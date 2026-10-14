@@ -1,0 +1,73 @@
+id = "l1-calling-conventions"
+level = 1
+order = 9
+title = "Calling conventions"
+summary = "Which registers hold the arguments and the result, on Windows and Linux."
+
+[[steps]]
+title = "Where do the arguments go?"
+text = '''
+Caller and callee must agree where arguments are. That agreement is the **calling convention**:
+
+| | 1st | 2nd | 3rd | 4th | result |
+|---|---|---|---|---|---|
+| Windows x64 | `rcx` | `rdx` | `r8` | `r9` | `rax` |
+| Linux / macOS x64 | `rdi` | `rsi` | `rdx` | `rcx` | `rax` |
+
+More arguments go on the stack. Rust uses these conventions for `extern "C"` functions, and in practice simple Rust functions follow them too.
+
+```rust
+fn f(a: u64, b: u64) -> u64 { a * 2 + b }
+```
+
+On Windows, which register holds `a` when `f` starts?
+'''
+check = { kind = "choice", options = ["rax", "rcx", "rdi", "rsp"], correct = 1 }
+
+[[steps]]
+title = "Linux"
+text = '''
+The same function compiled for Linux: which register holds `a`?
+'''
+check = { kind = "choice", options = ["rcx", "rsi", "rdi", "rdx"], correct = 2 }
+success = "So the first thing to check when you reverse a function: which platform? ORRESS's Info view tells you (PE is Windows, ELF is Linux)."
+
+[[steps]]
+title = "Slices and &str take two registers"
+text = '''
+A Rust slice (`&[u8]`) or `&str` is a pointer **and** a length, so it uses two argument registers:
+
+```rust
+fn check_password(s: &[u8]) -> bool { /* ... */ }
+```
+
+On Windows, `rcx` is the pointer to the bytes and `rdx` their length. The second crackme's check function begins with:
+
+```text
+cmp rdx, 7
+jne wrong
+```
+
+What does that tell you?
+'''
+check = { kind = "choice", options = [
+    "The password must be 7 characters long",
+    "The password must contain the digit 7",
+    "The function is called 7 times",
+    "The password starts at address 7",
+], correct = 0 }
+success = "Exactly. You already know something about the password without seeing it."
+
+[[steps]]
+title = "Return values"
+text = '''
+The result comes back in `rax`, or a smaller part of it: a `bool` in `al`, a `u32` in `eax`. After a call you will typically see:
+
+```text
+call check_password
+test al, al        ; is the bool false (0)?
+je wrong           ; jump if it was false
+```
+
+`test al, al` sets ZF when `al` is 0, so `je` here means "if the function returned false". This exact pattern decides Correct or Wrong in most crackmes.
+'''

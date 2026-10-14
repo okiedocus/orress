@@ -1,0 +1,22 @@
+[package]
+name = "orress-academy"
+description = "The ORRESS Academy: interactive lessons, practice crackmes and a CPU simulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-arch.workspace = true
+orress-ui.workspace = true
+egui.workspace = true
+egui_commonmark.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true

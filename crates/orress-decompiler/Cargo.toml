@@ -1,0 +1,27 @@
+[package]
+name = "orress-decompiler"
+description = "ORRESS decompiler: lifts x86, x86-64 and ARM64 code and prints Rust-style pseudocode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Opt-in: let the decompiler shell out to `rustc` to check that a generated Rust port
+# actually compiles. Off by default so the normal build never invokes a compiler.
+compile-check = []
+
+[dependencies]
+orress-analysis.workspace = true
+orress-loaders.workspace = true
+iced-x86.workspace = true
+yaxpeax-arch.workspace = true
+yaxpeax-arm.workspace = true
+
+[dev-dependencies]
+orress-bytes.workspace = true

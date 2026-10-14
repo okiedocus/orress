@@ -1,0 +1,28 @@
+[package]
+name = "orress-sandbox"
+description = "ORRESS malware safety: defanged storage, VM detection, execution guard, gated launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The workspace forbids unsafe; this crate only denies it, so the one module that needs raw
+# Win32 FFI (`job.rs`: Job Objects, to contain and kill a sample's whole process tree) can opt
+# in locally with `#![allow(unsafe_code)]`. Everything else stays unsafe-free.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+ferrisetw = "1"
+windows = { workspace = true, features = ["Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
+
+# killpg, to kill a sample's whole process group on timeout.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }

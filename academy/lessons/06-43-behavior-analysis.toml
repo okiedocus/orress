@@ -1,0 +1,87 @@
+id = "l6-behavior-analysis"
+level = 6
+order = 43
+title = "Behaviour analysis"
+summary = "Watch what a sample actually does when it runs: the behavioural domains, mapping actions to intent, and ORRESS's guarded sandbox."
+badge = "Behaviourist"
+
+[[steps]]
+title = "From capabilities to behaviour"
+text = '''
+Static triage told you what a sample **can** do — the APIs it imports, the capabilities those imply. **Behaviour analysis** watches what it **actually does** when you run it: the real sequence of actions it takes against the system.
+
+This matters most for the samples triage struggles with. A packed or obfuscated binary hides its logic on disk, but once it runs it *must* reveal itself — it has to drop its files, write its registry keys, open its network connections to do its job. Dynamic observation catches all of that, in order, as it happens.
+
+The catch: running malware is dangerous, so behaviour analysis only happens inside the safe lab you built in the previous lesson.
+'''
+
+[[steps]]
+title = "The behavioural domains"
+text = '''
+A behaviour monitor records the sample's actions and sorts them into a few domains. ORRESS's sandbox groups them as:
+
+- **Process** — starting new processes, injecting into others, spawning a shell.
+- **File** — creating, reading, writing or deleting files; dropping a payload to disk.
+- **Registry** — reading or writing registry keys (configuration, and the classic persistence locations).
+- **Network** — DNS lookups, connections, downloads, beacons to a C2 server.
+- **Image** — modules and libraries loaded into the process.
+
+Most of what any sample is *for* shows up as some combination of these. A ransomware's story is mostly File + Process; a downloader's is Network + File + Process.
+'''
+
+[[steps]]
+title = "Behaviour maps to intent"
+text = '''
+Each observed action hints at a goal. Suppose you run a sample and see it **copy itself into `%APPDATA%`** and then **write a new value under the registry `...\\CurrentVersion\\Run` key**. What is it doing?
+'''
+check = { kind = "choice", options = [
+  "Establishing persistence, so it runs again automatically after a reboot or logon",
+  "Uninstalling itself cleanly",
+  "Defragmenting the disk",
+  "Nothing meaningful; those are normal for every program",
+], correct = 0 }
+hints = [
+  "The Run key is executed at every logon. Why would malware want an entry there?",
+  "Copy-to-a-stable-location plus an autostart entry is the textbook persistence pattern.",
+]
+success = "Right — a copy to a fixed path plus a Run-key entry is persistence: the sample ensures it survives reboots. In ATT&CK terms, that's the Persistence tactic."
+
+[[steps]]
+title = "ORRESS's guarded sandbox"
+text = '''
+ORRESS has a **Sandbox** view built for exactly this — and it enforces the safe-lab rules in software:
+
+- It **detects whether you're in a VM** and, by policy, **refuses to launch a sample on bare metal** — so you can't accidentally detonate malware on your real machine.
+- It can route the sample's traffic through **FakeNet**, a simulated network that answers DNS and HTTP, so you capture C2 behaviour without anything reaching the real internet.
+- Once you're in a VM and confirm, it **runs the sample and logs its activity** by the domains above, and can drive a VirtualBox VM (including snapshots) for you.
+
+Open the **Sandbox** view (the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Sandbox" }
+spotlight = "view.Sandbox"
+hints = ["Ctrl+Shift+P, then type \"Sandbox\" — or the View menu."]
+
+[[steps]]
+title = "Reading the activity log"
+text = '''
+When the sample runs, the sandbox produces a **log of events**, each tagged with its domain, plus the process's own output and its exit code. You read it top to bottom as a story: what it touched first, what it dropped, who it called.
+
+Which single domain (one word, as the sandbox labels it) covers the sample **resolving a domain name, beaconing to its C2, and downloading a second stage**?
+'''
+check = { kind = "answer", answers = ["network"], number = false, case_sensitive = false }
+hints = ["It's the domain about talking to other machines.", "DNS, connections and downloads all fall under this category."]
+success = "Network — and FakeNet lets you watch all of it (the domains it resolves, the URLs it fetches) without letting the traffic escape."
+
+[[steps]]
+title = "From behaviour to a verdict"
+text = '''
+Turn the raw log into understanding:
+
+1. **Build a timeline.** Order the events: unpack -> drop payload -> set Run key -> resolve C2 -> beacon. The sequence tells the story.
+2. **Map to ATT&CK.** Tag each behaviour with its tactic — Persistence (Run key), Defense Evasion (process injection), Command and Control (the beacon), Exfiltration, Impact (file encryption). This is the shared language of reporting.
+3. **Harvest dynamic IOCs.** The things only running reveals: dropped file hashes, contacted domains and IPs, mutex names, user-agent strings.
+4. **Watch for anti-analysis.** Did it check for a VM and quietly exit? A sample that does nothing may simply have detected your lab — not every quiet sample is benign.
+5. **Combine with static triage** for the full picture, then write it up (the next lesson).
+
+Static tells you what it *could* do; behaviour proves what it *does*. Together, with the sandbox keeping you safe, that's a complete dynamic analysis.
+'''

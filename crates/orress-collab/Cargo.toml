@@ -1,0 +1,20 @@
+[package]
+name = "orress-collab"
+description = "ORRESS collaboration: Yjs CRDT shared state, presence/follow mode, end-to-end-encrypted relay client for team CTFs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+yrs = { workspace = true }
+chacha20poly1305 = { workspace = true }
+argon2 = { workspace = true }
+tungstenite = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "orress-zed-old-guest"
+description = "A Zed extension guest built against the pre-dap `since_v0.5.0` WIT world, to verify ORRESS's host runs extensions from older API versions"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Its own workspace root, so the ORRESS workspace does not try to build it for the host target.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.57"
+
+[profile.release]
+opt-level = "s"
+lto = true

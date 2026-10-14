@@ -1,0 +1,17 @@
+[package]
+name = "orress-theme"
+description = "Themes for ORRESS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true

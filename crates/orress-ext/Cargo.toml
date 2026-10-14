@@ -1,0 +1,28 @@
+[package]
+name = "orress-ext"
+description = "WASM extension host for ORRESS (wasmtime component model) + Zed-extension asset loading"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+wasmtime = { version = "38", default-features = false, features = ["runtime", "cranelift", "component-model"] }
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8"
+ureq = { version = "2", features = ["json"] }
+flate2 = "1"
+tar = "0.4"
+orress-archive.workspace = true
+orress-theme.workspace = true
+orress-lsp.workspace = true
+wasmtime-wasi = { version = "38", default-features = false }
+
+[dev-dependencies]
+wasm-encoder = "0.240"

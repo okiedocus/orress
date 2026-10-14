@@ -1,0 +1,28 @@
+[package]
+name = "orress-cli"
+description = "ORRESS on the command line: triage, strings, disassembly and data transforms"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "orress-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+orress-analysis.workspace = true
+orress-vm.workspace = true
+orress-script.workspace = true
+orress-bytes.workspace = true
+orress-decompiler.workspace = true
+orress-loaders.workspace = true
+orress-transforms.workspace = true
+serde_json.workspace = true

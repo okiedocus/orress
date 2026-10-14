@@ -1,0 +1,13 @@
+[package]
+name = "orress-ext-fixture-encode"
+description = "Dev tool: wraps the demo guest core module into a WASM component (regen the fixture)"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Detached from the ORRESS workspace (keeps wit-component out of the main lockfile).
+[workspace]
+
+[dependencies]
+wasi-preview1-component-adapter-provider = "38"
+wit-component = "0.247"

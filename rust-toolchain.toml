@@ -1,0 +1,6 @@
+# Pin the toolchain so `cargo fmt`/`clippy` are deterministic and CI never breaks
+# when GitHub's "stable" advances to a rustfmt/clippy with a different style or lints.
+# Keep this version in sync with the toolchain pinned in .github/workflows/ci.yml.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]

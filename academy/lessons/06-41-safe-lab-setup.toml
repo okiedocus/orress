@@ -1,0 +1,91 @@
+id = "l6-safe-lab-setup"
+level = 6
+order = 41
+title = "A safe analysis lab"
+summary = "Before you run malware: isolation, snapshots, network containment, and when ORRESS's sandbox is enough on its own."
+badge = "Quarantine"
+
+[[steps]]
+title = "Why you need a lab"
+text = '''
+Static triage is safe — nothing runs. But sooner or later you'll want **dynamic analysis**: actually executing a sample to watch what it does. That's where it gets dangerous. Run malware carelessly and it can:
+
+- **Infect your machine** — encrypt your files, install persistence, steal credentials.
+- **Spread across the network** — worms and lateral-movement tooling hunt for neighbours.
+- **Tip off the attacker** — the moment it beacons to its command-and-control (C2) server, they know a sample is being looked at, and may burn the infrastructure or push an update.
+
+So before any dynamic work, you build an **isolated environment** you can let the malware loose in and then throw away.
+'''
+
+[[steps]]
+title = "The disposable VM"
+text = '''
+The workhorse of a malware lab is a **virtual machine** you treat as disposable:
+
+- **Isolated** from the host: no shared folders, no shared clipboard, no drag-and-drop. Assume anything inside the VM is hostile and must not reach out.
+- **Resettable**: you can return it to a known-clean state instantly, so one sample never contaminates the next analysis.
+- **Monitored**: tools inside (process monitor, file/registry watchers, a network capture) record what the sample touches.
+
+Treat the host as if the VM is already infected — because during analysis, it is. The one feature that makes this practical is the VM's ability to **reset to a clean state** on demand.
+
+What is that save-and-restore feature of a VM called? (One word.)
+'''
+check = { kind = "answer", answers = ["snapshot", "snapshots"], number = false, case_sensitive = false }
+hints = ["It captures the whole machine state so you can roll back to it.", "You take one before running the sample and revert to it afterwards."]
+success = "Snapshots — take one of the clean VM, run the sample, then revert so the next run starts fresh."
+
+[[steps]]
+title = "Containing the network"
+text = '''
+Most modern malware wants the internet: to fetch a second stage, beacon to C2, or exfiltrate data. You usually *want* to see that traffic — but you must not let it actually reach the real world. How should the lab handle the network?
+'''
+check = { kind = "choice", options = [
+  "Cut real internet access and use an isolated or simulated network that captures traffic without letting it out",
+  "Give the VM full, direct internet access so the malware behaves naturally",
+  "Disable networking entirely and never look at it",
+  "Run the sample on the host so the VM stays clean",
+], correct = 0 }
+hints = [
+  "You want to observe the C2 traffic, but the malware must not actually phone home or spread.",
+  "Tools like INetSim or FakeNet simulate internet services on an isolated network and log every request.",
+]
+success = "Right — an isolated/simulated network (INetSim, FakeNet) lets you capture and even answer C2 traffic while nothing escapes to the real internet."
+
+[[steps]]
+title = "ORRESS's sandbox"
+text = '''
+A full VM is the right tool for real behavioural analysis — droppers, persistence, anything that uses real OS services. But for many questions you don't need one at all.
+
+ORRESS's **Emulator** runs the instructions in a **pure CPU sandbox**: it executes the processor, not the operating system, so there's no real disk, registry or network to harm — syscalls are intercepted, not performed. That makes it a safe place to run a tricky routine and watch the result: a decryption loop, an unpacking stub, a key schedule. You see the effect without ever touching your machine or standing up a VM.
+
+Open the **Emulator** tab (F7, the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Emulator" }
+spotlight = "view.Emulator"
+hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\"."]
+
+[[steps]]
+title = "Static, sandbox, or full VM?"
+text = '''
+Match the question to the lightest safe tool:
+
+- **Static triage** (no execution) -> what is this, what can it do, what are the IOCs. Always your first pass.
+- **ORRESS emulator** (CPU sandbox) -> what does *this specific routine* compute? Unpack a stub, run a decryptor, trace an algorithm. No VM, no risk.
+- **Full isolated VM** (real OS) -> how does the whole sample *behave*? Files dropped, registry keys set, processes spawned, real C2 traffic. The heavyweight pass when the lighter tools can't answer it.
+
+Reaching for the emulator before the VM saves time and keeps you safe for the many cases that don't need a real operating system.
+'''
+
+[[steps]]
+title = "A repeatable, safe routine"
+text = '''
+When you do run a sample in the VM, work in a disciplined loop:
+
+1. **Snapshot clean** — baseline the pristine VM.
+2. **Arm the monitors** — process/file/registry watchers and a network capture running before you detonate.
+3. **Detonate and observe** — run the sample, let it act, record everything.
+4. **Collect artifacts** — dropped files, new registry keys, network IOCs, memory strings.
+5. **Revert the snapshot** — back to clean before the next run.
+
+And a few standing rules: use **disposable** credentials and data inside the VM (never your real accounts); assume the sample may **detect the VM** and stay dormant (anti-analysis), so a quiet sample isn't always a safe one; and keep the host patched and the VM network truly isolated. A safe lab is what lets you be fearless with dangerous code — snapshots, isolation, and the right tool for each question.
+'''

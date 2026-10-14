@@ -1,0 +1,19 @@
+[package]
+name = "orress-zed-demo-guest"
+description = "A tiny real Zed extension (zed_extension_api) for testing ORRESS's clean-room Zed host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7.0"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true

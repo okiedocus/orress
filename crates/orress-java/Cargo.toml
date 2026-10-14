@@ -1,0 +1,15 @@
+[package]
+name = "orress-java"
+description = "ORRESS Java class-file loader: parse the constant pool, fields and methods, and disassemble JVM bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Pure std — no external dependencies.
+[dependencies]

@@ -1,0 +1,90 @@
+id = "l6-reporting"
+level = 6
+order = 44
+title = "Writing the report"
+summary = "The deliverable: how to structure a malware report, write for your readers, and start from ORRESS's Markdown export."
+badge = "Reporter"
+
+[[steps]]
+title = "Why the report is the point"
+text = '''
+You've triaged the sample, run it in the lab, watched its behaviour and written a YARA rule. None of it helps anyone until you **communicate it**. The report is the deliverable — the thing other people act on.
+
+Different readers need different things from it:
+
+- **Defenders / SOC** block the indicators and deploy your detections.
+- **Threat hunters** search the fleet for the same behaviour.
+- **Incident responders** scope the breach: what it does tells them where to look.
+- **Management** needs the impact and the recommendation, in plain language.
+
+Analysis that stays in your head, or in a scratch file, is wasted work. A clear report is what turns it into defence.
+'''
+
+[[steps]]
+title = "Anatomy of a report"
+text = '''
+A good malware report has a predictable skeleton, so readers can jump to the part they need:
+
+- **Summary** — one short paragraph anyone can read: what the sample is, what it does, how bad it is.
+- **Identification** — filenames, file type, size, and the **hashes** (so the exact sample is unambiguous).
+- **Capabilities & behaviour** — what it does, backed by evidence, mapped to **MITRE ATT&CK** techniques.
+- **Indicators (IOCs)** — the domains, IPs, file hashes and mutexes defenders need, **defanged**.
+- **Detection** — your **YARA rule(s)** and any other signatures, ready to deploy.
+- **Recommendations** — containment and remediation steps.
+
+Each section is aimed at a reader. The summary is for everyone; the IOCs and detection are for the people who have to act *today*.
+'''
+
+[[steps]]
+title = "Write for the reader who has to act"
+text = '''
+A SOC analyst reads your report at 2 a.m. during an incident. Which part do they most need, to respond right now?
+'''
+check = { kind = "choice", options = [
+  "The IOCs and detection signatures (hashes, domains, YARA) so they can block and hunt the threat immediately",
+  "A full line-by-line disassembly of every function",
+  "Your personal opinion of the malware author's coding style",
+  "A history of every tool you tried during analysis",
+], correct = 0 }
+hints = [
+  "During an incident, what do you do first? Block and search.",
+  "Actionable indicators and ready-to-deploy detections are the urgent part; deep internals can wait.",
+]
+success = "Right — concrete, actionable IOCs and detections are what let responders contain the threat; the deep technical detail supports the report but isn't the urgent part."
+
+[[steps]]
+title = "Start from the export"
+text = '''
+You don't write a report from a blank page. ORRESS's **Triage** tab has a **Copy report** button that exports the whole static picture — identification and hashes, capabilities with ATT&CK tags, imports by behaviour, and the defanged IOCs — as a ready skeleton you paste into your write-up and build on.
+
+It exports in a plain-text, diff-able markup format that drops straight into a ticket, wiki or pull request. What is that format called? (One word.)
+'''
+check = { kind = "answer", answers = ["markdown", "md"], number = false, case_sensitive = false }
+hints = ["It's the same lightweight markup used for README files and these lessons.", "The button is literally labelled \"Copy report (Markdown)\"."]
+success = "Markdown — the Copy report button gives you a Markdown skeleton, so most of the report's facts are already filled in."
+
+[[steps]]
+title = "Get your skeleton"
+text = '''
+Open the **Triage** tab (the View menu or the command palette) and find the **Copy report (Markdown)** button at the top. That export is your first draft: the facts are already there, ready for you to add the narrative, the behaviour timeline, and your YARA rule.
+
+Open Triage now.
+'''
+check = { kind = "action", id = "view::Triage" }
+spotlight = "view.Triage"
+hints = ["Ctrl+Shift+P, then type \"Triage\" — or the View menu. The Copy report button is at the top of the tab."]
+
+[[steps]]
+title = "Finish and share it"
+text = '''
+Turn the export into a report people trust:
+
+1. **Lead with the summary.** Write the one-paragraph verdict first; it's what most readers will ever read.
+2. **Separate observed from inferred.** State what you *saw* ("writes a Run key", from the sandbox log) apart from what you *conclude* ("for persistence"). Give a confidence level when you're not certain.
+3. **Make it reproducible.** Include hashes, the sample source, and tool versions, so someone else can verify your findings.
+4. **Keep IOCs defanged.** A report full of live, clickable URLs is itself a hazard; `hxxp[://]evil[.]com` is readable and safe.
+5. **Attach the detection.** Paste in your YARA rule and the behaviour timeline mapped to ATT&CK.
+6. **Review and version it.** Have someone check it, date it, and track changes.
+
+That completes the malware-analysis loop: **triage** to classify, a **safe lab** to run it, **behaviour analysis** to see what it does, **YARA** to detect it, and a **report** that turns all of it into defence. Analysis is only finished when it's written down and in someone else's hands.
+'''

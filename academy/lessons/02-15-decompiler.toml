@@ -1,0 +1,112 @@
+id = "l2-decompiler"
+level = 2
+order = 15
+title = "The decompiler"
+summary = "Read machine code as Rust: what the decompiler gets right, and how it lies."
+badge = "Decompiled"
+
+[[steps]]
+title = "Assembly, but readable"
+text = '''
+In Level 1 you read assembly one instruction at a time. That works, but it is slow: one line of Rust easily becomes ten instructions.
+
+A **decompiler** does the reverse of a compiler. It reads the machine code of a function and rebuilds code with `if`, `while`, variables and function calls. ORRESS writes that code **in Rust**, so it looks like what you write yourself.
+
+There is a catch: compiling throws information away. Names, types and comments are gone, so the decompiler has to *guess* them. This lesson shows you how to use it, and how to catch its guesses.
+'''
+
+[[steps]]
+title = "Open crackme #2 again"
+text = '''
+Open crackme #2, the program you solved byte by byte.
+'''
+check = { kind = "open_crackme", name = "crackme02" }
+
+[[steps]]
+title = "Go to main"
+text = '''
+Press **Ctrl+Shift+M** to jump to `main` in the disassembly.
+'''
+check = { kind = "cursor_in_main" }
+hints = ["Ctrl+Shift+M, or open the palette (Ctrl+Shift+P) and type main."]
+
+[[steps]]
+title = "Press F5"
+text = '''
+Press **F5** to open the **Decompiler**. It shows the function your cursor is in, and follows the cursor as you move.
+'''
+check = { kind = "action", id = "view::Decompiler" }
+hints = ["F5 opens the decompiler, as in most reverse-engineering tools. The View menu has it too."]
+
+[[steps]]
+title = "Read main"
+text = '''
+Scroll through the decompiled `main`. You will recognise the program:
+
+```rust
+sub_140005b80("Password: ", 21);     // print!("Password: ")
+local_38 = 0; local_30 = 1; local_28 = 0;   // String::new(): capacity 0, empty
+...
+if sub_140001100(rcx, rdx) == 0 {
+    sub_140005b80("Wrong password. Try again!\n", 55);
+    ...
+}
+```
+
+The function names are `sub_` plus an address, because the crackme was compiled without names. Click a line and the disassembly jumps to the instructions it came from.
+
+What happens when `sub_140001100` returns 0?
+'''
+spotlight = "view.Decompiler"
+check = { kind = "choice", options = [
+    "It prints \"Correct!\"",
+    "It prints \"Wrong password\" and stops",
+    "It asks for the password again",
+], correct = 1 }
+
+[[steps]]
+title = "Into the check"
+text = '''
+**Click the name `sub_140001100`** in the decompiler to go into that function. You should see something very close to the original source:
+
+```rust
+fn sub_140001100(a1: &[u8]) -> bool {
+    if a1.len() != 7 {
+        return false;
+    }
+    if a1[0] != b'R' {
+        return false;
+    }
+    ...
+}
+```
+
+The decompiler worked out that the function takes **a slice** (a pointer and a length, passed together), that it returns a **bool**, and that the numbers are characters (`b'R'` is the byte 0x52). The bounds checks Rust added are gone: the length is already known to be 7, so they can never fail.
+
+How long must the password be?
+'''
+check = { kind = "answer", answers = ["7"], number = true }
+hints = ["Look at the first `if`: `a1.len() != 7` returns false."]
+
+[[steps]]
+title = "How the decompiler lies"
+text = '''
+Everything the decompiler shows is a reconstruction. Typical guesses you will meet:
+
+- **Types.** The source said `password: &str`; the decompiler says `&[u8]`. In machine code both are just a pointer and a length.
+- **Leftover registers.** `rax`, `rdx` and friends appear as variables when the decompiler cannot follow them.
+- **Things it does not understand** are shown honestly: `asm!("xchg [rsi],al")` for an instruction, `unknown(...)` for a value, `read::<u32>(addr)` for memory it cannot type.
+- **Names.** `local_48` is just "the variable at stack offset 0x48".
+
+So use the decompiler to read **fast**, and the disassembly to check the details. Click a line to see exactly which instructions it came from.
+
+The decompiler shows `a1: &[u8]` but the source code had `&str`. Why?
+'''
+check = { kind = "choice", options = [
+    "The decompiler has a bug",
+    "A &str is passed exactly like a byte slice (pointer + length): the machine code does not keep the difference",
+    "Rust converts every string to bytes when the program starts",
+], correct = 1 }
+success = '''
+Now you can read whole functions in seconds. Tip: rename functions in the disassembly (**N**) and the decompiler uses your names too. Name things as you understand them, and the decompiled code reads more like source with every step.
+'''

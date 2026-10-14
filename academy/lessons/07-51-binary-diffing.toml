@@ -1,0 +1,87 @@
+id = "l7-binary-diffing"
+level = 7
+order = 51
+title = "Binary diffing"
+summary = "Compare two related binaries to see exactly what changed: how structural matching works, patch diffing for 1-days, and ORRESS's Binary Diff tab."
+badge = "Patch Analyst"
+
+[[steps]]
+title = "Comparing two binaries"
+text = '''
+Often you don't have one binary to understand — you have **two related ones**, and the interesting thing is the **difference** between them:
+
+- A program **before and after a security patch** — what did the vendor fix?
+- **Two samples of a malware family** — what did the author add or change in the new variant?
+- **Two builds of a library** — did this function really change, or just move?
+
+**Binary diffing** answers these. It matches up the functions in the two binaries and labels each one: the same, changed, newly added, or removed. Instead of re-reading the whole program, you go straight to what's new.
+'''
+
+[[steps]]
+title = "Why you can't just compare bytes"
+text = '''
+You can't `diff` two executables byte-for-byte. Recompiling even a single changed line shifts every address after it, may reorder functions, and rewrites relocations — so thousands of bytes differ even when the *logic* is almost identical. A raw byte diff is a sea of noise.
+
+The trick is to compare at the **function level**, using a **position-independent signature** for each function:
+
+- Its **shape**: how many instructions, basic blocks, control-flow edges and calls it has.
+- An **opcode hash**: a hash of the instruction opcode sequence that deliberately ignores the operand addresses, so it survives relocation.
+
+Two functions with the same shape and opcode hash are the *same code*, even at different addresses. Matching by structure, not location, is what makes diffing work.
+'''
+
+[[steps]]
+title = "The four verdicts"
+text = '''
+After matching, every function falls into one of four buckets: **identical** (matched, same code), **changed** (matched, but the code differs — with a similarity score), **added** (only in the new binary), and **removed** (only in the old one).
+
+A function that exists in the new build but has no counterpart in the old build is classed as which?
+'''
+check = { kind = "choice", options = [
+  "Added — it's new in this build",
+  "Identical",
+  "Removed",
+  "Changed",
+], correct = 0 }
+hints = [
+  "It appears in the new binary and matches nothing in the old one.",
+  "'Removed' is the opposite case: present in the old binary, gone from the new.",
+]
+success = "Right — a function present only in the newer binary is Added; one present only in the older binary is Removed."
+
+[[steps]]
+title = "Patch diffing and 1-days"
+text = '''
+The most famous use of binary diffing is **patch diffing**. Take a binary and its freshly patched version, diff them, and the functions that come back **changed** are exactly where the vendor altered something — very often a **security fix**.
+
+This cuts both ways. Defenders diff a patch to understand what was vulnerable. Attackers do the same to build an exploit for the bug *before* everyone installs the update — a **"1-day"** (the window between a patch shipping and systems applying it).
+
+Which of the four verdicts points you straight at the code the patch modified? (One word.)
+'''
+check = { kind = "answer", answers = ["changed"], number = false, case_sensitive = false }
+hints = ["Not added or removed — the function exists in both, but its code is different.", "It's the bucket that carries a similarity score."]
+success = "Changed — those are the functions the patch touched. Read them (and any new bounds or size checks) to find what was fixed."
+
+[[steps]]
+title = "Binary diffing in ORRESS"
+text = '''
+ORRESS has a **Binary Diff** tab. Open it, click **"Compare against another binary…"**, and pick the second file. ORRESS analyses it, matches its functions against the open binary, and shows a **summary** — how many identical, changed, added and removed — followed by the lists. Each **changed** pair carries a **similarity score** (0 to 1) telling you how much it changed.
+
+Open the **Binary Diff** tab (the View menu, or the command palette — search for "diff").
+'''
+check = { kind = "action", id = "view::Diff" }
+hints = ["Ctrl+Shift+P, then type \"diff\" — or the View menu."]
+
+[[steps]]
+title = "A diffing workflow"
+text = '''
+Put it together into a repeatable method:
+
+1. **Open version A**, then **Compare against** version B.
+2. **Read the summary.** A handful of changed/added functions in a big binary tells you the change is small and targeted — zoom in on those.
+3. **Work the changed list by similarity.** The lowest (but non-zero) similarity scores are the functions that changed the *most* — usually the heart of the patch or variant.
+4. **Inspect each changed pair.** Open both in the decompiler and read what differs: a new length check, a different constant, an added call. For a patch, that's your vulnerability; for malware, that's the new feature.
+5. **Check Added functions** for brand-new capability (a new C2 routine, a new command handler).
+
+Binary diffing turns "what changed between these two?" from a re-read of the whole program into a short, focused list. It's how 1-days get found and how malware families get tracked across versions.
+'''

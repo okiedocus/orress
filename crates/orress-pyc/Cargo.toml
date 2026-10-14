@@ -1,0 +1,15 @@
+[package]
+name = "orress-pyc"
+description = "ORRESS Python bytecode loader: parse .pyc headers + marshal, recover the code-object tree, disassemble CPython bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Pure std — no external dependencies.
+[dependencies]

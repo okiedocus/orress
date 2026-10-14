@@ -1,0 +1,83 @@
+id = "l3-emulation"
+level = 3
+order = 21
+title = "Emulation"
+summary = "Run code on a simulated CPU: execute a single function in isolation, feed it inputs, and read exactly what it computes."
+badge = "CPU Whisperer"
+
+[[steps]]
+title = "Running on a simulated CPU"
+text = '''
+A debugger runs the program on your **real** processor. **Emulation** runs it on a **simulated** one — a CPU built in software that reads the machine code and executes it instruction by instruction. ORRESS has one built in.
+
+Why fake the CPU when you could just run the program? Because an emulator lets you run **just a piece** of it. Point it at a single function, hand it some inputs, and read exactly what it produces — without launching the whole program, without its files or network, and without even needing the same operating system or CPU the binary was built for.
+
+For understanding one tricky routine, that isolation is a superpower.
+'''
+
+[[steps]]
+title = "Emulation vs debugging"
+text = '''
+You've met debugging (running the real program and observing it). Emulation is the complement:
+
+- **No environment needed.** A simulated CPU doesn't care what OS you're on — you can run a Linux function on Windows, or examine code for a different architecture, without that platform at all.
+- **No real side effects.** System calls are intercepted, not performed, so nothing touches your disk, registry or network. Running a snippet can't hurt your machine.
+- **Total determinism and visibility.** Same inputs, same result, every time — and you can read every register and byte of memory afterwards.
+
+The trade-off: the emulator models a **subset** of instructions and very little of the operating system. A whole GUI app that makes thousands of OS calls won't "just run". Emulation shines on **self-contained computational code** — a decoder, a hash, a key check.
+'''
+
+[[steps]]
+title = "What's it good for?"
+text = '''
+Given those strengths, what's the sweet spot for the emulator?
+'''
+check = { kind = "choice", options = [
+  "Running a single transform or decode function on inputs you choose, to see exactly what it computes",
+  "Making the whole program run faster than normal",
+  "Compiling the binary from source code",
+  "Replacing the debugger for a full-screen GUI application",
+], correct = 0 }
+hints = [
+  "Think about the one-function-in-isolation strength, not whole-program execution.",
+  "Feed a routine an input and read its output, with no environment to set up.",
+]
+success = "Right — the emulator is ideal for running a self-contained routine on chosen inputs and reading precisely what it produces."
+
+[[steps]]
+title = "Emulate in ORRESS"
+text = '''
+ORRESS's **Emulator** tab runs a function for you. You give it the **function address** (or click "use cursor's function"), type an **Input** (passed to the function as its first argument, a pointer — optionally with its length as the second), and press **Run**.
+
+It then shows the **status**, the **return value in RAX** (as hex, unsigned and signed), the **instruction count**, any **string at RAX**, and the **scratch buffer** after the run — so you see both the result and how memory was changed.
+
+Open the **Emulator** tab (F7, the View menu, or the command palette) and find the Run form.
+'''
+check = { kind = "action", id = "view::Emulator" }
+spotlight = "view.Emulator"
+hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\". The Run button is at the top."]
+
+[[steps]]
+title = "Where's the answer?"
+text = '''
+After a run, ORRESS highlights one register as the function's **return value** — the result the routine handed back. On x86-64 (the usual calling convention), the return value of a function comes back in one specific register.
+
+Which register holds a function's return value on x86-64? (Three characters.)
+'''
+check = { kind = "answer", answers = ["rax", "eax"], number = false, case_sensitive = false }
+hints = ["It's the same accumulator register you met in the calling-conventions lesson.", "r-a-x (its 32-bit half is eax)."]
+success = "RAX — the x86-64 return-value register. After a run, read RAX to see what the function computed (and the scratch buffer for what it wrote to memory)."
+
+[[steps]]
+title = "Workflow and limits"
+text = '''
+Put the emulator to work:
+
+1. **Confirm what a routine does.** Feed it an input, Run, and read RAX and the scratch buffer. Is it XOR-decoding? Hashing? Reordering bytes? The output tells you.
+2. **Run code you otherwise can't.** Wrong architecture, missing libraries, no matching OS — none of it stops the emulator from executing a self-contained function.
+3. **It powers the solvers.** The same engine underlies the side-channel and symbolic solvers, and time-travel recording — emulation is the foundation those build on.
+
+Know the edges, too: it models a **subset** of instructions and almost none of the OS, so heavy system calls, threads or GUI code won't run — and when it can't proceed, it stops and tells you (an unsupported instruction, or a memory fault). Aim it at **self-contained computation**.
+
+So: debugger for the **whole program on a real CPU**, emulator for **one function on a simulated CPU**. Reach for whichever fits the question.
+'''

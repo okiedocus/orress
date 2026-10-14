@@ -1,0 +1,46 @@
+[package]
+name = "orress"
+description = "ORRESS: a reverse-engineering IDE for CTFs and malware analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Build with `--features compile-check` to let the Rust-port view run `rustc` on the
+# generated scaffold and show whether it compiles.
+compile-check = ["orress-views/compile-check"]
+
+[[bin]]
+name = "orress"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+orress-academy.workspace = true
+orress-actions.workspace = true
+orress-project.workspace = true
+orress-views.workspace = true
+orress-lsp.workspace = true
+orress-ext.workspace = true
+orress-settings.workspace = true
+orress-theme.workspace = true
+orress-ui.workspace = true
+orress-workspace.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Embed the app icon + version/product metadata into the Windows executable (file icon in
+# Explorer / taskbar pins, and the EXE's Details properties).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

@@ -1,0 +1,109 @@
+id = "l5-vm-obfuscation"
+level = 5
+order = 30
+title = "VM-based obfuscation"
+summary = "How virtual-machine protections hide code, how to spot the interpreter, and how ORRESS flags it."
+badge = "VM Hunter"
+
+[[steps]]
+title = "What is a VM protection?"
+text = '''
+Packers compress code; obfuscators rewrite it. **Virtual-machine (VM) obfuscation** goes further: it *replaces* a function's machine code with **bytecode for a made-up CPU**, and bundles a small **interpreter** that runs that bytecode.
+
+Commercial protectors like **VMProtect** and **Themida** do this, and CTF authors love writing their own tiny VMs. The effect: your disassembler shows the interpreter, not the original logic. The real algorithm is now *data* — a blob of custom opcodes — so you can't just read it off the screen.
+
+The good news: an interpreter has a very recognisable shape, and once you find it you can start to unwind it.
+'''
+
+[[steps]]
+title = "The dispatch loop"
+text = '''
+Every bytecode interpreter has the same core:
+
+```
+loop {
+    opcode = fetch(vpc);   // read the next virtual instruction
+    vpc += 1;              // advance the virtual program counter
+    switch (opcode) {      // jump to the handler for it
+        0 => handle_add,
+        1 => handle_push,
+        ... dozens more ...
+    }
+}
+```
+
+The `switch` is the **dispatcher**. Each `handle_*` is a **handler** that does one virtual instruction, then **jumps back to the dispatcher** for the next one.
+
+So in the control-flow graph, the dispatcher is a single block that *many* handler blocks branch back to — it has a very high **fan-in** — and the whole thing sits inside a loop. That shape is the fingerprint of a VM.
+'''
+
+[[steps]]
+title = "Spotting the interpreter"
+text = '''
+You're staring at a large, confusing function. Which of these most strongly says "this is a VM interpreter"?
+'''
+check = { kind = "choice", options = [
+  "One block that dozens of other blocks jump back to, inside a loop (a high fan-in dispatcher)",
+  "The function is long",
+  "It calls many imported functions",
+  "It contains floating-point instructions",
+], correct = 0 }
+hints = [
+  "Think about the dispatch loop: handlers run, then return to one central block.",
+  "Length and imports are weak signals; the dispatcher's fan-in is the giveaway.",
+]
+success = "Exactly — a central, high-fan-in dispatcher inside a loop is the interpreter's signature."
+
+[[steps]]
+title = "Let ORRESS find it"
+text = '''
+ORRESS looks for exactly that shape. Open the **Triage** tab (View menu, or the command palette). When a function matches the interpreter pattern, Triage shows a **VM-based obfuscation** section listing the likely interpreter: its address, the dispatcher block, how many handlers it has, and a confidence score.
+
+Open Triage now.
+'''
+check = { kind = "action", id = "view::Triage" }
+spotlight = "view.Triage"
+hints = ["Ctrl+Shift+P, then type \"Triage\" — or the View menu."]
+
+[[steps]]
+title = "What the report tells you"
+text = '''
+When ORRESS flags a VM, it reports the **dispatcher** address. That's your anchor: it's where the `switch` lives, and every handler branches back to it.
+
+A real VM has one handler per virtual opcode, so its dispatcher usually fans out to 10+ handlers, often 50+. Small CTF VMs can be leaner, so ORRESS's detector uses a lower floor: a dispatcher must branch out to at least a minimum number of handlers that loop back to it before it is reported.
+
+What is that minimum: the smallest handler count ORRESS will still flag as a VM rather than an ordinary `switch`? (Type a single number.)
+'''
+check = { kind = "answer", answers = ["6"], number = true }
+hints = [
+  "It is well below the 10+ of a typical VM, so that tiny CTF interpreters are still caught.",
+  "ORRESS's threshold is 6 handlers.",
+]
+success = "Right: six handlers looping back to one dispatcher is already a VM shape to ORRESS, and real VMs (one handler per virtual opcode) usually have far more."
+
+[[steps]]
+title = "Practice: find the VM in Crackme #5"
+text = '''
+**Crackme #5** hides its key check inside a bytecode VM. Open it and look at Triage's **VM-based obfuscation** section: ORRESS flags the interpreter — its dispatcher address, the handler count, and a confidence score.
+
+Jump to that dispatcher. You'll find the fetch-decode-execute loop: it reads an opcode, and a big multi-way branch sends control to one handler per opcode, each looping back for the next. That's your anchor. Next lesson you'll reverse those handlers to recover the key.
+'''
+check = { kind = "open_crackme", name = "crackme05" }
+spotlight = "view.Triage"
+hints = [
+  "Open it from the lesson's practice programs (or the Academy's crackme list), then open Triage.",
+  "The flagged dispatcher is where the opcode switch lives; every handler branches back to it.",
+]
+
+[[steps]]
+title = "From detection to devirtualization"
+text = '''
+Finding the VM is step one. **Devirtualizing** it — turning the bytecode back into readable code — is the real work, and it's done by hand (or with a lot of scripting):
+
+1. **Find the dispatcher** (ORRESS does this for you).
+2. **Map the handlers**: for each opcode, read what its handler does (push, add, load, jump…). This builds the VM's instruction set.
+3. **Locate the bytecode** and the virtual program counter the interpreter reads.
+4. **Lift**: walk the bytecode, emit the equivalent real operation per opcode, and you've recovered the original program.
+
+Emulation helps a lot here: run the interpreter under ORRESS's emulator, watch which handler each opcode reaches, and record the effects. You now know what a VM protection is, what its interpreter looks like, how ORRESS flags it, and the path to peeling it apart.
+'''

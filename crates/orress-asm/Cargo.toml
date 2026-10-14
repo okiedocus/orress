@@ -1,0 +1,22 @@
+[package]
+name = "orress-asm"
+description = "ORRESS assembler: turns assembly text into machine-code bytes for patching, with a per-line listing and line-anchored diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Pure-Rust x86/x64 encoder (code_asm) + decoder (for round-trip tests). MIT licensed,
+# already used elsewhere in the workspace for decoding.
+iced-x86 = { version = "1.21", default-features = false, features = [
+    "std",
+    "code_asm",
+    "decoder",
+    "intel",
+] }

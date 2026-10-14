@@ -1,0 +1,82 @@
+id = "l7-time-travel-debugging"
+level = 7
+order = 50
+title = "Time-travel debugging"
+summary = "Record an execution once and step backward through it: why reverse debugging changes everything, and how to do it in ORRESS."
+badge = "Time Traveller"
+
+[[steps]]
+title = "The trouble with going forward"
+text = '''
+Welcome to Expert level. The first superpower: **debugging backward**.
+
+An ordinary debugger only moves forward. You hit a breakpoint, step past the interesting moment, and then realise the value you wanted is three instructions back — too late. Your only option is to restart and set an earlier breakpoint, over and over, hoping the program behaves the same each time. For a crash deep in a loop, or a value you can't explain, that's agony.
+
+The question you really want to ask is "**how did this register end up wrong, and which instruction did it?**" Forward-only debugging makes you guess your way there. There's a better way.
+'''
+
+[[steps]]
+title = "Record once, replay freely"
+text = '''
+**Time-travel debugging (TTD)** flips the model. Instead of stepping a live process, you **record the whole execution** — every instruction, with a snapshot of the CPU at each one — into a **trace**. Then you move **backward and forward** through that recording as much as you like, without ever re-running the program.
+
+Now the hard questions become easy:
+
+- "What was `rax` fifty instructions ago?" -> scrub back fifty steps and read it.
+- "When did this flag get set?" -> jump to the step where it changed.
+- "What led to the crash?" -> start at the end and walk backward to the cause.
+
+Debugging stops being a live chase and becomes **searching a recording** you already hold.
+'''
+
+[[steps]]
+title = "What time-travel is for"
+text = '''
+TTD shines at one particular kind of problem. Which?
+'''
+check = { kind = "choice", options = [
+  "Working backward from a bad value or a crash to the exact instruction that caused it",
+  "Making the program run faster",
+  "Compiling source code into a binary",
+  "Encrypting the program so it can't be analysed",
+], correct = 0 }
+hints = [
+  "Think about the one question forward-only debugging can't answer without restarting.",
+  "It's about cause-and-effect: tracing an effect back to its cause in the execution.",
+]
+success = "Exactly — TTD is about root cause: you have the symptom at the end and step backward to find the instruction responsible."
+
+[[steps]]
+title = "Time-travel in ORRESS"
+text = '''
+ORRESS's **Emulator** has time-travel built in. Press the **Record** button (marked with a record icon) and it runs the function, capturing every instruction and the register file at each step. A **slider** then appears: drag it to scrub through the execution, and at each step ORRESS shows the instruction that ran and the registers at that point, with the ones that **changed at that step highlighted**.
+
+Open the **Emulator** tab (F7, the View menu, or the command palette) and look for the Record button.
+'''
+check = { kind = "action", id = "view::Emulator" }
+spotlight = "view.Emulator"
+hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\". The Record button is near the run controls."]
+
+[[steps]]
+title = "Which way is back?"
+text = '''
+The scrubber is a timeline of the recorded steps. Moving the slider toward higher numbers steps *forward* through the execution; moving it toward lower numbers does the opposite — the move an ordinary debugger can't make.
+
+Moving the slider one step toward lower numbers takes you one instruction which direction in time? (One word.)
+'''
+check = { kind = "answer", answers = ["back", "backward", "backwards"], number = false, case_sensitive = false }
+hints = ["It's the direction that gives time-travel debugging its name.", "Lower step number = earlier in the execution."]
+success = "Backward — stepping to earlier recorded steps is the whole point: you replay the past without re-running the program."
+
+[[steps]]
+title = "A method for root cause"
+text = '''
+Use the trace deliberately:
+
+1. **Record the execution** of the function or region you care about. The trace is bounded (a fixed maximum number of steps), so aim it at the interesting code rather than the whole program.
+2. **Start at the symptom.** Scrub to the end — the crash, the wrong return value, the bad register.
+3. **Walk backward along the data.** Find the step where that register last changed; read the instruction and the state there. If its inputs are also suspect, step back to where *they* were set. Follow the dependency chain upstream.
+4. **Stop at the root.** When you reach the instruction that first introduced the bad value, you've found the cause — no guessing, no restarts.
+
+Because the recording is a **deterministic replay**, the same execution is there every time you look — a decisive advantage over re-running code that behaves differently on each run. That reliable, reversible view of an execution is one of the most powerful tools an expert has.
+'''

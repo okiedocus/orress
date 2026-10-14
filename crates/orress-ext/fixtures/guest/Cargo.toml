@@ -1,0 +1,20 @@
+[package]
+name = "orress-ext-demo-guest"
+description = "A tiny demo extension guest for testing the ORRESS WASM component host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Its own workspace root, so the ORRESS workspace does not try to build it for the host target.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.57"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true

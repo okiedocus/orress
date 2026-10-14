@@ -1,0 +1,17 @@
+[package]
+name = "orress-arch"
+description = "Instruction decoding for ORRESS: x86, x86-64 and ARM64, with control flow and explanations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+iced-x86.workspace = true
+yaxpeax-arch.workspace = true
+yaxpeax-arm.workspace = true

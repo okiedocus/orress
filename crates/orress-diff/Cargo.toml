@@ -1,0 +1,19 @@
+[package]
+name = "orress-diff"
+description = "ORRESS binary diffing: BinDiff-style function matching between two analyzed programs (patch diffing, malware-variant comparison)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-analysis = { workspace = true }
+orress-arch = { workspace = true }
+
+[dev-dependencies]
+orress-loaders = { workspace = true }

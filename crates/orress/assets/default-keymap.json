@@ -1,0 +1,73 @@
+[
+  {
+    "context": "Global",
+    "bindings": {
+      "ctrl-shift-p": "command_palette::Toggle",
+      "ctrl-o": "workspace::Open",
+      "ctrl-n": "workspace::NewNotes",
+      "ctrl-shift-n": "file::NewFile",
+      "ctrl-w": "workspace::CloseActiveTab",
+      "ctrl-\\": "workspace::SplitRight",
+      "ctrl-b": "workspace::ToggleLeftDock",
+      "ctrl-alt-b": "workspace::ToggleRightDock",
+      "ctrl-j": "workspace::ToggleBottomDock",
+      "ctrl-alt-e": "view::ToggleExplainMode",
+      "ctrl-=": "view::ZoomIn",
+      "ctrl-shift-=": "view::ZoomIn",
+      "ctrl--": "view::ZoomOut",
+      "ctrl-0": "view::ZoomReset",
+      "ctrl-k": "theme::Next",
+      "f1": "help::Keybindings",
+      "ctrl-q": "app::Quit",
+      "ctrl-g": "hex::GoTo",
+      "ctrl-f": "hex::Find",
+      "f3": "hex::FindNext",
+      "shift-f3": "hex::FindPrevious",
+      "ctrl-i": "file::Info",
+      "ctrl-shift-s": "file::Strings",
+      "ctrl-d": "view::Disassembly",
+      "f5": "view::Decompiler",
+      "f6": "view::Debugger",
+      "f7": "view::Emulator",
+      "f8": "view::Shellcode",
+      "ctrl-shift-t": "view::Triage",
+      "ctrl-shift-y": "view::Yara",
+      "ctrl-shift-f": "file::Functions",
+      "ctrl-shift-x": "view::Xrefs",
+      "ctrl-shift-m": "nav::GoToMain",
+      "alt-left": "nav::Back",
+      "alt-right": "nav::Forward",
+      "ctrl-shift-w": "workbench::Open",
+      "ctrl-shift-b": "hex::SendToWorkbench"
+    }
+  },
+  {
+    "context": "Hex",
+    "bindings": {
+      "ctrl-shift-c": "hex::CopyHex"
+    }
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      "ctrl-s": "file::Save",
+      "ctrl-shift-s": "file::SaveAs",
+      "ctrl-f": null,
+      "ctrl-g": null,
+      "ctrl-k": null,
+      "ctrl-i": null,
+      "ctrl-n": "file::NewFile",
+      "ctrl-d": null
+    }
+  },
+  {
+    "context": "Debugger",
+    "bindings": {
+      "f5": "debug::Continue",
+      "shift-f5": "debug::Stop",
+      "f10": "debug::StepOver",
+      "f11": "debug::StepInto",
+      "shift-f11": "debug::StepOut"
+    }
+  }
+]

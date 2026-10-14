@@ -1,0 +1,144 @@
+﻿[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+repository = "https://github.com/okiedocus/orress"
+authors = ["Okiedocus <info@okiedocus.nl>"]
+
+[workspace.dependencies]
+# Internal crates
+orress-academy = { path = "crates/orress-academy" }
+orress-actions = { path = "crates/orress-actions" }
+orress-analysis = { path = "crates/orress-analysis" }
+orress-arch = { path = "crates/orress-arch" }
+orress-asm = { path = "crates/orress-asm" }
+orress-challenge = { path = "crates/orress-challenge" }
+orress-decompiler = { path = "crates/orress-decompiler" }
+orress-emu = { path = "crates/orress-emu" }
+orress-sym = { path = "crates/orress-sym" }
+orress-triage = { path = "crates/orress-triage" }
+orress-sandbox = { path = "crates/orress-sandbox" }
+orress-wasm = { path = "crates/orress-wasm" }
+orress-pyc = { path = "crates/orress-pyc" }
+orress-java = { path = "crates/orress-java" }
+orress-archive = { path = "crates/orress-archive" }
+orress-js = { path = "crates/orress-js" }
+orress-dex = { path = "crates/orress-dex" }
+orress-dotnet = { path = "crates/orress-dotnet" }
+orress-ai = { path = "crates/orress-ai" }
+orress-editor = { path = "crates/orress-editor" }
+orress-lsp = { path = "crates/orress-lsp" }
+orress-ext = { path = "crates/orress-ext" }
+orress-term = { path = "crates/orress-term" }
+orress-dap = { path = "crates/orress-dap" }
+orress-debug = { path = "crates/orress-debug" }
+orress-bytes = { path = "crates/orress-bytes" }
+orress-loaders = { path = "crates/orress-loaders" }
+orress-project = { path = "crates/orress-project" }
+orress-views = { path = "crates/orress-views" }
+orress-settings = { path = "crates/orress-settings" }
+orress-theme = { path = "crates/orress-theme" }
+orress-transforms = { path = "crates/orress-transforms" }
+orress-ui = { path = "crates/orress-ui" }
+orress-workspace = { path = "crates/orress-workspace" }
+orress-collab = { path = "crates/orress-collab" }
+orress-ctf = { path = "crates/orress-ctf" }
+orress-relay = { path = "crates/orress-relay" }
+orress-diff = { path = "crates/orress-diff" }
+orress-vm = { path = "crates/orress-vm" }
+orress-script = { path = "crates/orress-script" }
+
+# UI
+eframe = { version = "0.36", features = ["persistence"] }
+egui = { version = "0.36", features = ["serde"] }
+egui_dock = { version = "0.21", features = ["serde"] }
+egui_extras = "0.36"
+egui_commonmark = { version = "0.25", default-features = false, features = ["pulldown_cmark"] }
+rfd = "0.17"
+
+# Binary formats and hashing
+iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
+yaxpeax-arch = { version = "0.3", default-features = false, features = ["std"] }
+yaxpeax-arm = { version = "0.5", default-features = false, features = ["std"] }
+md-5 = "0.11"
+memchr = "2"
+regex = "1"
+rhai = "1.26"
+object = { version = "0.40", default-features = false, features = ["read", "std", "write"] }
+windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_Kernel", "Win32_Security"] }
+sha1 = "0.11"
+sha2 = "0.11"
+
+# General
+aes = "0.9"
+clap = { version = "4", features = ["derive"] }
+miniz_oxide = "0.9"
+anyhow = "1"
+arboard = "3"
+directories = "6"
+nucleo-matcher = "0.3"
+portable-pty = "0.9"
+vt100 = "0.16"
+ropey = "1.6"
+tree-sitter = "0.25"
+tree-sitter-highlight = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+lsp-types = "0.95"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# Collaboration (M13): Yjs CRDT, WebSocket relay, authenticated encryption
+yrs = "0.23"
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+chacha20poly1305 = { version = "0.10", features = ["getrandom"] }
+argon2 = "0.5"
+toml = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev.package."*"]
+# Dependencies optimized even in debug builds: keeps the UI smooth while developing.
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Analysis runs on whole binaries; keep it fast in debug builds too.
+[profile.dev.package.orress-analysis]
+opt-level = 2
+
+[profile.dev.package.orress-arch]
+opt-level = 2
+
+[profile.dev.package.orress-decompiler]
+opt-level = 2
+
+[profile.dev.package.orress-editor]
+opt-level = 2
+
+[profile.dev.package.orress-lsp]
+opt-level = 2
+
+[profile.dev.package.orress-term]
+opt-level = 2
+
+[profile.dev.package.orress-dap]
+opt-level = 2
+
+[profile.dev.package.orress-debug]
+opt-level = 2

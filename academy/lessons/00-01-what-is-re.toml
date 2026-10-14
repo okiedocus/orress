@@ -1,0 +1,62 @@
+id = "l0-what-is-re"
+level = 0
+order = 1
+title = "What is reverse engineering?"
+summary = "What reversers do, why, and what is allowed."
+badge = "First steps"
+
+[[steps]]
+title = "Welcome"
+text = '''
+When you write Rust and run `cargo build`, the compiler turns your code into **machine code**: the raw bytes the processor executes. Names, comments and types mostly disappear.
+
+**Reverse engineering** is going the other way: you only have the program, and you work out what it does by reading its machine code, watching it run, and rebuilding its logic step by step.
+
+ORRESS is a tool for exactly that, and this Academy teaches you to use it, starting from zero.
+'''
+
+[[steps]]
+title = "Why people reverse programs"
+text = '''
+- **CTF competitions** (Capture The Flag): "reversing" challenges hide a secret *flag* such as `flag{...}` inside a program. You win points by finding it.
+- **Malware analysis**: find out what a malicious program does, so it can be detected and stopped.
+- **Security research**: find bugs in software you cannot see the source of.
+- **Compatibility**: understand an old file format or protocol so new software can work with it.
+
+Most of what you learn here applies to all four.
+'''
+
+[[steps]]
+title = "Legal and ethical use"
+text = '''
+Reverse engineering itself is a normal, legal skill. What you *do* with it matters:
+
+- Reversing CTF challenges, malware samples in a safe lab, and your own programs is fine.
+- Cracking software to avoid paying for it, or to share it, is not.
+- Malware is only analyzed in an isolated virtual machine, never on your everyday computer or a work network.
+
+Which of these is fine?
+'''
+check = { kind = "choice", options = [
+    "Cracking a paid game to share it online",
+    "Solving a reversing challenge you downloaded from a CTF event",
+    "Running a malware sample on your work laptop to see what it does",
+    "Removing the license check from software you did not buy",
+], correct = 1 }
+hints = ["Only one option harms nobody."]
+success = '''
+Right. CTF challenges are made to be reversed. The others either hurt someone or put a network at risk.
+'''
+
+[[steps]]
+title = "How the Academy works"
+text = '''
+Each lesson is a series of short steps. Many steps give you a **task** that you do in ORRESS itself: open a view, run a command, answer a question, or crack a practice program. The lesson notices when you did it.
+
+- Stuck? Every task has **hints**, from a gentle nudge to almost the answer.
+- A yellow outline (**spotlight**) shows where to look in the interface.
+- **Explain Mode** is on: hover over anything in ORRESS and the Explain panel tells you what it is.
+- You earn **XP** for each step and lesson, and **badges** for milestones.
+
+Press **Finish lesson** to collect your first badge.
+'''

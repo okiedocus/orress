@@ -1,0 +1,108 @@
+id = "l6-yara-rules"
+level = 6
+order = 42
+title = "Writing YARA rules"
+summary = "Turn 'I recognise this malware' into a reusable detection: rule anatomy, string types, conditions, and ORRESS's live YARA workbench."
+badge = "Rule Writer"
+
+[[steps]]
+title = "What is YARA?"
+text = '''
+You've triaged a sample and recognised something distinctive — a marker string, a config blob, a chunk of code. **YARA** lets you turn that recognition into a **reusable, shareable detection**.
+
+A YARA rule is a small pattern description: "a file matches if it contains *these* bytes or strings in *this* combination." Point the engine at a file (or thousands) and it tells you which ones match. Analysts use YARA to **hunt** a known threat across a whole fleet, **classify** samples into families, and **share** detections with other defenders.
+
+ORRESS has a built-in **YARA workbench** powered by the pure-Rust **YARA-X** engine, so you can write a rule and test it against the open file instantly — no external tool needed.
+'''
+
+[[steps]]
+title = "Anatomy of a rule"
+text = '''
+Every rule has the same three parts. Here's the example ORRESS starts you with:
+
+```text
+rule example {
+    meta:
+        author = "analyst"
+        description = "matches the PE DOS stub"
+    strings:
+        $dos = "This program cannot be run in DOS mode"
+        $mz  = { 4D 5A }
+    condition:
+        $mz at 0 and $dos
+}
+```
+
+- **meta** — informational only (author, description, date, references). It doesn't affect matching; it's provenance.
+- **strings** — the patterns to look for, each with a `$name`.
+- **condition** — the boolean logic that decides whether the file matches, referring to the strings by name.
+'''
+
+[[steps]]
+title = "Three kinds of string"
+text = '''
+The `strings:` section can describe patterns three ways:
+
+- **Text**: `$dos = "This program cannot be run in DOS mode"` — a literal string. Add `nocase`, `wide` (UTF-16), or `fullword` as modifiers.
+- **Hex**: `$mz = { 4D 5A }` — raw bytes, perfect for magic numbers, opcodes, or structures. Wildcards like `{ 4D ?? 5A }` allow bytes that vary.
+- **Regex**: `$re = /evil[0-9]+\.com/` — a regular expression, for patterns that aren't fixed.
+
+In the example, `$mz` has the **anchor** `at 0`. What does `$mz at 0` require?
+'''
+check = { kind = "choice", options = [
+  "The bytes 4D 5A must appear at offset 0 — the very start of the file",
+  "The pattern must appear zero times (i.e. be absent)",
+  "The pattern may appear anywhere in the file",
+  "The pattern must appear at the end of the file",
+], correct = 0 }
+hints = [
+  "`at <offset>` pins a string to an exact position; 0 is the first byte.",
+  "4D 5A at offset 0 is the \"MZ\" signature every PE file begins with.",
+]
+success = "Right — `at 0` pins the match to the first byte, so this checks the file starts with the MZ signature."
+
+[[steps]]
+title = "The condition"
+text = '''
+The `condition` is where a rule gets its precision. On its own, each string is just "present or not"; the condition combines them into a verdict with boolean logic (`and`, `or`, `not`), counts (`#dos > 3`), positions (`at`, `in`), and helpers like `filesize` or `any of them`.
+
+In the example the condition is:
+
+```text
+$mz at 0 and $dos
+```
+
+Which single keyword there makes the rule require **both** the MZ signature *and* the DOS-stub string, so that a file with only one of them does **not** match?
+'''
+check = { kind = "answer", answers = ["and"], number = false, case_sensitive = false }
+hints = ["It's the boolean operator between the two conditions.", "`A and B` is true only when both A and B are true."]
+success = "`and` — both must hold. Swap it for `or` and either one alone would match; that's how you tune a rule's strictness."
+
+[[steps]]
+title = "The YARA workbench"
+text = '''
+ORRESS lets you write and test rules live. The **YARA workbench** opens with the example rule, and you can:
+
+- **Edit the rule** and scan the open file — matches show their rule, pattern, offset and a byte preview.
+- **Generate a rule** from the sample's distinctive strings as a starting point.
+- **Scan a rule folder** — run the open file against every `.yar`/`.yara` rule in a directory (your rule library).
+
+Open the **YARA workbench** now (Ctrl+Shift+Y, the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Yara" }
+spotlight = "view.Yara"
+hints = ["Ctrl+Shift+Y opens it — or Ctrl+Shift+P and type \"YARA\"."]
+
+[[steps]]
+title = "Writing rules that last"
+text = '''
+A good rule catches the family and its variants without ever firing on clean files. The craft:
+
+1. **Pick distinctive, stable strings.** A custom mutex name, a C2 domain, a unique format string — not compiler boilerplate or library code that appears in thousands of benign programs.
+2. **Combine several.** Require a handful of markers together in the condition, so one small change by the author doesn't slip past the rule.
+3. **Use hex and anchors for code.** Match opcode sequences or structures with `{ .. }` and pin signatures with `at`, allowing wildcards where bytes legitimately vary.
+4. **Record provenance in meta.** Author, date, a reference to the report or sample hash — so future analysts trust and maintain it.
+5. **Test both ways.** Confirm it matches the sample (true positive) *and* doesn't match a pile of clean files (no false positives). Use ORRESS's "Generate rule" as a draft, then tighten it, and run your whole library with "Scan rule folder".
+
+A tuned rule is a durable asset: you write it once and it hunts the threat across every file you'll ever scan. That's how recognition becomes detection.
+'''

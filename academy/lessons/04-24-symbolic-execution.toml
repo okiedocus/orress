@@ -1,0 +1,93 @@
+id = "l4-symbolic-execution"
+level = 4
+order = 24
+title = "Symbolic execution"
+summary = "Let the program solve itself: treat the input as unknowns, collect the constraints a correct input must satisfy, and let a solver find it."
+badge = "Constraint Breaker"
+
+[[steps]]
+title = "When brute force runs out"
+text = '''
+Welcome to Intermediate CTF. Here's a classic: a check function takes your input, **transforms it** (XORs each byte with a key, adds a constant, shuffles it) and **compares the result** to a stored target. Get it right and you win.
+
+You could brute-force it — try every possible input until one works. For a 4-byte input maybe; for a 20-byte flag, never. There aren't enough seconds in the universe.
+
+But you don't have to guess. The check function is a precise description of exactly which input it accepts. **Symbolic execution** reads that description and works the input out directly.
+'''
+
+[[steps]]
+title = "Input as unknowns"
+text = '''
+The idea: instead of running the check with *concrete* bytes, run it with the input as **symbolic variables** — unknowns, call them `x0, x1, x2, ...`.
+
+As execution proceeds, every operation builds an **expression** instead of a number: after `xor al, 0x42`, the byte isn't `0x17`, it's `x0 ^ 0x42`. And every **input-dependent branch** becomes a **constraint** — a condition the input must satisfy to go that way. `cmp al, 0x55 / je win` records `(x0 ^ 0x42) == 0x55`.
+
+Steer execution all the way to the "you win" block, and you've collected the **complete set of constraints** that every accepted input must satisfy. You've turned the program into a system of equations.
+'''
+
+[[steps]]
+title = "From constraints to an answer"
+text = '''
+You now hold the equations. How do you get the actual input bytes out of them?
+'''
+check = { kind = "choice", options = [
+  "Hand the constraints to a solver, which computes concrete input bytes that satisfy all of them at once",
+  "Brute-force every possible input anyway",
+  "Recompile the crackme from source",
+  "Guess, based on the function's name",
+], correct = 0 }
+hints = [
+  "You have a system of equations; what kind of tool solves systems of equations?",
+  "A constraint solver takes the conditions and returns values that make them all true.",
+]
+success = "Right — a solver takes the collected constraints and produces an input satisfying all of them, without trying each candidate."
+
+[[steps]]
+title = "Symbolic solve in ORRESS"
+text = '''
+ORRESS has this built in. The **Emulator** tab has a **Symbolic solve** section: you tell it the **check function**, the **input length**, the **target address** (the win block), and the **avoid addresses** (the "wrong" blocks). Press **Solve symbolically** and it runs the check with the input symbolic, steers toward the target, collects the branch constraints, and runs its **built-in solver** to recover an input — then shows you the bytes.
+
+It cracks the usual byte-wise transform-and-compare checks (xor/add/sub then equal) with no external tools at all.
+
+Open the **Emulator** tab (F7, the View menu, or the command palette) and find the Symbolic solve section.
+'''
+check = { kind = "action", id = "view::Emulator" }
+spotlight = "view.Emulator"
+hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\". Scroll to the Symbolic solve heading."]
+
+[[steps]]
+title = "When it gets hard"
+text = '''
+The built-in solver handles the common byte-wise checks instantly. But some constraints are **tightly coupled** — bytes multiplied together, fed through S-boxes, or mixed so each output depends on many inputs. For those, ORRESS **exports the constraints in the standard SMT-LIB2 format** (there's a collapsible panel for it) so you can hand them to a heavyweight external SMT solver.
+
+Which famous SMT solver, from Microsoft Research, is the standard tool for exactly this job? (Two characters.)
+'''
+check = { kind = "answer", answers = ["z3"], number = false, case_sensitive = false }
+hints = ["It's named with a letter and a digit.", "ORRESS even labels the export panel \"SMT-LIB2 (for external ...)\"."]
+success = "z3 — ORRESS exports SMT-LIB2 so z3 (or any SMT solver) can crack constraints too coupled for the built-in one."
+
+[[steps]]
+title = "Practice: solve Crackme #3"
+text = '''
+Try it for real. **Crackme #3** checks its key with a byte-wise transform-and-compare (each input byte is XOR'd and compared) — exactly the shape symbolic execution solves.
+
+Open it, find the check function and its "Correct" and "Wrong" blocks, then in the **Symbolic solve** form set the function, the input length, the target (the win block) and the avoid address (the fail block), and press Solve. The solver recovers the key.
+'''
+check = { kind = "open_crackme", name = "crackme03" }
+hints = [
+  "Open it from the lesson's practice programs (or the Academy's crackme list).",
+  "Find check_password; the block that prints \"Correct!\" is your target, the one that prints \"Wrong\" is the avoid.",
+]
+
+[[steps]]
+title = "A symbolic workflow"
+text = '''
+Put it to work:
+
+1. **Find the check and its outcomes.** Use the decompiler or graph to locate the validation function, the "correct" block (target) and the "wrong" block(s) to avoid.
+2. **Set it up.** Enter the function, the input length, the target, and the avoid addresses in the Symbolic solve form.
+3. **Solve.** Let the built-in solver recover the input; if the constraints are too coupled, copy the SMT-LIB2 export to z3.
+4. **Verify.** Feed the recovered input back into the real program to confirm it's accepted.
+
+Know the limits, too: symbolic execution struggles with **path explosion** (huge branchy state spaces), **one-way functions** (real hashes and crypto can't be inverted this way), and **symbolic memory addresses**. But for the transform-and-compare keygen-me — the bread and butter of CTF — it turns an impossible brute force into an instant answer. You make the program solve itself.
+'''

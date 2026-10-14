@@ -1,0 +1,25 @@
+package orress:extension@0.1.0;
+
+/// Capabilities the host provides to an extension.
+interface host {
+    /// Write a line to ORRESS's log / output.
+    log: func(message: string);
+}
+
+/// The world an ORRESS extension's WASM implements. Minimal for now — enough to prove the
+/// component host end to end (host imports, exported functions, records, strings); the richer
+/// RE-specific and Zed-compatible capabilities grow from here.
+world extension {
+    import host;
+
+    /// Static metadata the host reads right after loading the extension.
+    record info {
+        name: string,
+        version: string,
+    }
+    export info: func() -> info;
+
+    /// A demo capability that exercises a string round-trip and a host call: it logs via the
+    /// host import and returns the text upper-cased.
+    export shout: func(text: string) -> string;
+}

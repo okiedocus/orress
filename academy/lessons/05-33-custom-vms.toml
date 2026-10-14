@@ -1,0 +1,116 @@
+id = "l5-custom-vms"
+level = 5
+order = 33
+title = "Reversing a custom VM"
+summary = "Hand-rolled bytecode VMs: their anatomy, tracing their bytecode, and mapping the opcode handlers to recover the program."
+badge = "Bytecode Breaker"
+
+[[steps]]
+title = "Roll-your-own virtual machines"
+text = '''
+The VM-obfuscation lesson showed how to *spot* an interpreter: a high-fan-in dispatcher inside a loop. This lesson is the next step — actually **reversing** one.
+
+CTF authors love writing a tiny **custom virtual machine**: the program carries a blob of **bytecode for a made-up CPU**, plus a small **interpreter** that runs it. The interesting logic — the flag check, the algorithm — lives in that bytecode, in an instruction set *you have to figure out*. The native disassembly only shows you the interpreter.
+
+So the job is two-sided: understand the **custom instruction set** (what each opcode does), then **read the bytecode** written in it. Get both and the hidden program is yours.
+'''
+
+[[steps]]
+title = "Anatomy of a VM"
+text = '''
+Almost every hand-rolled VM is built from the same four pieces:
+
+- **The bytecode** — an array of bytes somewhere in the binary. This *is* the real program, in the custom ISA.
+- **A virtual program counter (vpc)** — an index into the bytecode that says which virtual instruction is next.
+- **Virtual state** — either a **stack** (a stack machine, like the JVM or CPython) or a set of **virtual registers** (a register machine), held in a buffer the interpreter owns.
+- **The fetch-decode-execute loop** — read the opcode at `vpc`, advance `vpc`, pick the handler for that opcode, run it, repeat.
+
+Recognising whether it's stack-based or register-based early tells you how to read every handler afterwards.
+'''
+
+[[steps]]
+title = "Trace a tiny VM"
+text = '''
+Here's a small **stack machine**. Its opcodes:
+
+- `PUSH n` — push the value `n` onto the stack
+- `ADD` — pop `b`, pop `a`, push `a + b`
+- `MUL` — pop `b`, pop `a`, push `a * b`
+- `SUB` — pop `b`, pop `a`, push `a - b`
+- `HALT` — stop; the answer is the value left on top of the stack
+
+Run this bytecode in your head:
+
+```text
+PUSH 7
+PUSH 6
+MUL
+PUSH 10
+ADD
+PUSH 2
+SUB
+HALT
+```
+
+What single value is on top of the stack when it halts?
+'''
+check = { kind = "answer", answers = ["50"], number = true }
+hints = [
+  "Work top to bottom, keeping the stack as a list. PUSH 7, PUSH 6, then MUL pops both.",
+  "After MUL the stack is [42]; PUSH 10 then ADD gives [52]; PUSH 2 then SUB gives [52 - 2].",
+]
+success = "Correct — 7*6=42, +10=52, -2=50. You just executed a custom VM by hand."
+
+[[steps]]
+title = "Recovering the instruction set"
+text = '''
+Tracing is easy once you *know* the opcodes. In a real target you don't — you have to recover them from the interpreter. What's the core move?
+'''
+check = { kind = "choice", options = [
+  "Read each handler block and record the real operation its opcode performs, building an opcode table",
+  "Rename the dispatcher function to something friendly",
+  "Count how many bytes the bytecode blob is",
+  "Run the whole program and read the final output",
+], correct = 0 }
+hints = [
+  "You need to know what opcode 0 does, what opcode 1 does, and so on.",
+  "Each case of the dispatch is one handler; reversing that handler tells you what that opcode means.",
+]
+success = "Exactly — mapping every handler to its operation gives you the custom ISA, which lets you read any bytecode written in it."
+
+[[steps]]
+title = "Study the handlers"
+text = '''
+The handlers are ordinary native code, so you read them in the **Disassembly** view. Find the dispatcher (the block everything branches back to — the VM-obfuscation lesson's high-fan-in block), then follow each branch out of it to the handler for that opcode and work out what it does to the virtual stack or registers.
+
+Open the **Disassembly** view now (Ctrl+D, the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Disassembly" }
+spotlight = "view.Disassembly"
+hints = ["Ctrl+D opens it — or Ctrl+Shift+P and type \"Disassembly\"."]
+
+[[steps]]
+title = "Practice: reverse Crackme #5"
+text = '''
+**Crackme #5** checks its key with a hand-rolled bytecode VM — a real custom ISA for you to reverse. Open it and find `check_password`: the fetch-decode-execute dispatch loop is the interpreter.
+
+Map its handlers one opcode at a time (push an input byte, push an immediate, xor, rotate, compare, halt...), then read the embedded bytecode through your opcode table to recover the key.
+'''
+check = { kind = "open_crackme", name = "crackme05" }
+hints = [
+  "Open it from the lesson's practice programs (or the Academy's crackme list).",
+  "The dispatcher is the block all the handler arms branch back to; each arm is one opcode. The bytecode is a constant array the loop walks.",
+]
+
+[[steps]]
+title = "Write a disassembler for the custom ISA"
+text = '''
+Once you've mapped the handlers, turn that knowledge into a tool instead of reading bytecode by hand:
+
+1. **Build the opcode table** — opcode number to (mnemonic, operand size, effect), from the handlers you reversed.
+2. **Locate the bytecode blob** and where the interpreter starts reading it (the initial `vpc`).
+3. **Write a small disassembler** — walk the blob, and for each opcode emit its mnemonic and operands. Now the custom program is readable, like any other assembly.
+4. **Read or lift it.** Trace it (as you did above) to recover the algorithm — the flag check, the key schedule, whatever the author hid. Emulation helps: run the interpreter under ORRESS's **Emulator** and watch which handler each opcode reaches to confirm your table.
+
+Detecting the VM, understanding its anatomy, tracing its bytecode, and mapping its handlers into a disassembler — that's the whole craft of beating a custom VM.
+'''

@@ -1,0 +1,84 @@
+id = "l3-debugger"
+level = 3
+order = 19
+title = "The debugger"
+summary = "Run the program, stop it where you want, and watch it work one instruction at a time."
+badge = "Debugger"
+
+[[steps]]
+title = "Static vs. dynamic"
+text = '''
+So far you have read programs *statically*: the bytes on disk, without running them. Now you will watch one *run*.
+
+A **debugger** launches the program and keeps control of it. You can:
+
+- set **breakpoints** — addresses where it stops,
+- **step** one instruction at a time,
+- read and even change **registers** and **memory** while it is paused.
+
+Seeing the real values a program works with often answers in seconds what would take ages to puzzle out on paper. The catch: the program really runs, so only debug code you trust.
+'''
+
+[[steps]]
+title = "Open crackme #2"
+text = '''
+We will debug the byte-by-byte crackme again. Open it.
+'''
+check = { kind = "open_crackme", name = "crackme02" }
+
+[[steps]]
+title = "Open the debugger"
+text = '''
+Press **F6** to open the Debugger panel at the bottom. Read the short description there, then press **▶ Start debugging**.
+
+ORRESS launches the program and stops it at `main` (it sets a breakpoint there for you). In the disassembly, a green arrow now marks the next instruction to run.
+'''
+check = { kind = "action", id = "view::Debugger" }
+hints = ["F6, or the View menu > Open Debugger. Then click Start debugging."]
+
+[[steps]]
+title = "Registers are live now"
+text = '''
+While the program is stopped, the panel shows the real **registers** and **flags**. This is the actual processor state, not a guess.
+
+Press **↷ Step** a few times and watch the green arrow move and the changed register light up. Stepping is how reversers follow a program instruction by instruction.
+
+After a compare instruction, which flag is set when the two values are equal?
+'''
+spotlight = "view.Debugger"
+check = { kind = "choice", options = [
+    "CF (carry)",
+    "ZF (zero)",
+    "SF (sign)",
+], correct = 1 }
+hints = ["Hover a flag in the panel to read what it means. 'equal' means the subtraction was zero."]
+
+[[steps]]
+title = "Set your own breakpoint"
+text = '''
+Stepping all the way to the password check would take a while. Instead, set a breakpoint and let the program run to it.
+
+In the disassembly, click the line with the **call** to the password-check function (just before `test al, al` near the end of main), then press **F9** (or click the left gutter). A red dot appears: that is a breakpoint.
+
+Then press **▶ Continue**. The program runs until it reaches your breakpoint.
+'''
+spotlight = "view.Disassembly"
+check = { kind = "continue" }
+hints = [
+    "F9 toggles a breakpoint on the current line; the red dot shows it is set.",
+    "Press Continue in the Debugger panel. The program stops at your breakpoint.",
+]
+
+[[steps]]
+title = "What the debugger adds"
+text = '''
+You now have two ways to understand a program, and they work together:
+
+- **Static** (disassembly, decompiler): read everything, safely, without running it. Good for the big picture.
+- **Dynamic** (debugger): run it and see the real values — the decrypted string, the computed key, which branch is taken.
+
+Next you will use both to beat an XOR-encoded password, and later a program that tries to detect the debugger and hide from it.
+'''
+success = '''
+You ran a program under your own control, watched its registers change, and stopped it exactly where you wanted. That is the heart of dynamic analysis. Tip: you can change a register or a byte of memory while stopped and continue — a quick way to test "what if this check passed?".
+'''

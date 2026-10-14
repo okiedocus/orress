@@ -1,0 +1,20 @@
+[package]
+name = "orress-loaders"
+description = "Executable format loaders (PE, ELF, Mach-O) and file triage for ORRESS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-bytes.workspace = true
+memchr.workspace = true
+md-5.workspace = true
+object.workspace = true
+sha1.workspace = true
+sha2.workspace = true

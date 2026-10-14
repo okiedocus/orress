@@ -1,0 +1,8 @@
+/target
+*.orress
+# Never commit live malware samples
+/samples/
+*.infected
+
+# Private planning documents
+/docs/

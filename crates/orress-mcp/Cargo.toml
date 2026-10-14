@@ -1,0 +1,35 @@
+[package]
+name = "orress-mcp"
+description = "ORRESS MCP server: exposes ORRESS's analysis engines to external agents over stdio JSON-RPC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "orress-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+orress-loaders.workspace = true
+orress-triage.workspace = true
+orress-wasm.workspace = true
+orress-pyc.workspace = true
+orress-java.workspace = true
+orress-dotnet.workspace = true
+orress-dex.workspace = true
+orress-js.workspace = true
+orress-archive.workspace = true
+orress-analysis.workspace = true
+orress-project.workspace = true
+orress-diff.workspace = true
+orress-vm.workspace = true
+
+[dev-dependencies]
+orress-decompiler = { workspace = true }

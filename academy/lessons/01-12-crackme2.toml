@@ -1,0 +1,80 @@
+id = "l1-crackme2"
+level = 1
+order = 12
+title = "Byte by byte"
+summary = "A password that never appears as text: read it from the comparisons."
+badge = "Byte by Byte"
+reveal_source = "crackme02"
+
+[[steps]]
+title = "Meet crackme #2"
+text = '''
+Crackme #2 also asks for a password, but this time the Strings view will not help. Open it.
+'''
+check = { kind = "open_crackme", name = "crackme02" }
+
+[[steps]]
+title = "No password in the strings"
+text = '''
+Open the **Strings** view and look: you will find *Correct!* and *Wrong password*, but nothing that looks like a password. The program must check the password another way. Time to read code.
+'''
+check = { kind = "view", view = "Strings" }
+
+[[steps]]
+title = "Go to main"
+text = '''
+Press **Ctrl+Shift+M** to jump to `main`. Scroll through it and find the shape you learned: read a line, remove the line ending (the compares with `0xa` and `0xd` are `'\n'` and `'\r'`), then **call a function**, `test al, al`, and `je` to *Wrong password*.
+'''
+check = { kind = "cursor_in_main" }
+hints = ["Ctrl+Shift+M, or open the palette and type main."]
+
+[[steps]]
+title = "Follow and name the check"
+text = '''
+That called function returns a `bool`: it is the password check. Click its name (`sub_...`) in the `call` instruction to jump into it. Then press **N** and rename it to `check_password`.
+
+Naming functions as you understand them is the most important habit in reverse engineering: the names show up everywhere, and they are saved with your work.
+'''
+check = { kind = "renamed" }
+hints = [
+    "The call is just before test al, al near the end of main.",
+    "Click the function name in the call, then press N while the disassembly has focus.",
+]
+
+[[steps]]
+title = "Read the comparisons"
+text = '''
+Inside `check_password` you see the pattern from the calling-conventions lesson: `cmp rdx, 7` checks the length. Then, one after another:
+
+```text
+cmp byte ptr [rax], 0x52      ; first character
+cmp byte ptr [rax+1], 0x33    ; second character
+...
+```
+
+Between them are `cmp rdx, 2` / `jb ...`: Rust's bounds checks, which you can skip. **Hover over each number** (0x52, 0x33, …): ORRESS shows which character it is. Write the characters down in order.
+'''
+spotlight = "view.Disassembly"
+hints = ["The offsets [rax], [rax+1], [rax+2] … give the order."]
+
+[[steps]]
+title = "Enter the password"
+text = '''
+Put the seven characters together and type the password.
+'''
+check = { kind = "secret", sha256 = "2bfa401089ad1adbbf882bbd49236b2043d5e6f0f1c9a4d7bea8f7bef5f7f3ea" }
+hints = [
+    "0x52 is 'R', 0x33 is '3', 0x76 is 'v'.",
+    "It looks like the word 'Reverse', written with 3 instead of e.",
+    "R3v3rs…",
+]
+
+[[steps]]
+title = "Leave a note"
+text = '''
+Good reversers leave notes for their future selves. Click the first `cmp byte ptr [rax], 0x52` line, press **;** and write a comment such as `first char must be 'R'`.
+'''
+check = { kind = "commented" }
+success = '''
+You read a password straight out of machine code. That is real reverse engineering! Level 1 is complete; the source code of the crackme is unlocked below. Next up in Level 2: static analysis of bigger programs and your first XOR-encoded secret.
+'''

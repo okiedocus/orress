@@ -1,0 +1,57 @@
+id = "l1-crackme1"
+level = 1
+order = 11
+title = "Your first crackme"
+summary = "Find a password that is hidden in plain sight."
+badge = "First Crack"
+reveal_source = "crackme01"
+
+[[steps]]
+title = "Meet crackme #1"
+text = '''
+Time for a real target. **Crackme #1** is a small Rust program that asks for a password and says *Correct!* or *Wrong password*. Your job: find the password without guessing.
+
+Open it with the button below. (ORRESS saves it in its config folder under `academy/crackmes`, so you can also run it from a terminal and type passwords.)
+'''
+check = { kind = "open_crackme", name = "crackme01" }
+
+[[steps]]
+title = "First look"
+text = '''
+Read the **Info** view. Note what ORRESS detected: a 64-bit Windows program written in **Rust**, with no function names (stripped). It also suggests looking at the strings first: the fastest first step with any unknown program.
+'''
+check = { kind = "view", view = "Info" }
+
+[[steps]]
+title = "Open the strings"
+text = '''
+Open the **Strings** view from the Project panel. It lists every piece of readable text in the program: messages, file names, error texts, and sometimes much more.
+'''
+spotlight = "tree.Strings"
+check = { kind = "view", view = "Strings" }
+
+[[steps]]
+title = "Find the password"
+text = '''
+Look for the messages the program prints, like *Correct!* and *Wrong password*. A program that compares your input with a fixed password must keep that password somewhere, and the simplest place is right next to its other strings.
+
+Type the password you found below.
+'''
+spotlight = "view.Strings"
+check = { kind = "secret", sha256 = "945fc2e5cdad07b7dde9a4681f1d6bf18d03222decc42a7b964dd7e77eb25a1c" }
+hints = [
+    "Use the filter box. What word might a password contain? Try filtering for 'open'.",
+    "Rust stores string literals back to back. Look at the strings near 'Correct!'.",
+    "It starts with open_ and ends with a number.",
+]
+
+[[steps]]
+title = "Confirm it in the code"
+text = '''
+Finding a password in the strings is a good guess; reversers confirm it in the code. Your password sits in the middle of a longer line, so click the **»** in the **Refs** column of that line: ORRESS jumps to the code that uses it, inside `main`. Every instruction that loads a string has the text as a comment, so look for `; "open_sesame_101"`.
+
+Around it you will see a length check (`cmp` with 0xF = 15, the password's length) and the comparison that decides between *Correct!* and *Wrong*. Run the crackme from a terminal and try the password if you like!
+'''
+success = '''
+You cracked your first program! The source code is now unlocked below. Notice `black_box`: without it the compiler would have stored the password as two 8-byte numbers inside the instructions instead of as text, and the Strings view would not find it. ORRESS still shows such text in a comment (`"open_ses" (text stored in a number)`). You will meet that trick again in Level 2.
+'''

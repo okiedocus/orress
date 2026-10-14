@@ -1,0 +1,90 @@
+id = "l7-your-own-analysis-passes"
+level = 7
+order = 53
+title = "Your own analysis passes"
+summary = "The final skill: automate ORRESS. Drive its analysis engine from scripts and AI through the MCP server to build reusable passes."
+badge = "Toolsmith"
+
+[[steps]]
+title = "Scaling yourself"
+text = '''
+This is the last lesson, and the last skill isn't a new analysis technique — it's **automation**.
+
+Once you've reversed enough binaries, you notice you keep doing the *same* steps: triage every new sample, pull its strings and IOCs, diff it against a known-good baseline, flag the obfuscated ones. Doing that by hand is fine for one file. For a thousand — an incoming malware feed, every build of your product, a firmware dump full of embedded binaries — you need to **script it**.
+
+An **analysis pass** is a reusable, automated procedure over a binary. Instead of clicking through the GUI, you express your routine once and run it over everything. That's how one analyst keeps up with a flood of samples.
+'''
+
+[[steps]]
+title = "ORRESS as a server"
+text = '''
+ORRESS doesn't just have a GUI — it exposes its analysis engine as a **server** that scripts and AI agents can call. It speaks the **Model Context Protocol (MCP)**: a simple JSON-RPC interface (`initialize`, `tools/list`, `tools/call`) whose tools are the very analyses you've been using by hand.
+
+The tools available today include:
+
+- `triage` — the full static triage report (flags, capabilities, IOCs, hashes).
+- `strings` — extract strings.
+- `disassemble` — disassemble a function or region.
+- `detect_vm` — find VM-interpreter obfuscation.
+- `binary_diff` — diff two binaries (identical/changed/added/removed).
+- `deobfuscate_js` — unroll obfuscated JavaScript.
+- `archive_list` — list the contents of an archive.
+
+Each takes a file path (or two) and returns **structured results** a program can read — no screen-scraping.
+'''
+
+[[steps]]
+title = "Composing a pass"
+text = '''
+A custom pass is just these primitives **combined** to answer your question. Which of these is a realistic analysis pass you could build from ORRESS's MCP tools?
+'''
+check = { kind = "choice", options = [
+  "For every file in a folder: run triage, flag the ones detect_vm reports as obfuscated, and binary_diff each against a known-good baseline",
+  "Recompile the Linux kernel from source",
+  "Render a 3D animation of the binary",
+  "Order replacement hardware for the analysis machine",
+], correct = 0 }
+hints = [
+  "A pass chains the analysis tools over your inputs and collects the results.",
+  "triage + detect_vm + binary_diff, run across a folder, is exactly the kind of pipeline the MCP tools are for.",
+]
+success = "Right — a pass orchestrates the analysis tools (triage, detect_vm, binary_diff) over your inputs and gathers structured output. The other options have nothing to do with the engine."
+
+[[steps]]
+title = "The AI Assistant"
+text = '''
+There's also an interactive front-end to the same engine: the **AI Assistant**. You can ask it questions about the open binary in plain language and have it drive the analysis for you — a conversational way to run a pass without writing the script yourself.
+
+Crucially, it respects your privacy: it runs on **your own Claude plan through the Claude Code CLI** (no API key to manage), offers an **offline static-only mode**, and **sending the binary's context is opt-in** — you decide what leaves your machine.
+
+Open the **AI Assistant** (the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Assistant" }
+spotlight = "view.Assistant"
+hints = ["Ctrl+Shift+P, then type \"Assistant\" — or the View menu."]
+
+[[steps]]
+title = "The protocol underneath"
+text = '''
+Both paths — your own scripts and the AI Assistant — reach ORRESS's analysis engine through the **same standard protocol**, the one named in the "ORRESS as a server" step. It's what lets any agent or tool call ORRESS's analyses in a uniform way.
+
+What is the three-letter acronym for that protocol? (It stands for Model Context Protocol.)
+'''
+check = { kind = "answer", answers = ["MCP"], number = false, case_sensitive = false }
+hints = ["Model Context Protocol -> take the initial of each word.", "M-C-P."]
+success = "MCP — the Model Context Protocol. Expose your engine over it and any agent can orchestrate it; that's what makes ORRESS automatable."
+
+[[steps]]
+title = "Build your own passes"
+text = '''
+Putting it together, the way you turn repetitive analysis into a pass:
+
+1. **Spot the routine.** Notice a sequence of steps you repeat on every sample.
+2. **Express it with the tools.** Script a chain of MCP `tools/call`s — or just ask the Assistant to do it — over your inputs.
+3. **Run it at scale.** Point the pass at a folder, a malware feed, a CI pipeline, or a triage queue.
+4. **Collect structured output.** Feed the results straight into a report, a dashboard, or a database — no copy-paste.
+
+Examples worth building: auto-triage an incoming sample feed; regression-diff every release of your own product to catch unexpected changes; sweep a firmware image's archive and triage each embedded binary.
+
+That closes the loop. You started at Foundations with binary and hex; you finish by **programming the reverse-engineering engine itself**. The tool is no longer something you only use — it's something you extend. Go build.
+'''

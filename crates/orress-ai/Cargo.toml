@@ -1,0 +1,18 @@
+[package]
+name = "orress-ai"
+description = "ORRESS AI assistant backends: Claude plan (CLI), Claude API, OpenAI-compatible (incl. local LLMs), or offline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Blocking HTTP(S) client (rustls) — no async runtime; we call it on a background thread.
+ureq = { version = "2", features = ["json"] }

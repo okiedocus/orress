@@ -1,0 +1,19 @@
+[package]
+name = "orress-triage"
+description = "ORRESS static malware triage: IOC extraction and a behavior/IOC report over BinaryInfo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+regex.workspace = true
+orress-loaders.workspace = true
+tlsh2 = "1"
+fuzzyhash = "0.2"
+yara-x = { version = "1.12", default-features = false, features = ["pe-module", "elf-module", "macho-module", "hash-module", "math-module", "string-module", "constant-folding", "fast-regexp", "inventory"] }

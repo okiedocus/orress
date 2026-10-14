@@ -1,0 +1,28 @@
+[package]
+name = "orress-debug"
+description = "ORRESS debugger: native debugging back ends, breakpoints, registers, memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# This crate needs FFI into the OS debug APIs, so it cannot forbid unsafe like the rest of
+# the workspace does. Unsafe is confined to the platform back ends (e.g. `windows.rs`),
+# each call documented with a SAFETY comment.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+# Storage_FileSystem: GetFinalPathNameByHandleW, to name loaded DLLs.
+windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.29", features = ["ptrace", "process", "signal", "personality", "fs"] }
+

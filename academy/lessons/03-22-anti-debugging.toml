@@ -1,0 +1,103 @@
+id = "l3-anti-debugging"
+level = 3
+order = 22
+title = "Beating anti-debugging"
+summary = "Programs that detect when they're watched — how they spot a debugger, why every check is really just a branch, and how to defeat it."
+badge = "Unshackled"
+
+[[steps]]
+title = "Programs that fight back"
+text = '''
+Some binaries notice when you're debugging them and **change their behaviour** to throw you off: they exit, take a fake path, quietly corrupt the answer, or just do nothing interesting. Crackmes do it to frustrate you; malware does it to **evade analysis** and hide its real behaviour from an analyst.
+
+This is **anti-debugging**, and it's the last core dynamic-analysis skill. The good news: these tricks look scary but share one fatal weakness, and once you see it, most of them fall in a single edit.
+
+The job is always the same two steps: **recognise** the check, then **neutralise** it.
+'''
+
+[[steps]]
+title = "How a program spots a debugger"
+text = '''
+The common detection tricks:
+
+- **API calls** — on Windows, `IsDebuggerPresent`, `CheckRemoteDebuggerPresent`, or `NtQueryInformationProcess` (asking for the debug port).
+- **Reading the PEB directly** — the `BeingDebugged` flag (and `NtGlobalFlag`) live in the process structure, so a program can check them **without any API call** at all.
+- **ptrace** — on Linux, a process calls `ptrace(PTRACE_TRACEME)`; if it fails, something is already tracing it.
+- **Timing** — read the clock (`rdtsc`) before and after a short block. Under a debugger that's single-stepping, the gap is enormous, which gives the debugger away.
+- **Breakpoint scanning** — the program checks its own code for the `0xCC` byte a software breakpoint leaves behind.
+
+Different mechanisms, same end: each feeds into a branch that means "if a debugger is here, misbehave."
+'''
+
+[[steps]]
+title = "The universal weakness"
+text = '''
+However a check detects the debugger, it has to *do something* with that result. What's the weakness every anti-debug trick shares?
+'''
+check = { kind = "choice", options = [
+  "It ends in a branch — find the jump the check controls and you can force the program onto the 'no debugger' path",
+  "Anti-debug checks are mathematically unbreakable",
+  "You must give up debugging and only read the code statically",
+  "They only work on Linux, so just use Windows",
+], correct = 0 }
+hints = [
+  "The detection result is useless unless the program acts on it. How does code act on a yes/no?",
+  "Every check is followed by a conditional jump you can see and change.",
+]
+success = "Right — detection is pointless without a branch to act on it, and a branch is something you can see, understand, and change."
+
+[[steps]]
+title = "ORRESS flags it"
+text = '''
+ORRESS helps you recognise anti-debugging up front. When a binary imports those APIs, the **Triage** tab classifies it as **"a challenge that resists debugging"**, lists the capability **"Check for a debugger"** tagged with MITRE ATT&CK **T1622 (Debugger Evasion)**, and its graded hints tell you to **locate the anti-debug check** (IsDebuggerPresent, a PEB flag, ptrace, or a timing check) **and see what branch it controls**.
+
+From there you cross-reference the flagged API to find the exact check in the code.
+
+Open the **Triage** tab (the View menu, or the command palette) and read its challenge hints.
+'''
+check = { kind = "action", id = "view::Triage" }
+spotlight = "view.Triage"
+hints = ["Ctrl+Shift+P, then type \"Triage\" — or the View menu. Reveal the Challenge hints."]
+
+[[steps]]
+title = "Patch and go"
+text = '''
+Once you've found the check and the branch it controls, the classic defeat is simply to **change that branch** so the "debugger detected" path is never taken — NOP the check, or invert/force the jump, exactly as in the Patching lesson. Analysts call this move "patch and go."
+
+What's the one-word verb for editing the program's bytes to flip or remove that branch?
+'''
+check = { kind = "answer", answers = ["patch"], number = false, case_sensitive = false }
+hints = ["It's the skill from the previous-but-one lesson.", "You change the bytes so the check can't send the program down the wrong path."]
+success = "Patch — find the branch and patch it (NOP/invert/force) so the program behaves the same whether or not a debugger is attached."
+
+[[steps]]
+title = "Practice: disarm Crackme #4"
+text = '''
+**Crackme #4** fights back: it calls `IsDebuggerPresent` and, if a debugger is attached, bails out before it will ever confirm the password — so under the debugger it always says "detected."
+
+Open it and beat the guard. Find the `debugger_present()` check and the branch it controls, then **patch and go** (NOP or invert that branch), or run `check_password` in the **Emulator**, where there's no real debugger to find. Then the real check is yours.
+'''
+check = { kind = "open_crackme", name = "crackme04" }
+hints = [
+  "Open it from the lesson's practice programs (or the Academy's crackme list).",
+  "Cross-reference IsDebuggerPresent to the branch; NOP/invert it, or emulate check_password directly.",
+]
+
+[[steps]]
+title = "An anti-debugging playbook"
+text = '''
+A repeatable plan:
+
+1. **Recognise it.** Triage flags it, or the program behaves differently under a debugger than when run normally.
+2. **Locate the check.** Cross-reference the anti-debug APIs, or look for PEB reads, an `rdtsc` timing pair, or a `ptrace` call near a suspicious branch.
+3. **Read the branch.** Work out which way is "detected" and which is "clean."
+4. **Neutralise it.** Three good options:
+   - **Patch and go** — NOP/invert/force the branch so it always takes the clean path.
+   - **Emulate** — run the routine in the Emulator, where there's no real debugger to detect and timing is deterministic.
+   - **Make it lie** — force the checked flag (e.g. `BeingDebugged`) to 0.
+5. **Verify.** Confirm the program now behaves the same debugged as not.
+
+Watch for **stacked** checks — protectors sprinkle many, so find them all (or sidestep them with the emulator). But the lesson holds: anti-debugging is a **speed bump, not a wall**. Recognise, locate the branch, patch and go.
+
+That completes Dynamic Analysis — you can debug a program, patch it, emulate it, and beat the tricks built to stop you.
+'''

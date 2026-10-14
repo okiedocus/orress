@@ -1,0 +1,75 @@
+id = "l1-patterns"
+level = 1
+order = 10
+title = "Recognizing Rust code"
+summary = "if, loops, indexing and Rust's bounds checks in assembly."
+
+[[steps]]
+title = "if/else in the graph"
+text = '''
+In the **graph view**, an `if`/`else` looks like a diamond: one block ends with a comparison and splits into a green arrow (condition true, jump taken) and a red one (false), and both paths meet again below. An `if` without `else` is a triangle: one path skips a block.
+
+A block ends with `cmp eax, 0` and `je`. Which arrow does the program follow when eax is 0?
+'''
+check = { kind = "choice", options = ["The green arrow (taken)", "The red arrow (not taken)"], correct = 0 }
+success = "je jumps when the values are equal (ZF = 1). eax == 0, so the jump is taken: green."
+
+[[steps]]
+title = "Loops have an arrow going up"
+text = '''
+A loop shows up as an arrow that goes **back up** to an earlier block. Count how often this loop body runs:
+
+```text
+    xor ecx, ecx       ; i = 0
+body:
+    ; ... loop body ...
+    add ecx, 2         ; i += 2
+    cmp ecx, 10
+    jb body            ; while i < 10
+```
+
+```rust
+let mut i = 0;
+while i < 10 { /* body */ i += 2; }
+```
+'''
+check = { kind = "answer", answers = ["5"], number = true }
+hints = ["i takes the values 0, 2, 4, …"]
+
+[[steps]]
+title = "Indexing arrays"
+text = '''
+`array[i]` becomes an address computation: start + i × element size.
+
+```rust
+let x = numbers[i];   // numbers: &[u64]
+```
+
+```text
+mov rax, [rcx+rdx*8]  ; rcx = start, rdx = i, 8 = size of a u64
+```
+
+The multiplier tells you the element type's size. In `mov eax, [rcx+rdx*4]`, how many bytes is each element?
+'''
+check = { kind = "answer", answers = ["4"], number = true }
+success = "4 bytes: an array of u32 or i32 (or f32)."
+
+[[steps]]
+title = "Bounds checks"
+text = '''
+Rust checks every index: `s[3]` panics if the slice is too short. The compiler turns that into a comparison before the access:
+
+```text
+cmp rdx, 4           ; is the length at least 4?
+jb  panic_bounds     ; jump to the panic if below
+mov al, [rcx+3]      ; s[3]
+```
+
+C does not do this, so these checks are a sign of Rust code. When you see `cmp` with the length and a `jb` to code that never returns, you can mentally skip it: it is just safety. What does the `jb` jump to?
+'''
+check = { kind = "choice", options = [
+    "The next character",
+    "Code that panics because the index is out of bounds",
+    "The start of the loop",
+    "The return address",
+], correct = 1 }

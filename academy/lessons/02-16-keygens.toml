@@ -1,0 +1,100 @@
+id = "l2-keygens"
+level = 2
+order = 16
+title = "Writing a keygen"
+summary = "The proper crackme solve: understand the key-validation algorithm and write a program that generates keys that genuinely pass."
+badge = "Keymaker"
+
+[[steps]]
+title = "Patch, or keygen?"
+text = '''
+There are two ways to beat a program that asks for a licence key.
+
+**Patching** (from the Dynamic-Analysis track) edits the check so it accepts *anything*. It's fast, but it only fixes **your** copy, and it never gives you a real key.
+
+A **keygen** (key generator) is the deeper solve: you understand the validation **algorithm** and write a small program that produces keys that are **genuinely valid** — ones the unmodified program accepts, on any machine. A working keygen is the strongest possible proof that you fully understood the logic.
+
+Crackme authors consider the keygen the "real" solution. This lesson is how you build one.
+'''
+
+[[steps]]
+title = "What a keygen-me checks"
+text = '''
+A proper keygen-me doesn't compare your input to a fixed password (you've seen those). It **runs an algorithm** to decide if a key is valid. Typical shapes:
+
+- **Transform-and-compare**: `valid = transform(key) == target`, where `transform` is some XOR / add / rotate / rearrange, and `target` is a constant.
+- **Username-bound**: the key must match a value **derived from a username or serial** — `transform(key) == f(username)` — so each user needs a different key.
+- **Format / checksum rules**: the key must have a certain length, charset, or a checksum digit that balances.
+
+Your task is to recover that algorithm **exactly** — every operation and constant — because your keygen has to reproduce it.
+'''
+
+[[steps]]
+title = "Which approach?"
+text = '''
+You want keys that work on **any** copy of the program — to prove you understand it, or to hand to someone else. Which approach gives you that?
+'''
+check = { kind = "choice", options = [
+  "Write a keygen — reproduce the validation algorithm and generate keys that genuinely pass",
+  "Patch the jump, which only makes your own copy accept any input and yields no real key",
+  "Brute-force a new key by hand on every single run",
+  "Delete the program so it can't ask for a key",
+], correct = 0 }
+hints = [
+  "Patching changes one binary; a valid key works everywhere.",
+  "To produce real keys you must reproduce what the check does.",
+]
+success = "Right — only a keygen produces genuinely valid keys that work on any copy. Patching is local and gives you no key to show for it."
+
+[[steps]]
+title = "Read the algorithm"
+text = '''
+You can't reproduce what you don't understand, so step one is reading the validation precisely. Open the **Decompiler** (press **F5**) on the key-checking function and trace it: what does it do to your input key, what does it compare the result against, and where does any username or serial come in?
+
+ORRESS's decompiler shows the logic as **Rust-like pseudocode**, which is also a convenient language to write your keygen in.
+
+Open the **Decompiler** (F5, the View menu, or the command palette) on the check function.
+'''
+check = { kind = "action", id = "view::Decompiler" }
+hints = ["F5 opens the decompiler — or the View menu. Put the cursor in the validation function first."]
+
+[[steps]]
+title = "Working backward"
+text = '''
+Now turn the check into a generator. Say the validation is `transform(key) == target`, and `transform` is something reversible — a XOR with a constant, an add, a byte permutation.
+
+To get a key that passes, you start from `target` and undo the transform: you apply its ______ to recover the input that produces it.
+
+What's the word for the operation that undoes `transform`? (One word.)
+'''
+check = { kind = "answer", answers = ["inverse", "reverse"], number = false, case_sensitive = false }
+hints = ["If transform XORs with 0x5A, what undoes it? (XOR with 0x5A again.)", "You run the transformation in the opposite direction."]
+success = "The inverse — apply the inverse of each step to the target and you compute a valid key directly. XOR inverts to XOR, add to subtract, a permutation to its reverse."
+
+[[steps]]
+title = "Practice: keygen Crackme #3"
+text = '''
+**Crackme #3** is a perfect first keygen. Its check is `input[i] XOR KEY[i % 4] == CIPHER[i]` — and XOR is its own inverse, so the key is simply `CIPHER[i] XOR KEY[i % 4]`.
+
+Open it, read the check in the decompiler to recover the `KEY` and `CIPHER` constants, then compute the key (by hand, or with a two-line Rust program). Feed it back in to confirm.
+'''
+check = { kind = "open_crackme", name = "crackme03" }
+hints = [
+  "Open it from the lesson's practice programs (or the Academy's crackme list).",
+  "Both KEY and CIPHER are constants in check_password; XOR them position by position to get the key.",
+]
+
+[[steps]]
+title = "Build it and verify"
+text = '''
+The full keygen workflow:
+
+1. **Recover the check.** In the decompiler, pin down the inputs, every transform step and constant, and the comparison target.
+2. **Choose a strategy:**
+   - **Invert it.** If the transform is reversible, compute the key straight from the target (and the username, for username-bound checks). This is the clean keygen.
+   - **Search for it.** If it isn't cleanly reversible (multiplication, S-boxes, a hash), let the **symbolic solver** find a satisfying key, or the **side-channel solver** recover it byte-by-byte — the Intermediate-CTF tools.
+3. **Implement it.** Write the generator as a small program — Rust is handy, since the decompiler already shows the logic that way — that outputs a valid key (per username, if needed).
+4. **Verify.** Feed a generated key back into the **real program** (or run the check in the **Emulator**). It must say *Correct*. Match the exact length, charset and format the check demands.
+
+When your keygen's output sails through the unmodified program, you've done more than crack it — you've **reconstructed its algorithm**. Reading turned into generating. That's the proper solve.
+'''

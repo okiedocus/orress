@@ -1,0 +1,60 @@
+[package]
+name = "orress-views"
+description = "Reverse-engineering views for ORRESS: hex editor, file info, sections, imports, strings, inspector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Surface the decompiler's optional "does this port compile?" check in the Rust-port view.
+compile-check = ["orress-decompiler/compile-check"]
+
+[dependencies]
+orress-analysis.workspace = true
+orress-arch.workspace = true
+orress-asm.workspace = true
+orress-theme.workspace = true
+orress-bytes.workspace = true
+orress-decompiler.workspace = true
+orress-emu.workspace = true
+orress-sym.workspace = true
+orress-triage.workspace = true
+orress-sandbox.workspace = true
+orress-wasm.workspace = true
+orress-pyc.workspace = true
+orress-java.workspace = true
+orress-archive.workspace = true
+orress-js.workspace = true
+orress-dex.workspace = true
+orress-dotnet.workspace = true
+orress-ai.workspace = true
+orress-settings.workspace = true
+orress-editor.workspace = true
+orress-challenge.workspace = true
+ropey.workspace = true
+orress-lsp.workspace = true
+orress-ext.workspace = true
+orress-collab.workspace = true
+orress-ctf.workspace = true
+orress-diff.workspace = true
+orress-vm.workspace = true
+orress-script.workspace = true
+orress-dap.workspace = true
+orress-term.workspace = true
+vt100.workspace = true
+orress-debug.workspace = true
+orress-loaders.workspace = true
+orress-project.workspace = true
+orress-ui.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+orress-transforms.workspace = true
+serde.workspace = true
+serde_json.workspace = true

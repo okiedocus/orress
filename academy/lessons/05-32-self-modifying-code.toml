@@ -1,0 +1,80 @@
+id = "l5-self-modifying-code"
+level = 5
+order = 32
+title = "Self-modifying code"
+summary = "Code that rewrites itself at runtime: why the disassembly lies, how to spot it, and how to read the real instructions."
+badge = "Shapeshifter"
+
+[[steps]]
+title = "Code that rewrites itself"
+text = '''
+Normally the bytes of a function don't change: what the disassembler shows on disk is what the CPU runs. **Self-modifying code (SMC)** breaks that assumption. The program **writes new bytes into its own code** — decrypting, patching or generating instructions — and then runs them.
+
+A classic shape: a loop XORs a block of "garbage" bytes with a key, turning them into real instructions, then jumps into the block it just decoded. Until that loop runs, the real instructions simply aren't there.
+
+SMC is used by packers (the unpacking stub is self-modifying), by obfuscators, and by anti-analysis tricks that only reveal their payload once running. The lesson it teaches: **the static view is a snapshot, and SMC makes that snapshot a lie.**
+'''
+
+[[steps]]
+title = "Why the disassembly lies"
+text = '''
+When you open a self-modifying binary, the disassembler decodes the bytes *as they sit on disk*. For the region that gets rewritten later, those bytes are whatever the program starts with — encrypted blob, junk, or placeholder — so you see:
+
+- A stretch of **nonsensical instructions** that don't form sensible control flow, often flagged as "bad" or decoded as data.
+- Nearby, a small **writer loop**: a read, an arithmetic op (XOR/ADD/ROL), a store *back into the code region*, and a counter.
+- A **jump or call into the region that was just written** — control flow entering bytes that another part of the program produced.
+
+The giveaway is a **write whose destination is inside an executable section**. Normal code writes to the stack and the heap, never to its own `.text`.
+'''
+
+[[steps]]
+title = "Spotting self-modifying code"
+text = '''
+You're reversing a binary and one region disassembles into garbage that's never called from anywhere sensible. Which single observation most strongly says "this code rewrites itself"?
+'''
+check = { kind = "choice", options = [
+  "A loop that stores bytes into an address range that is also executed",
+  "The function is recursive",
+  "It uses the stack a lot",
+  "It contains many string constants",
+], correct = 0 }
+hints = [
+  "Where do normal programs write? Where do they never write?",
+  "A store whose destination lands inside an executable section is the tell — code writing code.",
+]
+success = "Exactly — a write into a region that's later executed is the signature of self-modifying code."
+
+[[steps]]
+title = "You can't read what isn't there yet"
+text = '''
+Static analysis alone can't show you SMC's payload, because the real instructions don't exist until the writer loop runs. So why can't you just keep reading the disassembly to find the hidden logic?
+
+Type the one word that best completes this sentence: the real instructions are produced at ______ .
+'''
+check = { kind = "answer", answers = ["runtime", "run-time", "run time"], number = false }
+hints = ["It's the opposite of \"on disk\" / \"statically\". The bytes are built while the program is executing."]
+success = "Right — the payload exists only at runtime, so you have to run the code to see it."
+
+[[steps]]
+title = "Let the code decode itself"
+text = '''
+The way to read self-modifying code is to **execute the writer and then look at the result**. ORRESS's **Emulator** runs the instructions in a sandbox, applying every memory write — including writes back into the code — so after the decode loop runs, the region now holds the *real* instructions, ready to disassemble.
+
+Open the **Emulator** tab (press F7, the View menu, or the command palette).
+'''
+check = { kind = "action", id = "view::Emulator" }
+spotlight = "view.Emulator"
+hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\"."]
+
+[[steps]]
+title = "From snapshot to real code"
+text = '''
+The full workflow for peeling self-modifying code apart:
+
+1. **Find the writer.** Look for a loop that stores into an executable address range (ORRESS highlights writes that land in code).
+2. **Run past it.** Single-step or set a breakpoint just after the decode loop in the **Emulator**, so every write is applied.
+3. **Re-read the region.** Disassemble the now-decoded bytes — the real instructions are finally there. Dump them if you want to analyse them statically.
+4. **Watch for layers.** SMC often decodes in stages (stub decodes stage 1, which decodes stage 2…). Repeat until no region still rewrites itself.
+
+Same principle as packers and VMs: when the static view is a lie, make the program reveal the truth, then analyse *that*. You now know what self-modifying code is, why the disassembly can't be trusted, how to recognise the writer, and how to let ORRESS run it to recover the real instructions.
+'''

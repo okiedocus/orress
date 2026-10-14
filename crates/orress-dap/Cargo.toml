@@ -1,0 +1,16 @@
+[package]
+name = "orress-dap"
+description = "ORRESS Debug Adapter Protocol client for source-level debugging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

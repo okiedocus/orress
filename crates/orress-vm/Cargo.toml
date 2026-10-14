@@ -1,0 +1,23 @@
+[package]
+name = "orress-vm"
+description = "ORRESS VM-obfuscation detection: finds bytecode-interpreter (virtual machine) dispatch loops — the first step of devirtualizing VM-protected code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-analysis = { workspace = true }
+orress-sym = { workspace = true }
+orress-emu = { workspace = true }
+iced-x86 = { workspace = true }
+
+[dev-dependencies]
+# Hand-built programs for the lifting tests (BinaryInfo -> Program::analyze).
+orress-loaders = { workspace = true }
+iced-x86 = { version = "1.21", features = ["code_asm"] }

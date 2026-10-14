@@ -1,0 +1,79 @@
+id = "l7-drivers-and-rootkits"
+level = 7
+order = 52
+title = "Drivers and rootkits"
+summary = "Reverse-engineering kernel-mode code: how to spot a driver, how rootkits hide, and why ring 0 raises the stakes."
+badge = "Ring Zero"
+
+[[steps]]
+title = "Down to the kernel"
+text = '''
+Everything you've reversed so far has been **user mode** — ordinary programs, running with limited privilege, isolated from each other by the operating system. Expert work eventually takes you below that line, into **kernel mode**: device drivers, and the malware that lives alongside them.
+
+Kernel code runs at the processor's highest privilege level with direct access to memory, hardware and every process on the machine. That's where **drivers** operate legitimately — and where a **rootkit** plants itself to hide, persist and tamper with the system from underneath the tools trying to find it.
+
+The reversing skills are the same — it's still disassembly and control flow. What changes is the environment, the APIs, and the stakes.
+'''
+
+[[steps]]
+title = "Spotting a driver"
+text = '''
+A Windows kernel driver (a `.sys` file) is a **PE file**, just like an `.exe` — but with tell-tale differences:
+
+- Its **PE subsystem** is **Native**, not Console or GUI.
+- Its entry point is **`DriverEntry`**, not the usual C runtime startup.
+- It imports from the **kernel**, not the usual user-mode DLLs: functions from `ntoskrnl.exe` and `hal.dll` with prefixes like `Ex`, `Io`, `Ob`, `Ps`, `Rtl` (for example `ExAllocatePool`, `IoCreateDevice`) — never `kernel32`/`user32`.
+
+See those traits together and you're looking at kernel-mode code, which tells you to switch your mental model from "a program with a `main`" to "a driver the kernel calls into."
+'''
+
+[[steps]]
+title = "Is this a driver?"
+text = '''
+The quickest check is the file overview. ORRESS's **"What Is This File?"** view reports the PE **subsystem**, among the format, protections and entropy. For a normal app it says *Console* or *GUI*; for a driver it reads **"Native (driver or boot program)"**.
+
+Open the **What Is This File?** view (the command palette, or the File menu) and find the Subsystem field.
+'''
+check = { kind = "action", id = "file::Info" }
+hints = ["Ctrl+Shift+P, then type \"What Is This File\" — or the File menu. Look for the Subsystem row."]
+
+[[steps]]
+title = "How rootkits hide"
+text = '''
+A rootkit's whole purpose is to make the system **lie** — so a hidden process, file or network connection simply doesn't appear to the tools that query it. From the kernel, how does it pull that off?
+'''
+check = { kind = "choice", options = [
+  "By hooking or patching OS code and tables (e.g. the system-call table or a driver's dispatch routines), or unlinking kernel objects (DKOM), so the OS returns doctored answers",
+  "By choosing a very long and complex file name",
+  "By compressing itself to take up less disk space",
+  "By asking the user politely not to look",
+], correct = 0 }
+hints = [
+  "If you control the code that answers 'list the processes', you control what the answer says.",
+  "Think SSDT hooks, inline patches on kernel functions, and DKOM (unlinking an EPROCESS from the list).",
+]
+success = "Right — rootkits intercept or doctor the kernel's own bookkeeping (hooks, patches, DKOM) so the system reports a false picture of itself."
+
+[[steps]]
+title = "The stakes of ring 0"
+text = '''
+Kernel mode is often called by its x86 privilege level, a single-digit number. User-mode apps run at the least-privileged level; the kernel runs at the **most**-privileged one.
+
+What is the privilege-ring number of kernel mode? (One digit.)
+'''
+check = { kind = "answer", answers = ["0"], number = true }
+hints = ["The rings go from 0 (most privileged) to 3 (least). Applications run in ring 3.", "Kernel mode is the most privileged ring."]
+success = "Ring 0 — the most privileged level. A mistake here doesn't crash one app; it can blue-screen or compromise the whole machine."
+
+[[steps]]
+title = "Analysing kernel code safely"
+text = '''
+Ring 0 changes how you work:
+
+1. **Confirm it's kernel-mode** — Native subsystem, `DriverEntry`, kernel imports.
+2. **Find the entry and dispatch routines.** `DriverEntry` sets up the driver; the **IRP dispatch** routines are its interface to user mode (the requests it handles). Those are where the real behaviour lives.
+3. **Map what it touches.** Which kernel objects, tables and functions does it read or write? Writes to the **system-call table**, patches at the **start of kernel functions**, or walks of the **process list** are rootkit fingerprints.
+4. **Respect the danger.** A kernel bug or detonation can **blue-screen or fully compromise** the host, and a kernel rootkit can defeat user-mode monitoring entirely — so lean on **static analysis** first, and do any dynamic work in a **disposable VM with kernel debugging**, never on your real machine.
+
+Same disassembly skills, far higher stakes. Ring 0 is the deep end of reverse engineering — and now you know how to recognise it, read it, and stay safe doing so.
+'''

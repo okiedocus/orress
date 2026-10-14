@@ -1,0 +1,69 @@
+id = "l0-tour"
+level = 0
+order = 5
+title = "A tour of ORRESS"
+summary = "The command palette, Explain Mode and the main views, on a real program."
+badge = "Explorer"
+
+[[steps]]
+title = "The command palette"
+text = '''
+Every command in ORRESS can be found by typing. Press **Ctrl+Shift+P** (or click the key cap at the bottom right) to open the **command palette**, type a few letters such as `dock`, and close it again with Esc.
+'''
+spotlight = "palette"
+check = { kind = "action", id = "command_palette::Toggle" }
+hints = ["Hold Ctrl and Shift, then press P."]
+
+[[steps]]
+title = "Explain Mode"
+text = '''
+Explain Mode shows a plain-language tooltip for almost everything you hover over, and the **Explain** panel on the right keeps the last explanation so you can read it calmly.
+
+Click **Explain** in the status bar (highlighted) to switch it off, then click it once more to switch it back on.
+'''
+spotlight = "explain_toggle"
+check = { kind = "action", id = "view::ToggleExplainMode" }
+success = "Leave it on while you learn; later you can switch it off with Ctrl+Alt+E."
+
+[[steps]]
+title = "Open a practice program"
+text = '''
+The Academy comes with small practice programs called **crackmes**: programs that ask for a password, made to be reversed. Click the button below to open the second one; you will crack it in Level 1. Today we only look around.
+'''
+check = { kind = "open_crackme", name = "crackme02" }
+
+[[steps]]
+title = "What is this file?"
+text = '''
+ORRESS opened the **Info** view: format (a Windows program, PE), processor (x86-64), protections, and what it detected (it was written in **Rust**). The *Observations and tips* card suggests where to start.
+
+Make sure the **Info** tab is the active tab (click it if needed) and read through it.
+'''
+spotlight = "view.Info"
+check = { kind = "view", view = "Info" }
+
+[[steps]]
+title = "Raw bytes"
+text = '''
+Open the **Hex** view from the Project panel on the left. Every program starts with the bytes `4D 5A`: the letters `MZ`. Click a byte and look at the **Inspector** on the right: it shows that byte as a number, a character and more.
+'''
+spotlight = "tree.Hex"
+check = { kind = "view", view = "Hex" }
+
+[[steps]]
+title = "Jump to main"
+text = '''
+The program's own code starts in `main`, but a Rust program first runs start-up code from the standard library. ORRESS finds the real `main` for you.
+
+Press **Ctrl+Shift+M** (or use the palette: *Go to main*). You will land in the **Disassembly**: the program's instructions, with names, strings as comments, and clickable calls.
+'''
+check = { kind = "action", id = "nav::GoToMain" }
+hints = ["Open the command palette and type: main"]
+
+[[steps]]
+title = "The graph view"
+text = '''
+Click into the disassembly and press **Space**. The same function is now drawn as a **graph**: boxes of instructions with green arrows (a condition was true), red arrows (false) and blue ones (always). Press Space again to go back.
+'''
+check = { kind = "view", view = "Graph" }
+success = "That is the tour. In Level 1 you will learn to read what these views show."

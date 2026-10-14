@@ -1,0 +1,17 @@
+[package]
+name = "orress-ctf"
+description = "ORRESS CTF platform integration: import challenges and submit flags on CTFd and rCTF via an API token"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ureq = { version = "2", features = ["json"] }
