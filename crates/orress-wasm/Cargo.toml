@@ -16,7 +16,7 @@ workspace = true
 # Pinned to the versions already in the lockfile (pulled by wasmtime/yara-x) so we
 # don't introduce a third copy of the wasm-tools crates.
 wasmparser = "0.236"
-wasmprinter = "0.236"
+wasmprinter = "0.261"
 
 [dev-dependencies]
 wasm-encoder = "0.236"
