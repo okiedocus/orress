@@ -20,6 +20,8 @@ fuzzyhash = "0.2"
 # yara-x is held on the 1.7 line because it builds on the wasmtime 36 LTS series, which (unlike
 # the 38-45 lines newer yara-x releases use) has fixes for every published wasmtime advisory.
 # yara-x 1.7 only accepts its own 1.7 companion crates, so those are pinned exactly as well.
+# Known yara-x advisory GHSA-2jx3-ff3v-j7jj (unsound `Rules::deserialize`, fixed in 1.19) does not
+# apply: ORRESS never deserializes compiled rules, it always compiles them from source.
 # Revisit when a yara-x release moves to a patched wasmtime line.
 yara-x-macros = "=1.7.1"
 yara-x-parser = "=1.7.1"

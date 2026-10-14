@@ -10,6 +10,10 @@ updates:
       cargo-minor-and-patch:
         update-types: ["minor", "patch"]
     ignore:
+      # Major upgrades usually need code changes; they are migrated deliberately. Security
+      # updates are not affected by this and still arrive as individual PRs.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # Held on the yara-x 1.7 line (wasmtime 36 LTS) on purpose — see crates/orress-triage/Cargo.toml.
       - dependency-name: "yara-x*"
       - dependency-name: "wasmtime*"
