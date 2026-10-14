@@ -69,6 +69,8 @@ pub fn detect() -> VmEvidence {
 /// board vendor — into a VM hint. Only unambiguous virtual-hardware identities count: in
 /// particular Hyper-V is recognised solely by Microsoft's "Virtual Machine" product, so a
 /// physical Microsoft device (a Surface) running virtualization-based security does not.
+// Firmware identity is only read on Windows and Linux; elsewhere this is used by tests alone.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn classify_firmware(manufacturer: &str, product: &str, board_vendor: &str) -> Option<String> {
     let m = manufacturer.trim().to_ascii_lowercase();
     let p = product.trim().to_ascii_lowercase();

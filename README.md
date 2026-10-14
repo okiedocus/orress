@@ -11,7 +11,7 @@ written in pure Rust, with a decompiler that speaks **Rust** and a built-in cour
 
 [![CI](https://github.com/okiedocus/orress/actions/workflows/ci.yml/badge.svg)](https://github.com/okiedocus/orress/actions/workflows/ci.yml)
 ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?logo=rust)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue)
 ![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)
 
 <img src="assets/screenshots/decompiler.png" alt="ORRESS disassembly and Rust decompiler side by side" width="860">
@@ -125,9 +125,12 @@ written in pure Rust, with a decompiler that speaks **Rust** and a built-in cour
 
 ## Getting started
 
-**Download:** prebuilt Windows and Linux (x86-64) binaries are attached to each
+**Download:** prebuilt binaries for **Windows** (x86-64), **Linux** (x86-64, ARM64) and **macOS**
+(Apple Silicon, Intel) are attached to each
 [GitHub release](https://github.com/okiedocus/orress/releases), with a `.sha256` checksum for every
-archive. Unpack and run `orress` (the app), or `orress-cli`, `orress-mcp`, `orress-relay`.
+archive. Unpack and run `orress` (the app), or `orress-cli`, `orress-mcp`, `orress-relay`. The macOS
+builds are not notarized yet: run `xattr -dr com.apple.quarantine <unpacked folder>` once, or
+right-click `orress` → **Open**.
 
 **Build from source:** you need [Rust via rustup](https://rustup.rs) (1.95 or newer). The repository
 pins its toolchain (`rust-toolchain.toml`), and rustup installs it automatically on the first build.
@@ -160,7 +163,7 @@ Run the test suite with `cargo test --workspace`.
 
 | | Windows | Linux | macOS |
 |---|---|---|---|
-| App, analysis, decompiler, emulator, editor | ✅ | ✅ | untested |
+| App, analysis, decompiler, emulator, editor | ✅ | ✅ (x86-64, ARM64) | ✅ new — please report issues |
 | Native debugger | ✅ 64-bit targets | ⚠️ experimental (`ptrace`, x86-64) | — |
 | Sandbox (process-tree containment) | ✅ Job Objects | ✅ process groups | untested |
 | ETW activity monitor | ✅ (needs admin) | — | — |

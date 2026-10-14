@@ -1,47 +1,57 @@
 name: Release
 
-# Push a tag `vX.Y.Z` (matching the workspace version) to build release binaries.
-# The result is a DRAFT GitHub release: review it, then publish it by hand.
+# Push a tag `vX.Y.Z` (matching the workspace version) to build release binaries for every
+# platform and create a DRAFT GitHub release with them; review it, then publish it.
+# Running the workflow by hand without a tag only builds and uploads the archives as workflow
+# artifacts — a dry run to check that every platform still builds.
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build (e.g. v1.0.0)"
-        required: true
+        description: "Existing tag to release (e.g. v1.0.0); leave empty for a build-only dry run"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive: zip
-          # The oldest supported Ubuntu runner, so the binaries run on older glibc too.
+          # The oldest supported Ubuntu runners, so the binaries run on older glibc too.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            archive: tar.gz
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          # Intel Macs: cross-compiled on the Apple Silicon runner (Apple's toolchain targets both).
+          - os: macos-14
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.99.0"
+          targets: ${{ matrix.target }}
       - name: Check the tag matches the workspace version
+        if: env.TAG != ''
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -61,7 +71,8 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="orress-${TAG}-${{ matrix.target }}"
+          label="${TAG:-dev-${GITHUB_SHA::7}}"
+          name="orress-${label}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
           for bin in orress orress-cli orress-mcp orress-relay; do
@@ -69,12 +80,12 @@ jobs:
           done
           cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cd dist
-          if [ "${{ matrix.archive }}" = "zip" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
             7z a -tzip "$name.zip" "$name" > /dev/null
             sha256sum "$name.zip" > "$name.zip.sha256"
           else
             tar czf "$name.tar.gz" "$name"
-            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -88,6 +99,7 @@ jobs:
   draft-release:
     name: Draft GitHub release
     needs: build
+    if: inputs.tag != '' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,6 +126,23 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
+          cat >> notes.md <<'EOF'
+
+          ### Downloads
+
+          | Platform | Archive |
+          |---|---|
+          | Windows (x86-64) | `orress-*-x86_64-pc-windows-msvc.zip` |
+          | Linux (x86-64) | `orress-*-x86_64-unknown-linux-gnu.tar.gz` |
+          | Linux (ARM64) | `orress-*-aarch64-unknown-linux-gnu.tar.gz` |
+          | macOS (Apple Silicon) | `orress-*-aarch64-apple-darwin.tar.gz` |
+          | macOS (Intel) | `orress-*-x86_64-apple-darwin.tar.gz` |
+
+          Each archive has a `.sha256` checksum. Linux needs `libxkbcommon`, GTK 3 and Wayland or X11
+          (present on desktop distributions). The macOS builds are not notarized yet: after unpacking,
+          run `xattr -dr com.apple.quarantine orress-*` once, or right-click `orress` → Open. macOS
+          support is new — please report problems.
+          EOF
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}

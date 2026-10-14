@@ -12,6 +12,7 @@ The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering S
 
 ### Highlights
 
+- **Prebuilt for Windows (x86-64), Linux (x86-64, ARM64) and macOS (Apple Silicon, Intel).**
 - **A pure-Rust reverse-engineering IDE** with a Zed-inspired workspace: docks, panes, splits, a
   command palette, and Zed-format keymaps and themes.
 - **Loaders and formats**: PE, ELF and Mach-O, plus .NET, Java class/JAR, Android DEX, Python
