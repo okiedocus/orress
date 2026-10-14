@@ -26,4 +26,4 @@ windows = { workspace = true, features = ["Win32_System_JobObjects", "Win32_Syst
 
 # killpg, to kill a sample's whole process group on timeout.
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal"] }
+nix = { version = "0.31", features = ["signal"] }
