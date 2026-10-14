@@ -61,7 +61,13 @@ fn ported(funcs: &[(&str, &[u8])], index: usize) -> String {
 }
 
 /// Compiles `src` as a library with `rustc`. Returns `true` if it compiles (or rustc is absent).
+/// Ports keep unlifted x86-64 instructions as `asm!`, which only an x86-64 host rustc accepts,
+/// so on other hosts (e.g. Apple Silicon) such sources are skipped.
 fn rustc_compiles(src: &str) -> bool {
+    if !cfg!(target_arch = "x86_64") && src.contains("asm!") {
+        eprintln!("skipping rustc check: x86-64 inline asm on a non-x86-64 host");
+        return true;
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
     let uniq = N.fetch_add(1, Ordering::Relaxed);

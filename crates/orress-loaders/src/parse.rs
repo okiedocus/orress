@@ -54,6 +54,17 @@ pub fn parse(data: &[u8]) -> BinaryInfo {
         ..BinaryInfo::default()
     };
 
+    // Mach-O's LC_MAIN stores the entry point as a *file offset* (`entryoff`), and `object`
+    // reports it as-is; turn it into a virtual address through the segment that maps it.
+    if format == Format::MachO
+        && let Some(off) = info.entry
+    {
+        info.entry = file.segments().find_map(|seg| {
+            let (start, size) = seg.file_range();
+            (size > 0 && off >= start && off - start < size).then(|| seg.address() + (off - start))
+        });
+    }
+
     for section in file.sections() {
         let name = section.name().unwrap_or("").to_owned();
         let (offset, file_size) = section.file_range().unwrap_or((0, 0));

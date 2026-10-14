@@ -61,6 +61,64 @@ fn coff_and_macho_objects_parse() {
     assert_eq!(macho.arch, "ARM64 (AArch64)");
 }
 
+/// A minimal 64-bit ARM64 Mach-O executable: `__PAGEZERO`, a `__TEXT` segment mapping the
+/// first 16 KiB of the file at 0x1_0000_0000, and an `LC_MAIN` whose `entryoff` is a *file
+/// offset* (as on every modern macOS binary).
+fn macho_executable(entryoff: u64) -> Vec<u8> {
+    const TEXT_SIZE: u64 = 0x4000;
+    fn segment(
+        out: &mut Vec<u8>,
+        name: &str,
+        vmaddr: u64,
+        vmsize: u64,
+        fileoff: u64,
+        filesize: u64,
+    ) {
+        out.extend(0x19u32.to_le_bytes()); // LC_SEGMENT_64
+        out.extend(72u32.to_le_bytes());
+        let mut segname = [0u8; 16];
+        segname[..name.len()].copy_from_slice(name.as_bytes());
+        out.extend(segname);
+        for v in [vmaddr, vmsize, fileoff, filesize] {
+            out.extend(v.to_le_bytes());
+        }
+        out.extend([5u32, 5, 0, 0].iter().flat_map(|v| v.to_le_bytes())); // prot, nsects, flags
+    }
+    let mut cmds = Vec::new();
+    segment(&mut cmds, "__PAGEZERO", 0, 0x1_0000_0000, 0, 0);
+    segment(&mut cmds, "__TEXT", 0x1_0000_0000, TEXT_SIZE, 0, TEXT_SIZE);
+    cmds.extend(0x8000_0028u32.to_le_bytes()); // LC_MAIN
+    cmds.extend(24u32.to_le_bytes());
+    cmds.extend(entryoff.to_le_bytes());
+    cmds.extend(0u64.to_le_bytes()); // stacksize
+    let mut out = Vec::new();
+    // magic, cputype (ARM64), cpusubtype, filetype (MH_EXECUTE), ncmds, sizeofcmds, flags, reserved
+    for v in [
+        0xfeed_facfu32,
+        0x0100_000c,
+        0,
+        2,
+        3,
+        cmds.len() as u32,
+        0,
+        0,
+    ] {
+        out.extend(v.to_le_bytes());
+    }
+    out.extend(cmds);
+    out.resize(TEXT_SIZE as usize, 0);
+    out
+}
+
+#[test]
+fn macho_entry_offset_becomes_a_virtual_address() {
+    let info = triage(&macho_executable(0x3f80));
+    assert_eq!(info.format, Format::MachO);
+    assert_eq!(info.kind, Kind::Executable);
+    assert_eq!(info.entry, Some(0x1_0000_3f80));
+    assert_eq!(info.entry_offset(), Some(0x3f80));
+}
+
 #[test]
 fn unknown_data_still_gets_triage() {
     let mut zip = b"PK\x03\x04".to_vec();

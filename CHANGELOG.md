@@ -36,6 +36,13 @@ The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering S
 - **Team play**: end-to-end-encrypted real-time collaboration through a small relay
   (`orress-relay`), with CTFd and rCTF integration.
 
+### Fixed (since the pre-release builds)
+
+- Mach-O executables now report their real entry point: `LC_MAIN` stores a file offset, which
+  is now translated to a virtual address (previously "go to entry" and analysis seeding were off
+  on every macOS binary).
+- Linux position-independent executables are classified as executables, not libraries.
+
 ### Security
 
 - Extensions run in the wasmtime 36 long-term-support series with path confinement, a filtered
