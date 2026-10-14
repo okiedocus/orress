@@ -19,4 +19,4 @@ wasmparser = "0.236"
 wasmprinter = "0.236"
 
 [dev-dependencies]
-wasm-encoder = "0.236"
+wasm-encoder = "0.240"

@@ -4581,7 +4581,7 @@ dependencies = [
 name = "orress-wasm"
 version = "1.0.0"
 dependencies = [
- "wasm-encoder 0.236.1",
+ "wasm-encoder 0.240.0",
  "wasmparser 0.236.1",
  "wasmprinter",
 ]
