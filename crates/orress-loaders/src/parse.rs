@@ -162,7 +162,14 @@ pub fn parse(data: &[u8]) -> BinaryInfo {
             info.import_slots = code_hints::elf_import_slots(&file);
             protections::elf(elf, data, &mut info);
         }
-        object::File::MachO32(_) | object::File::MachO64(_) => protections::macho(&file, &mut info),
+        object::File::MachO32(macho) => {
+            info.import_slots = code_hints::macho_import_slots(macho);
+            protections::macho(&file, &mut info);
+        }
+        object::File::MachO64(macho) => {
+            info.import_slots = code_hints::macho_import_slots(macho);
+            protections::macho(&file, &mut info);
+        }
         _ => {}
     }
     info

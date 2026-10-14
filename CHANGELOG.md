@@ -42,6 +42,8 @@ The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering S
   is now translated to a virtual address (previously "go to entry" and analysis seeding were off
   on every macOS binary).
 - Linux position-independent executables are classified as executables, not libraries.
+- Mach-O imports are resolved to their stubs and GOT slots (from the indirect symbol table), so
+  calls into system libraries are named in macOS binaries.
 
 ### Security
 

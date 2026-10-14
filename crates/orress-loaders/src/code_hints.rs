@@ -1,9 +1,12 @@
 //! Facts the code analysis needs from the file format: where imported function pointers
 //! live, named function symbols, and function starts from exception tables.
 
+use object::macho;
+use object::read::macho::{MachHeader, MachOFile, Nlist, Section as _};
 use object::read::pe::{ImageNtHeaders, ImageThunkData, PeFile};
 use object::{
-    LittleEndian as LE, Object, ObjectSymbol, ObjectSymbolTable, RelocationTarget, SymbolKind,
+    LittleEndian as LE, Object, ObjectSymbol, ObjectSymbolTable, ReadRef, RelocationTarget,
+    SymbolIndex, SymbolKind, U32,
 };
 
 use crate::model::*;
@@ -77,6 +80,78 @@ pub fn elf_import_slots(file: &object::File<'_>) -> Vec<NamedAddress> {
             _ => None,
         })
         .collect()
+}
+
+/// Mach-O: the indirect symbol table names every entry of the symbol-stub (`__stubs`) and
+/// symbol-pointer (`__got`, `__la_symbol_ptr`) sections. Code calls an import with
+/// `bl`/`call <stub>` or loads its pointer from the GOT, so those entries are the import slots.
+pub fn macho_import_slots<'data, Mach: MachHeader, R: ReadRef<'data>>(
+    file: &MachOFile<'data, Mach, R>,
+) -> Vec<NamedAddress> {
+    let endian = file.endian();
+    let Ok(mut commands) = file.macho_load_commands() else {
+        return Vec::new();
+    };
+    let mut dysymtab = None;
+    while let Ok(Some(command)) = commands.next() {
+        if let Ok(Some(d)) = command.dysymtab() {
+            dysymtab = Some(d);
+            break;
+        }
+    }
+    let Some(dysymtab) = dysymtab else {
+        return Vec::new();
+    };
+    let Ok(indirect) = file.data().read_slice_at::<U32<Mach::Endian>>(
+        u64::from(dysymtab.indirectsymoff.get(endian)),
+        dysymtab.nindirectsyms.get(endian) as usize,
+    ) else {
+        return Vec::new();
+    };
+    let symbols = file.macho_symbol_table();
+    let pointer_size = if file.is_64() { 8 } else { 4 };
+    let mut out = Vec::new();
+    for section in file.sections() {
+        let section = section.macho_section();
+        let entry_size = match section.flags(endian).typ() {
+            macho::S_SYMBOL_STUBS => u64::from(section.reserved2(endian)),
+            macho::S_NON_LAZY_SYMBOL_POINTERS | macho::S_LAZY_SYMBOL_POINTERS => pointer_size,
+            _ => continue,
+        };
+        if entry_size == 0 {
+            continue;
+        }
+        let address: u64 = section.addr(endian).into();
+        let size: u64 = section.size(endian).into();
+        let first = section.reserved1(endian) as usize;
+        // Bounded by the indirect table: a hostile section size cannot make this loop long.
+        for i in 0..size / entry_size {
+            let Some(entry) = first
+                .checked_add(i as usize)
+                .and_then(|index| indirect.get(index))
+            else {
+                break;
+            };
+            let index = entry.get(endian);
+            // INDIRECT_SYMBOL_LOCAL / INDIRECT_SYMBOL_ABS: not an import.
+            if index & 0xc000_0000 != 0 {
+                continue;
+            }
+            let Ok(nlist) = symbols.symbol(SymbolIndex(index as usize)) else {
+                continue;
+            };
+            let Ok(name) = nlist.name(endian, symbols.strings()) else {
+                continue;
+            };
+            if !name.is_empty() {
+                out.push(NamedAddress {
+                    address: address + i * entry_size,
+                    name: String::from_utf8_lossy(name).into_owned(),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Defined function symbols (static and dynamic), one name per address.
