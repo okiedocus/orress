@@ -4,6 +4,7 @@ description = "Instruction decoding for ORRESS: x86, x86-64 and ARM64, with cont
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true

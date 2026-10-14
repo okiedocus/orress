@@ -4,6 +4,7 @@ description = "WASM extension host for ORRESS (wasmtime component model) + Zed-e
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -12,7 +13,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-wasmtime = { version = "38", default-features = false, features = ["runtime", "cranelift", "component-model"] }
+# wasmtime 36 is a long-term-support series (patched through 2027); keep it in step with the
+# wasmtime that yara-x uses (orress-triage) so only one copy is built.
+wasmtime = { version = "36.0.17", default-features = false, features = ["runtime", "cranelift", "component-model"] }
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.8"
@@ -22,7 +25,7 @@ tar = "0.4"
 orress-archive.workspace = true
 orress-theme.workspace = true
 orress-lsp.workspace = true
-wasmtime-wasi = { version = "38", default-features = false }
+wasmtime-wasi = { version = "36.0.17", default-features = false }
 
 [dev-dependencies]
 wasm-encoder = "0.240"

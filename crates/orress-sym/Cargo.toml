@@ -4,6 +4,7 @@ description = "ORRESS symbolic execution and constraint solving: find an input t
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true

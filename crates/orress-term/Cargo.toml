@@ -4,6 +4,7 @@ description = "ORRESS integrated terminal: a PTY-backed shell with a vt100 scree
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true

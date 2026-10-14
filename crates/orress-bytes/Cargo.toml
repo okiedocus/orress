@@ -4,6 +4,7 @@ description = "Byte-level tools for ORRESS: entropy, strings, pattern search, va
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true

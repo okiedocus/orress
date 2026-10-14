@@ -4,6 +4,7 @@ description = "ORRESS pure-Rust x86/x64 emulator: run a function, count instruct
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true

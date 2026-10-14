@@ -4,6 +4,7 @@ description = "ORRESS static malware triage: IOC extraction and a behavior/IOC r
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -16,4 +17,11 @@ regex.workspace = true
 orress-loaders.workspace = true
 tlsh2 = "1"
 fuzzyhash = "0.2"
-yara-x = { version = "1.12", default-features = false, features = ["pe-module", "elf-module", "macho-module", "hash-module", "math-module", "string-module", "constant-folding", "fast-regexp", "inventory"] }
+# yara-x is held on the 1.7 line because it builds on the wasmtime 36 LTS series, which (unlike
+# the 38-45 lines newer yara-x releases use) has fixes for every published wasmtime advisory.
+# yara-x 1.7 only accepts its own 1.7 companion crates, so those are pinned exactly as well.
+# Revisit when a yara-x release moves to a patched wasmtime line.
+yara-x-macros = "=1.7.1"
+yara-x-parser = "=1.7.1"
+yara-x-proto = "=1.7.1"
+yara-x = { version = "=1.7.1", default-features = false, features = ["pe-module", "elf-module", "macho-module", "hash-module", "math-module", "string-module", "constant-folding", "fast-regexp"] }

@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in ORRESS is broken, crashes, or gives a wrong result.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this!
+        **Security issue?** Please don't file it here — see [SECURITY.md](https://github.com/okiedocus/orress/blob/main/SECURITY.md).
+        **Never attach live malware** to a public issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Open crackme.exe
+        2. Put the cursor in `main` and press F5
+        3. The decompiler shows ... but the code actually ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproducer
+      description: >
+        A small file or snippet that shows the problem helps the most. Harmless files can be
+        attached here (zip them first); for anything malicious, follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: ORRESS version
+      description: Shown in Help → About, or the commit hash if you built from source.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Loading / file formats
+        - Disassembly / analysis
+        - Decompiler
+        - Debugger
+        - Emulator / symbolic solver
+        - Malware triage / YARA / sandbox
+        - Editor / terminal / LSP
+        - Extensions / themes
+        - AI assistant / MCP
+        - Collaboration / CTF integration
+        - Academy
+        - CLI
+        - UI / other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or panic message
+      description: Paste any error text or backtrace (run with `RUST_BACKTRACE=1`).
+      render: text

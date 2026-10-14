@@ -2,3 +2,5 @@
 *.png binary
 *.exe binary
 *.bin binary
+*.dll binary
+*.ico binary

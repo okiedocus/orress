@@ -10,7 +10,7 @@ A reverse-engineering IDE for CTF players, malware analysts and the curious —
 written in pure Rust, with a decompiler that speaks **Rust** and a built-in course that takes you from zero to expert.
 
 [![CI](https://github.com/okiedocus/orress/actions/workflows/ci.yml/badge.svg)](https://github.com/okiedocus/orress/actions/workflows/ci.yml)
-![Rust](https://img.shields.io/badge/rust-1.99-orange?logo=rust)
+![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?logo=rust)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)
 
@@ -51,6 +51,7 @@ written in pure Rust, with a decompiler that speaks **Rust** and a built-in cour
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
+- [Security](#security)
 - [License](#license)
 
 ## Features
@@ -124,9 +125,12 @@ written in pure Rust, with a decompiler that speaks **Rust** and a built-in cour
 
 ## Getting started
 
-There are no prebuilt binaries yet, so build from source. You need
-[Rust via rustup](https://rustup.rs); the repository pins its toolchain (`rust-toolchain.toml`), and
-rustup installs it automatically on the first build.
+**Download:** prebuilt Windows and Linux (x86-64) binaries are attached to each
+[GitHub release](https://github.com/okiedocus/orress/releases), with a `.sha256` checksum for every
+archive. Unpack and run `orress` (the app), or `orress-cli`, `orress-mcp`, `orress-relay`.
+
+**Build from source:** you need [Rust via rustup](https://rustup.rs) (1.95 or newer). The repository
+pins its toolchain (`rust-toolchain.toml`), and rustup installs it automatically on the first build.
 
 ```sh
 git clone https://github.com/okiedocus/orress.git
@@ -356,16 +360,15 @@ the same path, so a new feature shows up everywhere at once. Academy lessons are
 
 ## Contributing
 
-Issues and pull requests are welcome. Before opening a PR:
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the
+checks CI runs, and the project's conventions. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
-```sh
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+## Security
 
-CI runs the same three checks on Windows and Linux. Please keep the project **pure Rust** — new
-dependencies that pull in C/C++ toolchains need a strong reason.
+ORRESS opens hostile files by design. Please report vulnerabilities **privately** as described in
+[SECURITY.md](SECURITY.md) — not as public issues. Dependencies are checked against the RustSec
+advisory database and a license policy ([`deny.toml`](deny.toml)) on every push and daily.
 
 ## License
 

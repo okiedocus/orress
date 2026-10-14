@@ -6,9 +6,14 @@ members = ["crates/*"]
 version = "1.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.88"
+# ORRESS ships as an application, not as crates.io libraries.
+publish = false
+rust-version = "1.95"
 repository = "https://github.com/okiedocus/orress"
+homepage = "https://ctf.okiedocus.nl/orress"
 authors = ["Okiedocus <info@okiedocus.nl>"]
+keywords = ["reverse-engineering", "disassembler", "decompiler", "malware-analysis", "ctf"]
+categories = ["development-tools::debugging", "command-line-utilities"]
 
 [workspace.dependencies]
 # Internal crates

@@ -4,6 +4,7 @@ description = "ORRESS decompiler: lifts x86, x86-64 and ARM64 code and prints Ru
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
