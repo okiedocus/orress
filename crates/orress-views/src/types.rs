@@ -130,7 +130,9 @@ impl Draft {
                 d.kind = Kind::Union;
                 d.fields = fields.iter().map(FieldDraft::from_def).collect();
             }
-            UserType::Enum { width, variants, .. } => {
+            UserType::Enum {
+                width, variants, ..
+            } => {
                 d.kind = Kind::Enum;
                 d.enum_width = *width;
                 d.variants = variants
@@ -210,7 +212,10 @@ pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
 
     ui.horizontal(|ui| {
         ui.label(RichText::new("Types").strong());
-        ui.label(muted(format!("{} defined · saved with this binary", names.len())));
+        ui.label(muted(format!(
+            "{} defined · saved with this binary",
+            names.len()
+        )));
     });
     ui.separator();
 
@@ -241,7 +246,10 @@ pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
                     let ty = &catalog.types[name];
                     let selected = view.draft.as_ref().is_some_and(|d| &d.orig == name);
                     ui.horizontal(|ui| {
-                        if ui.selectable_label(selected, format!("{} {name}", ty.kind_label())).clicked() {
+                        if ui
+                            .selectable_label(selected, format!("{} {name}", ty.kind_label()))
+                            .clicked()
+                        {
                             view.draft = Some(Draft::from_type(ty));
                             view.error = None;
                             view.status = None;
@@ -268,7 +276,14 @@ pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
                 ui.label(muted("Select a type on the left, or create one."));
                 return;
             };
-            let save = editor(ui, draft, &names, view.error.as_deref(), view.status.as_deref(), &catalog);
+            let save = editor(
+                ui,
+                draft,
+                &names,
+                view.error.as_deref(),
+                view.status.as_deref(),
+                &catalog,
+            );
             if save {
                 match commit(doc, draft) {
                     Ok(_) => {
@@ -321,21 +336,28 @@ fn editor(
     probe.types.insert(ty.name().to_owned(), ty.clone());
     match probe.layout(&ty) {
         Some(fields) if !fields.is_empty() => {
-            egui::Grid::new("types_layout").num_columns(4).spacing([14.0, 2.0]).show(ui, |ui| {
-                ui.label(muted("offset"));
-                ui.label(muted("name"));
-                ui.label(muted("type"));
-                ui.label(muted("size"));
-                ui.end_row();
-                for f in &fields {
-                    ui.label(RichText::new(format!("+0x{:X}", f.offset)).monospace());
-                    ui.label(&f.path);
-                    let arr = if f.count > 1 { format!("{}[{}]", f.ty.label(), f.count) } else { f.ty.label() };
-                    ui.label(RichText::new(arr).monospace());
-                    ui.label(RichText::new(format!("0x{:X}", f.size)).monospace());
+            egui::Grid::new("types_layout")
+                .num_columns(4)
+                .spacing([14.0, 2.0])
+                .show(ui, |ui| {
+                    ui.label(muted("offset"));
+                    ui.label(muted("name"));
+                    ui.label(muted("type"));
+                    ui.label(muted("size"));
                     ui.end_row();
-                }
-            });
+                    for f in &fields {
+                        ui.label(RichText::new(format!("+0x{:X}", f.offset)).monospace());
+                        ui.label(&f.path);
+                        let arr = if f.count > 1 {
+                            format!("{}[{}]", f.ty.label(), f.count)
+                        } else {
+                            f.ty.label()
+                        };
+                        ui.label(RichText::new(arr).monospace());
+                        ui.label(RichText::new(format!("0x{:X}", f.size)).monospace());
+                        ui.end_row();
+                    }
+                });
             if let Some(total) = probe.size_of(&TypeRef::Named(ty.name().to_owned())) {
                 ui.label(muted(format!("total size 0x{total:X} ({total} bytes)")));
             }
@@ -346,7 +368,9 @@ fn editor(
             }
         }
         None => {
-            ui.label(muted("layout unavailable (unknown or self-referential member)"));
+            ui.label(muted(
+                "layout unavailable (unknown or self-referential member)",
+            ));
         }
     }
     save
@@ -354,24 +378,27 @@ fn editor(
 
 fn fields_editor(ui: &mut Ui, draft: &mut Draft, names: &[String]) {
     let mut remove = None;
-    egui::Grid::new("types_fields").num_columns(5).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label(muted("name"));
-        ui.label(muted("type"));
-        ui.label(muted("ptr"));
-        ui.label(muted("count"));
-        ui.label("");
-        ui.end_row();
-        for (i, f) in draft.fields.iter_mut().enumerate() {
-            ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(120.0));
-            base_combo(ui, i, &mut f.base, names);
-            ui.checkbox(&mut f.pointer, "");
-            ui.add(egui::TextEdit::singleline(&mut f.count).desired_width(48.0));
-            if ui.small_button("✕").clicked() {
-                remove = Some(i);
-            }
+    egui::Grid::new("types_fields")
+        .num_columns(5)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label(muted("name"));
+            ui.label(muted("type"));
+            ui.label(muted("ptr"));
+            ui.label(muted("count"));
+            ui.label("");
             ui.end_row();
-        }
-    });
+            for (i, f) in draft.fields.iter_mut().enumerate() {
+                ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(120.0));
+                base_combo(ui, i, &mut f.base, names);
+                ui.checkbox(&mut f.pointer, "");
+                ui.add(egui::TextEdit::singleline(&mut f.count).desired_width(48.0));
+                if ui.small_button("✕").clicked() {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+        });
     if let Some(i) = remove
         && draft.fields.len() > 1
     {
@@ -388,26 +415,38 @@ fn enum_editor(ui: &mut Ui, draft: &mut Draft) {
         ComboBox::from_id_salt("enum_width")
             .selected_text(draft.enum_width.label())
             .show_ui(ui, |ui| {
-                for p in [Prim::U8, Prim::I8, Prim::U16, Prim::I16, Prim::U32, Prim::I32, Prim::U64, Prim::I64] {
+                for p in [
+                    Prim::U8,
+                    Prim::I8,
+                    Prim::U16,
+                    Prim::I16,
+                    Prim::U32,
+                    Prim::I32,
+                    Prim::U64,
+                    Prim::I64,
+                ] {
                     ui.selectable_value(&mut draft.enum_width, p, p.label());
                 }
             });
     });
     let mut remove = None;
-    egui::Grid::new("types_variants").num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label(muted("name"));
-        ui.label(muted("value"));
-        ui.label("");
-        ui.end_row();
-        for (i, (name, value)) in draft.variants.iter_mut().enumerate() {
-            ui.add(egui::TextEdit::singleline(name).desired_width(140.0));
-            ui.add(egui::TextEdit::singleline(value).desired_width(80.0));
-            if ui.small_button("✕").clicked() {
-                remove = Some(i);
-            }
+    egui::Grid::new("types_variants")
+        .num_columns(3)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label(muted("name"));
+            ui.label(muted("value"));
+            ui.label("");
             ui.end_row();
-        }
-    });
+            for (i, (name, value)) in draft.variants.iter_mut().enumerate() {
+                ui.add(egui::TextEdit::singleline(name).desired_width(140.0));
+                ui.add(egui::TextEdit::singleline(value).desired_width(80.0));
+                if ui.small_button("✕").clicked() {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+        });
     if let Some(i) = remove
         && draft.variants.len() > 1
     {
@@ -459,14 +498,11 @@ fn kind_word(kind: Kind) -> &'static str {
 
 /// Validates and writes the draft to the document, handling a rename (removing the old
 /// name). Returns the previous name if it changed.
-fn commit(
-    doc: &mut orress_project::Document,
-    draft: &Draft,
-) -> Result<Option<String>, String> {
+fn commit(doc: &mut orress_project::Document, draft: &Draft) -> Result<Option<String>, String> {
     let ty = draft.to_type();
     doc.define_type(ty)?;
-    let renamed = (!draft.orig.is_empty() && draft.orig != draft.name.trim())
-        .then(|| draft.orig.clone());
+    let renamed =
+        (!draft.orig.is_empty() && draft.orig != draft.name.trim()).then(|| draft.orig.clone());
     if let Some(old) = &renamed {
         doc.remove_type(old);
     }

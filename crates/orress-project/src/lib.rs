@@ -12,13 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub use annotations::{Annotations, validate_name};
-pub use types::{
-    FieldDef, FuncProto, LaidField, Prim, TypeCatalog, TypeRef, UserType, references,
-};
 pub use orress_analysis::Program;
 use orress_bytes::Endian;
 use orress_bytes::strings::FoundString;
 use orress_loaders::BinaryInfo;
+pub use types::{FieldDef, FuncProto, LaidField, Prim, TypeCatalog, TypeRef, UserType, references};
 
 /// Navigation history depth.
 const MAX_HISTORY: usize = 200;
@@ -324,9 +322,7 @@ impl Document {
     /// Defines or replaces a user type. Validated against the current catalog.
     pub fn define_type(&mut self, ty: UserType) -> Result<(), String> {
         self.type_catalog().validate(&ty)?;
-        self.annotations
-            .types
-            .insert(ty.name().to_owned(), ty);
+        self.annotations.types.insert(ty.name().to_owned(), ty);
         self.save_annotations();
         Ok(())
     }

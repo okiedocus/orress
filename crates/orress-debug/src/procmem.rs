@@ -108,8 +108,8 @@ pub fn memory_map(pid: u32) -> Result<Vec<MapRegion>, String> {
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION};
 
     // SAFETY: a standard query-only OpenProcess; fails cleanly on protected processes.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) }
-        .map_err(|e| e.message())?;
+    let handle =
+        unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) }.map_err(|e| e.message())?;
     let mut out = Vec::new();
     let mut addr: usize = 0;
     loop {

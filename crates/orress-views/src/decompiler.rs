@@ -815,7 +815,12 @@ fn build_hints(doc: &Document) -> orress_decompiler::types::TypeHints {
                 .filter(|f| f.count == 1)
                 .filter_map(|f| {
                     let (w, signed) = scalar_width(&catalog, &f.ty)?;
-                    Some((f.offset, orress_decompiler::ir::Width(w), signed, f.path.clone()))
+                    Some((
+                        f.offset,
+                        orress_decompiler::ir::Width(w),
+                        signed,
+                        f.path.clone(),
+                    ))
                 })
                 .collect();
             structs.push(dt::StructDef {
@@ -830,7 +835,9 @@ fn build_hints(doc: &Document) -> orress_decompiler::types::TypeHints {
         let params = proto
             .params
             .iter()
-            .map(|(_, t)| lower_ty(&catalog, t).unwrap_or(dt::Ty::Int(orress_decompiler::ir::Width(8), false)))
+            .map(|(_, t)| {
+                lower_ty(&catalog, t).unwrap_or(dt::Ty::Int(orress_decompiler::ir::Width(8), false))
+            })
             .collect();
         let ret = proto.ret.as_ref().and_then(|t| lower_ty(&catalog, t));
         prototypes.insert(addr, dt::Proto { ret, params });
@@ -890,11 +897,15 @@ fn lower_ty(
                     .filter(|f| f.count == 1)
                     .filter_map(|f| {
                         let (w, signed) = scalar_width(catalog, &f.ty)?;
-                        Some((f.offset, f.path.clone(), dt::Field {
-                            offset: f.offset,
-                            width: orress_decompiler::ir::Width(w),
-                            signed,
-                        }))
+                        Some((
+                            f.offset,
+                            f.path.clone(),
+                            dt::Field {
+                                offset: f.offset,
+                                width: orress_decompiler::ir::Width(w),
+                                signed,
+                            },
+                        ))
                     })
                     .collect::<Vec<_>>();
                 let field_names = fields.iter().map(|(o, n, _)| (*o, n.clone())).collect();

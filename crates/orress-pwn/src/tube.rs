@@ -77,7 +77,8 @@ impl Tube {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            lock.lock().unwrap_or_else(|e| e.into_inner())
+                            lock.lock()
+                                .unwrap_or_else(|e| e.into_inner())
                                 .data
                                 .extend_from_slice(&buf[..n]);
                             cv.notify_all();

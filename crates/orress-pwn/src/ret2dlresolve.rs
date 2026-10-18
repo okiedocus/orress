@@ -62,7 +62,10 @@ pub fn build(
 
     // Elf64_Rela { r_offset = got_target, r_info = (sym_index << 32) | R_JUMP_SLOT, r_addend = 0 }.
     put(rela_addr, &got_target.to_le_bytes());
-    put(rela_addr + 8, &((sym_index << 32) | R_JUMP_SLOT).to_le_bytes());
+    put(
+        rela_addr + 8,
+        &((sym_index << 32) | R_JUMP_SLOT).to_le_bytes(),
+    );
     // r_addend already zero.
     // Elf64_Sym { st_name, st_info = 0x12, st_other = 0, st_shndx = 0, st_value = 0, st_size = 0 }.
     put(sym_addr, &(st_name as u32).to_le_bytes());
@@ -91,7 +94,7 @@ mod tests {
         let rela_addr = write_to + p.reloc_index * ENT.wrapping_sub(0); // placeholder, recomputed below
         let _ = rela_addr;
         let rela_abs = rela_plt + p.reloc_index * ENT;
-        assert!(rela_abs >= write_to && (rela_abs - rela_plt) % ENT == 0);
+        assert!(rela_abs >= write_to && (rela_abs - rela_plt).is_multiple_of(ENT));
 
         let at = |addr: u64| -> u64 {
             let o = (addr - write_to) as usize;
@@ -104,7 +107,7 @@ mod tests {
         assert_eq!(r_info & 0xffff_ffff, R_JUMP_SLOT);
         let sym_index = r_info >> 32;
         let sym_addr = dynsym + sym_index * ENT;
-        assert!(sym_addr > rela_abs && (sym_addr - dynsym) % ENT == 0);
+        assert!(sym_addr > rela_abs && (sym_addr - dynsym).is_multiple_of(ENT));
 
         // Sym: st_info byte and st_name pointing into our string.
         let sym_o = (sym_addr - write_to) as usize;

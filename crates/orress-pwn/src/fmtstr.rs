@@ -90,7 +90,10 @@ mod tests {
             while i < fmt.len() && fmt[i].is_ascii_digit() {
                 i += 1;
             }
-            let num: usize = std::str::from_utf8(&fmt[start..i]).unwrap().parse().unwrap_or(0);
+            let num: usize = std::str::from_utf8(&fmt[start..i])
+                .unwrap()
+                .parse()
+                .unwrap_or(0);
             if i < fmt.len() && fmt[i] == b'c' {
                 printed += num as u32; // %<num>c prints num chars
                 seq += 1; // consumes one sequential arg
@@ -125,7 +128,12 @@ mod tests {
         let got = simulate(&payload, &args);
         // Every requested half-word must have been written correctly.
         for &(addr, value) in writes {
-            let hws = [value as u16, (value >> 16) as u16, (value >> 32) as u16, (value >> 48) as u16];
+            let hws = [
+                value as u16,
+                (value >> 16) as u16,
+                (value >> 32) as u16,
+                (value >> 48) as u16,
+            ];
             let top = (0..4).rev().find(|&k| hws[k] != 0).unwrap_or(0);
             for (k, &hw) in hws.iter().enumerate().take(top + 1) {
                 let a = addr + 2 * k as u64;

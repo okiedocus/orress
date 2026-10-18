@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use object::read::pe::{ImageNtHeaders, PeFile};
 use object::LittleEndian as LE;
+use object::read::pe::{ImageNtHeaders, PeFile};
 
 /// The biggest single item we will hold/extract (guards against a corrupt size field).
 const MAX_ITEM: usize = 256 * 1024 * 1024;
@@ -93,7 +93,13 @@ impl Resource {
         let safe: String = self
             .name
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         format!("{index:03}_{safe}.{}", self.ext)
     }
@@ -208,7 +214,9 @@ fn pe_items<Pe: ImageNtHeaders>(
             continue;
         }
         image_end = image_end.max(u64::from(off) + u64::from(size));
-        let name = String::from_utf8_lossy(&section.name).trim_end_matches('\0').to_string();
+        let name = String::from_utf8_lossy(&section.name)
+            .trim_end_matches('\0')
+            .to_string();
         if let Some(bytes) = data.get(off as usize..(off as usize).saturating_add(size as usize)) {
             out.push(Resource::new(
                 ResourceKind::Section,
@@ -312,7 +320,9 @@ fn emit_resource(
 /// Wraps a single RT_ICON image (a DIB or PNG) in a one-image `.ico` container.
 fn wrap_icon(payload: &[u8]) -> Vec<u8> {
     let (mut w, mut h, mut bits) = (0u8, 0u8, 0u16);
-    if payload.len() >= 40 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == 40 {
+    if payload.len() >= 40
+        && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == 40
+    {
         let biw = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
         let bih = i32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
         bits = u16::from_le_bytes([payload[14], payload[15]]);
@@ -419,20 +429,76 @@ struct Sig {
 }
 
 const SIGS: &[Sig] = &[
-    Sig { magic: b"\x89PNG\r\n\x1a\n", ext: "png", name: "png" },
-    Sig { magic: b"\xff\xd8\xff", ext: "jpg", name: "jpeg" },
-    Sig { magic: b"GIF87a", ext: "gif", name: "gif" },
-    Sig { magic: b"GIF89a", ext: "gif", name: "gif" },
-    Sig { magic: b"BM", ext: "bmp", name: "bmp" },
-    Sig { magic: b"RIFF", ext: "wav", name: "riff" },
-    Sig { magic: b"PK\x03\x04", ext: "zip", name: "zip" },
-    Sig { magic: b"\x1f\x8b\x08", ext: "gz", name: "gzip" },
-    Sig { magic: b"%PDF", ext: "pdf", name: "pdf" },
-    Sig { magic: b"7z\xbc\xaf\x27\x1c", ext: "7z", name: "7z" },
-    Sig { magic: b"Rar!\x1a\x07", ext: "rar", name: "rar" },
-    Sig { magic: b"OggS", ext: "ogg", name: "ogg" },
-    Sig { magic: b"fLaC", ext: "flac", name: "flac" },
-    Sig { magic: b"\x25\x21PS", ext: "ps", name: "postscript" },
+    Sig {
+        magic: b"\x89PNG\r\n\x1a\n",
+        ext: "png",
+        name: "png",
+    },
+    Sig {
+        magic: b"\xff\xd8\xff",
+        ext: "jpg",
+        name: "jpeg",
+    },
+    Sig {
+        magic: b"GIF87a",
+        ext: "gif",
+        name: "gif",
+    },
+    Sig {
+        magic: b"GIF89a",
+        ext: "gif",
+        name: "gif",
+    },
+    Sig {
+        magic: b"BM",
+        ext: "bmp",
+        name: "bmp",
+    },
+    Sig {
+        magic: b"RIFF",
+        ext: "wav",
+        name: "riff",
+    },
+    Sig {
+        magic: b"PK\x03\x04",
+        ext: "zip",
+        name: "zip",
+    },
+    Sig {
+        magic: b"\x1f\x8b\x08",
+        ext: "gz",
+        name: "gzip",
+    },
+    Sig {
+        magic: b"%PDF",
+        ext: "pdf",
+        name: "pdf",
+    },
+    Sig {
+        magic: b"7z\xbc\xaf\x27\x1c",
+        ext: "7z",
+        name: "7z",
+    },
+    Sig {
+        magic: b"Rar!\x1a\x07",
+        ext: "rar",
+        name: "rar",
+    },
+    Sig {
+        magic: b"OggS",
+        ext: "ogg",
+        name: "ogg",
+    },
+    Sig {
+        magic: b"fLaC",
+        ext: "flac",
+        name: "flac",
+    },
+    Sig {
+        magic: b"\x25\x21PS",
+        ext: "ps",
+        name: "postscript",
+    },
 ];
 
 fn carve(data: &[u8], covered: &[(usize, usize)], out: &mut Vec<Resource>) {
@@ -475,12 +541,16 @@ fn carve_end(sig: &Sig, data: &[u8], pos: usize) -> Option<usize> {
         "jpg" => memchr::memmem::find(&rest[2..], b"\xff\xd9").map(|i| pos + 2 + i + 2),
         "pdf" => rfind(rest, b"%%EOF").map(|i| pos + i + 5),
         "gif" => rest.iter().position(|&b| b == 0x3b).map(|i| pos + i + 1),
-        "bmp" => read_u32(rest, 2).map(|n| pos + n as usize).filter(|&e| e <= data.len()),
+        "bmp" => read_u32(rest, 2)
+            .map(|n| pos + n as usize)
+            .filter(|&e| e <= data.len()),
         "wav" => {
             if rest.len() < 12 || &rest[8..12] != b"WAVE" {
                 return None;
             }
-            read_u32(rest, 4).map(|n| pos + 8 + n as usize).filter(|&e| e <= data.len())
+            read_u32(rest, 4)
+                .map(|n| pos + 8 + n as usize)
+                .filter(|&e| e <= data.len())
         }
         "zip" => zip_end(rest).map(|n| pos + n),
         _ => Some((pos + CARVE_FALLBACK).min(data.len())),
@@ -499,7 +569,8 @@ fn rfind(hay: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn read_u16(data: &[u8], at: usize) -> Option<u16> {
-    data.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]))
+    data.get(at..at + 2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
 }
 
 fn read_u32(data: &[u8], at: usize) -> Option<u32> {
@@ -544,7 +615,10 @@ mod tests {
         let png = out.iter().find(|r| r.ext == "png").expect("png carved");
         assert_eq!(png.offset, Some(png_start as u64));
         assert_eq!(png.data.len(), after_png - png_start);
-        assert!(out.iter().any(|r| r.ext == "zip" && r.offset == Some(zip_start as u64)));
+        assert!(
+            out.iter()
+                .any(|r| r.ext == "zip" && r.offset == Some(zip_start as u64))
+        );
     }
 
     #[test]
@@ -560,7 +634,13 @@ mod tests {
     fn write_all_writes_files_and_manifest() {
         let dir = std::env::temp_dir().join(format!("orress-res-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let res = vec![Resource::new(ResourceKind::Embedded, "png_0", "png", Some(0), vec![1, 2, 3])];
+        let res = vec![Resource::new(
+            ResourceKind::Embedded,
+            "png_0",
+            "png",
+            Some(0),
+            vec![1, 2, 3],
+        )];
         let written = write_all(&res, &dir).expect("write");
         assert_eq!(written.len(), 1);
         assert!(dir.join("export_manifest.txt").exists());

@@ -22,7 +22,11 @@ pub struct ResourcesView {
 
 impl ResourcesView {
     fn ensure(&mut self, path: &Path, generation: u64, bytes: &[u8]) {
-        if self.doc.as_ref().is_some_and(|(p, g)| p == path && *g == generation) {
+        if self
+            .doc
+            .as_ref()
+            .is_some_and(|(p, g)| p == path && *g == generation)
+        {
             return;
         }
         self.items = orress_resources::extract(bytes);
@@ -41,7 +45,9 @@ pub fn resources_view(
     orress_ui::spotlight::mark(ui.ctx(), "view.Resources", ui.max_rect());
     ui.horizontal(|ui| {
         ui.label(RichText::new("Resources").strong());
-        ui.label(muted("icons · manifest · version · embedded files · sections · overlay"));
+        ui.label(muted(
+            "icons · manifest · version · embedded files · sections · overlay",
+        ));
     });
     ui.separator();
 
@@ -133,7 +139,9 @@ pub fn resources_view(
                 for i in indices {
                     let r = &view.items[i];
                     let detail = match r.offset {
-                        Some(o) => format!("{}  ·  {}  ·  0x{o:x}", r.ext, human_size(r.data.len())),
+                        Some(o) => {
+                            format!("{}  ·  {}  ·  0x{o:x}", r.ext, human_size(r.data.len()))
+                        }
                         None => format!("{}  ·  {}", r.ext, human_size(r.data.len())),
                     };
                     ui.horizontal(|ui| {

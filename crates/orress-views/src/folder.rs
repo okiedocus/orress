@@ -171,7 +171,17 @@ fn is_executable(path: &Path) -> bool {
             .map(str::to_ascii_lowercase)
             .as_deref(),
         Some(
-            "exe" | "dll" | "sys" | "ocx" | "scr" | "cpl" | "efi" | "mui" | "node" | "drv" | "ax"
+            "exe"
+                | "dll"
+                | "sys"
+                | "ocx"
+                | "scr"
+                | "cpl"
+                | "efi"
+                | "mui"
+                | "node"
+                | "drv"
+                | "ax"
                 | "tsp"
         )
     )

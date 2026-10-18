@@ -395,7 +395,11 @@ impl OrressApp {
         if !path.exists()
             && let Err(e) = std::fs::write(&path, "")
         {
-            self.notify(ctx, format!("Could not create {}: {e}", path.display()), true);
+            self.notify(
+                ctx,
+                format!("Could not create {}: {e}", path.display()),
+                true,
+            );
             return;
         }
         self.open_file(path);
@@ -628,9 +632,11 @@ impl OrressApp {
                 {
                     match std::fs::create_dir_all(&path) {
                         Ok(()) => self.open_folder(path),
-                        Err(e) => {
-                            self.notify(ctx, format!("Could not create {}: {e}", path.display()), true)
-                        }
+                        Err(e) => self.notify(
+                            ctx,
+                            format!("Could not create {}: {e}", path.display()),
+                            true,
+                        ),
                     }
                 }
             }

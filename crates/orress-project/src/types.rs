@@ -363,10 +363,19 @@ impl TypeCatalog {
                     self.resolve_ref(&f.ty)?;
                 }
             }
-            UserType::Enum { variants, width, .. } => {
+            UserType::Enum {
+                variants, width, ..
+            } => {
                 if !matches!(
                     width,
-                    Prim::U8 | Prim::I8 | Prim::U16 | Prim::I16 | Prim::U32 | Prim::I32 | Prim::U64 | Prim::I64
+                    Prim::U8
+                        | Prim::I8
+                        | Prim::U16
+                        | Prim::I16
+                        | Prim::U32
+                        | Prim::I32
+                        | Prim::U64
+                        | Prim::I64
                 ) {
                     return Err("enum underlying type must be an integer".into());
                 }
@@ -390,7 +399,10 @@ impl TypeCatalog {
         // A by-value cycle makes the size unresolvable; catch it with the type in place.
         let mut probe = self.clone();
         probe.types.insert(ty.name().to_owned(), ty.clone());
-        if probe.size_of(&TypeRef::Named(ty.name().to_owned())).is_none() {
+        if probe
+            .size_of(&TypeRef::Named(ty.name().to_owned()))
+            .is_none()
+        {
             return Err("this type refers to itself by value (use a pointer instead)".into());
         }
         Ok(())
@@ -436,12 +448,19 @@ mod tests {
     use super::*;
 
     fn cat(types: Vec<UserType>, bits: Option<u8>) -> TypeCatalog {
-        let map = types.into_iter().map(|t| (t.name().to_owned(), t)).collect();
+        let map = types
+            .into_iter()
+            .map(|t| (t.name().to_owned(), t))
+            .collect();
         TypeCatalog::new(map, bits)
     }
 
     fn field(name: &str, ty: TypeRef, count: u64) -> FieldDef {
-        FieldDef { name: name.into(), ty, count }
+        FieldDef {
+            name: name.into(),
+            ty,
+            count,
+        }
     }
 
     #[test]
@@ -503,7 +522,11 @@ mod tests {
             name: "Node".into(),
             fields: vec![
                 field("val", TypeRef::Prim(Prim::I32), 1),
-                field("next", TypeRef::Pointer(Box::new(TypeRef::Named("Node".into()))), 1),
+                field(
+                    "next",
+                    TypeRef::Pointer(Box::new(TypeRef::Named("Node".into()))),
+                    1,
+                ),
             ],
         };
         let c = cat(vec![node.clone()], Some(64));

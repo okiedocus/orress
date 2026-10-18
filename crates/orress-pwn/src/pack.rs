@@ -66,7 +66,10 @@ mod tests {
     fn pack_round_trips() {
         assert_eq!(p64(0x0102030405060708), vec![8, 7, 6, 5, 4, 3, 2, 1]); // little-endian
         assert_eq!(p32(0xdeadbeef), vec![0xef, 0xbe, 0xad, 0xde]);
-        assert_eq!(pack(0xdeadbeef, 4, Endian::Big), vec![0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            pack(0xdeadbeef, 4, Endian::Big),
+            vec![0xde, 0xad, 0xbe, 0xef]
+        );
         assert_eq!(u64v(&p64(0x1122334455667788)), 0x1122334455667788);
         assert_eq!(u32v(&[0xef, 0xbe, 0xad, 0xde]), 0xdeadbeef);
         assert_eq!(unpack(&[0xde, 0xad, 0xbe, 0xef], Endian::Big), 0xdeadbeef);

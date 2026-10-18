@@ -16,8 +16,8 @@ pub fn demangle(name: &str) -> Option<String> {
     }
     // MSVC C++ (`?` prefix).
     if name.starts_with('?') {
-        let flags = msvc_demangler::DemangleFlags::COMPLETE
-            | msvc_demangler::DemangleFlags::NO_MS_KEYWORDS;
+        let flags =
+            msvc_demangler::DemangleFlags::COMPLETE | msvc_demangler::DemangleFlags::NO_MS_KEYWORDS;
         if let Ok(s) = msvc_demangler::demangle(name, flags)
             && s != name
         {

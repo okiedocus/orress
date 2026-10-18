@@ -164,7 +164,8 @@ impl Emulator {
     /// Writes 16 bytes little-endian (an XMM-width memory store).
     fn write128(&mut self, addr: u64, val: u128) -> Result<(), EmuError> {
         self.mem.write(addr, val as u64, 8)?;
-        self.mem.write(addr.wrapping_add(8), (val >> 64) as u64, 8)?;
+        self.mem
+            .write(addr.wrapping_add(8), (val >> 64) as u64, 8)?;
         Ok(())
     }
 

@@ -36,7 +36,7 @@ fn reg_offset(name: &str) -> Option<usize> {
     })
 }
 
-/// Builds a sigreturn frame with the given registers set (names as in [`reg_offset`]); unset
+/// Builds a sigreturn frame with the given registers set (names as in `reg_offset`); unset
 /// registers are zero, except `csgsfs` which defaults to `0x33`.
 pub fn sigreturn_frame(regs: &BTreeMap<String, u64>) -> Vec<u8> {
     let mut frame = vec![0u8; FRAME_LEN];
