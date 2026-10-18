@@ -4128,7 +4128,7 @@ dependencies = [
 
 [[package]]
 name = "orress"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4153,7 +4153,7 @@ dependencies = [
 
 [[package]]
 name = "orress-academy"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "egui_commonmark",
@@ -4167,7 +4167,7 @@ dependencies = [
 
 [[package]]
 name = "orress-actions"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "serde",
@@ -4177,7 +4177,7 @@ dependencies = [
 
 [[package]]
 name = "orress-ai"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "orress-analysis"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "object 0.40.0",
  "orress-arch",
@@ -4196,7 +4196,7 @@ dependencies = [
 
 [[package]]
 name = "orress-arch"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
  "yaxpeax-arch",
@@ -4205,28 +4205,28 @@ dependencies = [
 
 [[package]]
 name = "orress-archive"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "miniz_oxide 0.9.1",
 ]
 
 [[package]]
 name = "orress-asm"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
 ]
 
 [[package]]
 name = "orress-bytes"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "orress-challenge"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "orress-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4251,7 +4251,7 @@ dependencies = [
 
 [[package]]
 name = "orress-collab"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "orress-ctf"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4272,7 +4272,7 @@ dependencies = [
 
 [[package]]
 name = "orress-dap"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4280,7 +4280,7 @@ dependencies = [
 
 [[package]]
 name = "orress-debug"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "nix 0.29.0",
  "windows 0.59.0",
@@ -4288,7 +4288,7 @@ dependencies = [
 
 [[package]]
 name = "orress-decompiler"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
  "orress-analysis",
@@ -4300,11 +4300,11 @@ dependencies = [
 
 [[package]]
 name = "orress-dex"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "orress-diff"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "orress-analysis",
  "orress-arch",
@@ -4313,11 +4313,11 @@ dependencies = [
 
 [[package]]
 name = "orress-dotnet"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "orress-editor"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ropey",
  "tree-sitter",
@@ -4330,14 +4330,14 @@ dependencies = [
 
 [[package]]
 name = "orress-emu"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
 ]
 
 [[package]]
 name = "orress-ext"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flate2",
  "orress-archive",
@@ -4355,15 +4355,15 @@ dependencies = [
 
 [[package]]
 name = "orress-java"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "orress-js"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "orress-loaders"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "md-5 0.11.0",
  "memchr",
@@ -4375,7 +4375,7 @@ dependencies = [
 
 [[package]]
 name = "orress-lsp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "lsp-types",
  "serde",
@@ -4384,7 +4384,7 @@ dependencies = [
 
 [[package]]
 name = "orress-mcp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "orress-analysis",
  "orress-archive",
@@ -4405,7 +4405,7 @@ dependencies = [
 
 [[package]]
 name = "orress-project"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "orress-analysis",
  "orress-bytes",
@@ -4417,11 +4417,11 @@ dependencies = [
 
 [[package]]
 name = "orress-pyc"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "orress-relay"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "orress-collab",
  "tungstenite",
@@ -4429,7 +4429,7 @@ dependencies = [
 
 [[package]]
 name = "orress-resources"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "memchr",
  "object 0.40.0",
@@ -4437,7 +4437,7 @@ dependencies = [
 
 [[package]]
 name = "orress-sandbox"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ferrisetw",
  "nix 0.29.0",
@@ -4446,7 +4446,7 @@ dependencies = [
 
 [[package]]
 name = "orress-script"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "orress-analysis",
  "orress-arch",
@@ -4456,7 +4456,7 @@ dependencies = [
 
 [[package]]
 name = "orress-settings"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -4467,7 +4467,7 @@ dependencies = [
 
 [[package]]
 name = "orress-sym"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
  "orress-emu",
@@ -4475,7 +4475,7 @@ dependencies = [
 
 [[package]]
 name = "orress-term"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "portable-pty",
@@ -4484,7 +4484,7 @@ dependencies = [
 
 [[package]]
 name = "orress-theme"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "serde",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "orress-transforms"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "aes",
  "md-5 0.11.0",
@@ -4505,7 +4505,7 @@ dependencies = [
 
 [[package]]
 name = "orress-triage"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "fuzzyhash",
  "orress-loaders",
@@ -4519,7 +4519,7 @@ dependencies = [
 
 [[package]]
 name = "orress-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "nucleo-matcher",
@@ -4528,7 +4528,7 @@ dependencies = [
 
 [[package]]
 name = "orress-views"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "egui_extras",
@@ -4577,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "orress-vm"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "iced-x86",
  "orress-analysis",
@@ -4588,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "orress-wasm"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "wasm-encoder 0.236.1",
  "wasmparser 0.236.1",
@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "orress-workspace"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "egui",
  "egui_dock",

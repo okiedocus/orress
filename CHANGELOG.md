@@ -6,6 +6,35 @@ All notable changes to ORRESS are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-18
+
+### Added
+
+- **Project folders** (Zed-style): **File > New Project…** and **Open Project…** root the app at a
+  folder, restored on startup. A lazy folder tree sits at the top of the left panel (the open-files
+  and analysis-views list stays below it); click a file to open it, right-click to reveal it in the
+  OS, make a notes file, or extract an executable's resources.
+- **Resource extractor** (new `orress-resources` crate and **Resources** tab): pull native Win32
+  resources (icons rebuilt as `.ico`, bitmaps as `.bmp`, manifest, version info, string tables,
+  RCDATA), embedded files found by magic-byte signature (PNG/JPEG/GIF/BMP/WAV/ZIP/GZIP/PDF/…), every
+  PE section, and overlay data out of a binary, saved into the project folder.
+- **Disassembly and decompiler search** (Ctrl+F, F3 / Shift+F3) and right-click menus in the code
+  views exposing every action and view.
+- **ORRESS Academy, rewritten for beginners**: a full course that assumes only basic Rust, with a
+  glossary, per-step goals, "do this" instructions and explained multiple-choice. Level 3 (dynamic
+  analysis) is complete — the debugger, breakpoints and stepping, reading and changing a running
+  program, patching, emulation and beating anti-debugging — and the course now spans 560 steps.
+
+### Changed
+
+- The **emulator** now models the common SSE2 subset (movdqu/movdqa, pxor/xorps, pcmpeqb,
+  pmovmskb, movd/movq, …), so the fixed-length byte comparisons Rust compiles to SIMD now emulate.
+- The **Challenge Workbench** bundles its own `challenge-kit`, vendored into each scaffolded
+  challenge so it builds offline with no external repository; a Built-in / External toggle keeps the
+  escape hatch for a custom checkout.
+- The **debugger** can be started again after a program ends, and the CPU simulator shows r8–r15
+  when a program uses them.
+
 ## [1.0.0] - 2026-10-14
 
 The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering Software Suite.
@@ -53,5 +82,6 @@ The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering S
 - Dependencies are checked by `cargo deny` (RustSec advisories, licenses, sources) on every push
   and daily.
 
-[Unreleased]: https://github.com/okiedocus/orress/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/okiedocus/orress/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/okiedocus/orress/releases/tag/v1.1.0
 [1.0.0]: https://github.com/okiedocus/orress/releases/tag/v1.0.0
