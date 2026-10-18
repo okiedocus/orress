@@ -40,10 +40,36 @@ impl Default for Meta {
     }
 }
 
-/// The default source of the `challenge-kit` dependency used by a scaffolded project. A git URL so a
-/// freshly scaffolded project builds anywhere; override with a local path if you have the CTF repo
-/// checked out (faster, offline).
-pub const DEFAULT_KIT_SOURCE: &str = "git = \"https://github.com/okiedocus/capture_the_flag\"";
+/// The bundled `challenge-kit` library source, vendored into a scaffolded project so it builds
+/// offline, with no dependency on the (private) CTF platform repository.
+const KIT_LIB_RS: &str = include_str!("../kit/lib.rs");
+/// The bundled `challenge-kit` manifest (named `.in` so it is not itself a cargo manifest).
+const KIT_CARGO_TOML: &str = include_str!("../kit/Cargo.toml.in");
+
+/// The `challenge-kit` dependency spec body for a project that uses the vendored built-in kit.
+pub const BUILTIN_KIT_DEP: &str = "path = \"challenge-kit\"";
+
+/// Where a scaffolded challenge gets its `challenge-kit` dependency.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum KitSource {
+    /// Vendor the bundled kit into the project (a `challenge-kit/` subfolder) and depend on it by
+    /// path. Self-contained and offline; the default.
+    #[default]
+    BuiltIn,
+    /// A custom Cargo dependency spec body, e.g. `git = "https://…"` or `path = "../checkout"`,
+    /// for authors who keep their own `challenge-kit` checkout.
+    External(String),
+}
+
+impl KitSource {
+    /// The dependency spec body to write into the project's `Cargo.toml`.
+    fn dep_spec(&self) -> &str {
+        match self {
+            Self::BuiltIn => BUILTIN_KIT_DEP,
+            Self::External(s) => s,
+        }
+    }
+}
 
 /// The generated `main.rs` for a challenge, pre-filled from `meta`.
 pub fn template(meta: &Meta) -> String {
@@ -89,9 +115,11 @@ fn main() {{
     )
 }
 
-/// The generated `Cargo.toml` for a scaffolded challenge. `kit_source` is the dependency spec body
-/// for `challenge-kit` (e.g. [`DEFAULT_KIT_SOURCE`] or `path = "..."`).
-pub fn cargo_toml(kit_source: &str) -> String {
+/// The generated `Cargo.toml` for a scaffolded challenge. `kit_dep` is the dependency spec body
+/// for `challenge-kit` (e.g. [`BUILTIN_KIT_DEP`] or `git = "..."`). The empty `[workspace]` table
+/// makes the project its own workspace root, so it builds the same wherever it is placed (and the
+/// vendored `challenge-kit` path dependency resolves without joining a surrounding workspace).
+pub fn cargo_toml(kit_dep: &str) -> String {
     format!(
         r#"[package]
 name = "challenge"
@@ -103,25 +131,45 @@ name = "challenge"
 path = "src/main.rs"
 
 [dependencies]
-challenge-kit = {{ {kit_source} }}
+challenge-kit = {{ {kit_dep} }}
+
+[workspace]
 "#
     )
 }
 
-/// Scaffolds a challenge project at `dir`: `Cargo.toml`, `src/main.rs` (from the template) and a
-/// `challenge.toml` snapshot of the metadata. Returns the path to `src/main.rs` (open it in the
-/// editor). Does not overwrite an existing `src/main.rs`.
-pub fn scaffold(dir: &Path, meta: &Meta, kit_source: &str) -> Result<PathBuf, String> {
+/// Scaffolds a challenge project at `dir`: `Cargo.toml`, `src/main.rs` (from the template), a
+/// `challenge.json` snapshot of the metadata, and — when `kit` is [`KitSource::BuiltIn`] — a
+/// vendored `challenge-kit/` so the project builds offline. Returns the path to `src/main.rs`
+/// (open it in the editor). Does not overwrite an existing `src/main.rs`.
+pub fn scaffold(dir: &Path, meta: &Meta, kit: &KitSource) -> Result<PathBuf, String> {
     let src_dir = dir.join("src");
     std::fs::create_dir_all(&src_dir)
         .map_err(|e| format!("could not create {}: {e}", src_dir.display()))?;
-    write_if_absent(&dir.join("Cargo.toml"), &cargo_toml(kit_source))?;
+    write_if_absent(&dir.join("Cargo.toml"), &cargo_toml(kit.dep_spec()))?;
+    if *kit == KitSource::BuiltIn {
+        vendor_kit(dir)?;
+    }
     let main_rs = src_dir.join("main.rs");
     write_if_absent(&main_rs, &template(meta))?;
     // A metadata snapshot, for reference / re-submission.
     let meta_json = serde_json::to_string_pretty(meta).unwrap_or_default();
     let _ = std::fs::write(dir.join("challenge.json"), meta_json);
     Ok(main_rs)
+}
+
+/// Writes the bundled `challenge-kit` into `dir/challenge-kit/`, overwriting it so the vendored
+/// copy always matches this build of ORRESS.
+fn vendor_kit(dir: &Path) -> Result<(), String> {
+    let kit_dir = dir.join("challenge-kit");
+    let kit_src = kit_dir.join("src");
+    std::fs::create_dir_all(&kit_src)
+        .map_err(|e| format!("could not create {}: {e}", kit_src.display()))?;
+    std::fs::write(kit_dir.join("Cargo.toml"), KIT_CARGO_TOML)
+        .map_err(|e| format!("could not write the kit manifest: {e}"))?;
+    std::fs::write(kit_src.join("lib.rs"), KIT_LIB_RS)
+        .map_err(|e| format!("could not write the kit source: {e}"))?;
+    Ok(())
 }
 
 fn write_if_absent(path: &Path, contents: &str) -> Result<(), String> {
@@ -251,24 +299,49 @@ mod tests {
     }
 
     #[test]
-    fn cargo_toml_has_the_kit_dependency() {
-        let toml = cargo_toml(DEFAULT_KIT_SOURCE);
-        assert!(toml.contains("challenge-kit = {"));
-        assert!(toml.contains("capture_the_flag"));
+    fn cargo_toml_uses_the_chosen_kit_dependency() {
+        let builtin = cargo_toml(KitSource::BuiltIn.dep_spec());
+        assert!(builtin.contains("challenge-kit = {"));
+        assert!(builtin.contains(r#"path = "challenge-kit""#));
+        assert!(builtin.contains("[workspace]"));
+        // No stray reference to the private platform repo.
+        assert!(!builtin.contains("capture_the_flag"));
+
+        let external = cargo_toml(KitSource::External(r#"git = "https://x/y""#.into()).dep_spec());
+        assert!(external.contains(r#"git = "https://x/y""#));
     }
 
     #[test]
-    fn scaffold_writes_a_buildable_project_layout() {
+    fn builtin_scaffold_vendors_the_kit_offline() {
         let dir = std::env::temp_dir().join(format!("orress-cw-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let meta = Meta::default();
-        let main = scaffold(&dir, &meta, DEFAULT_KIT_SOURCE).expect("scaffold");
+        let main = scaffold(&dir, &meta, &KitSource::BuiltIn).expect("scaffold");
         assert!(main.ends_with("main.rs"));
         assert!(dir.join("Cargo.toml").exists());
         assert!(dir.join("src/main.rs").exists());
         assert!(dir.join("challenge.json").exists());
+        // The kit is vendored in, so the project needs no external repo to build.
+        let kit_lib = dir.join("challenge-kit/src/lib.rs");
+        assert!(dir.join("challenge-kit/Cargo.toml").exists());
+        assert!(kit_lib.exists());
+        let kit = std::fs::read_to_string(&kit_lib).unwrap();
+        assert!(kit.contains("pub trait Challenge"));
+        assert!(kit.contains("pub fn assigned_id()"));
         let src = std::fs::read_to_string(&main).unwrap();
         assert!(src.contains("challenge_kit::assigned_id()"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_scaffold_does_not_vendor_the_kit() {
+        let dir = std::env::temp_dir().join(format!("orress-cw-ext-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let kit = KitSource::External(r#"path = "../my-kit""#.into());
+        scaffold(&dir, &Meta::default(), &kit).expect("scaffold");
+        let toml = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(toml.contains(r#"path = "../my-kit""#));
+        assert!(!dir.join("challenge-kit").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

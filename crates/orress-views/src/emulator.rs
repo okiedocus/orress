@@ -88,7 +88,9 @@ impl JobKind {
 /// What a finished job produced.
 enum JobOutput {
     Run(RunReport),
-    Record(Result<Trace, String>),
+    // The trace is boxed: a `Trace` carries a CPU snapshot (now including the 128-bit SSE
+    // registers), so it dwarfs the other variants if stored inline.
+    Record(Result<Box<Trace>, String>),
     Solve(SolveReport),
     Sym(SymReport),
 }
@@ -140,6 +142,7 @@ impl EmulatorView {
         match out {
             JobOutput::Run(r) => self.run = Some(r),
             JobOutput::Record(Ok(t)) => {
+                let t = *t;
                 self.scrub = t.len().saturating_sub(1);
                 self.trace = Some(t);
                 self.trace_error = None;
@@ -195,7 +198,7 @@ fn start(view: &mut EmulatorView, ctx: &egui::Context, program: &Arc<Program>, k
 fn run_job(kind: JobKind, params: &Params, program: &Program, cancel: &AtomicBool) -> JobOutput {
     match kind {
         JobKind::Run => JobOutput::Run(run_once(params, program)),
-        JobKind::Record => JobOutput::Record(record_once(params, program)),
+        JobKind::Record => JobOutput::Record(record_once(params, program).map(Box::new)),
         JobKind::Solve => JobOutput::Solve(solve_once(params, program, cancel)),
         JobKind::Symbolic => JobOutput::Sym(symbolic_solve_once(params, program)),
         JobKind::AutoVm => JobOutput::Sym(auto_vm_solve(program)),

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use egui::Ui;
-use orress_challenge::{DEFAULT_KIT_SOURCE, Meta};
+use orress_challenge::{KitSource, Meta};
 use orress_ui::muted;
 
 use crate::RunConsole;
@@ -30,6 +30,9 @@ pub struct ChallengeWorkbenchView {
     hints_text: String,
     project_dir: Option<PathBuf>,
     main_rs: Option<PathBuf>,
+    /// Use the bundled, offline `challenge-kit` (true) or a custom dependency (false).
+    use_builtin_kit: bool,
+    /// The custom `challenge-kit` dependency spec, used when `use_builtin_kit` is false.
     kit_source: String,
     site_url: String,
     username: String,
@@ -47,7 +50,8 @@ impl Default for ChallengeWorkbenchView {
             hints_text: String::new(),
             project_dir: None,
             main_rs: None,
-            kit_source: DEFAULT_KIT_SOURCE.to_string(),
+            use_builtin_kit: true,
+            kit_source: String::new(),
             site_url: "https://ctf.okiedocus.nl".to_string(),
             username: String::new(),
             password: String::new(),
@@ -167,9 +171,28 @@ pub fn challenge_workbench(
             ui.heading("2 · Write the logic");
             ui.horizontal(|ui| {
                 ui.label("challenge-kit:");
-                ui.add(egui::TextEdit::singleline(&mut view.kit_source).desired_width(360.0))
-                    .on_hover_text("Cargo dependency for challenge-kit (git URL, or path = \"...\" for a local checkout)");
+                ui.radio_value(&mut view.use_builtin_kit, true, "Built-in")
+                    .on_hover_text(
+                        "Use the challenge-kit bundled with ORRESS. It is vendored into the project, \
+                         so it builds offline with no external repository.",
+                    );
+                ui.radio_value(&mut view.use_builtin_kit, false, "External")
+                    .on_hover_text("Depend on your own challenge-kit checkout instead.");
             });
+            if !view.use_builtin_kit {
+                ui.horizontal(|ui| {
+                    ui.label("    dependency:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut view.kit_source)
+                            .desired_width(360.0)
+                            .hint_text(r#"git = "https://…"  or  path = "../checkout""#),
+                    )
+                    .on_hover_text(
+                        "A Cargo dependency spec body for challenge-kit, e.g. \
+                         git = \"https://github.com/you/challenge-kit\" or path = \"../checkout\".",
+                    );
+                });
+            }
             ui.horizontal(|ui| {
                 if ui
                     .button("Scaffold & open in editor")
@@ -180,7 +203,12 @@ pub fn challenge_workbench(
                         .pick_folder()
                 {
                     view.sync_hints();
-                    match orress_challenge::scaffold(&dir, &view.meta, &view.kit_source) {
+                    let kit = if view.use_builtin_kit {
+                        KitSource::BuiltIn
+                    } else {
+                        KitSource::External(view.kit_source.clone())
+                    };
+                    match orress_challenge::scaffold(&dir, &view.meta, &kit) {
                         Ok(main) => {
                             view.project_dir = Some(dir);
                             open_requests.push(main.clone());

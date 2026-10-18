@@ -1,0 +1,9 @@
+# Vendored by the ORRESS Challenge Workbench: a local, offline copy of the CTF platform's
+# challenge-kit so your challenge builds and runs without the platform repository. The platform
+# rebuilds your check() against its own kit when you submit. Do not edit; the Workbench
+# overwrites this on the next scaffold.
+[package]
+name = "challenge-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
