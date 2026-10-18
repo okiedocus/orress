@@ -35,8 +35,14 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          binary. You can also drag a file onto the window.",
     )
     .register(
-        "workspace::OpenFolder",
-        "Open Folder…",
+        "workspace::NewProject",
+        "New Project…",
+        "Create a new project folder and open it: one folder to hold a target's binary, source, \
+         notes, patches and extracted resources, shown as a tree in the left panel.",
+    )
+    .register(
+        "workspace::OpenProject",
+        "Open Project…",
         "Open a project folder: its files and subfolders show as a tree in the left panel, so one \
          folder can hold a target's binary, source, notes, patches and extracted resources.",
     )

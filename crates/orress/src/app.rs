@@ -604,12 +604,26 @@ impl OrressApp {
                     }
                 }
             }
-            "workspace::OpenFolder" => {
+            "workspace::OpenProject" => {
                 if let Some(dir) = rfd::FileDialog::new()
                     .set_title("Open a project folder")
                     .pick_folder()
                 {
                     self.open_folder(dir);
+                }
+            }
+            "workspace::NewProject" => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("New project folder")
+                    .set_file_name("new-project")
+                    .save_file()
+                {
+                    match std::fs::create_dir_all(&path) {
+                        Ok(()) => self.open_folder(path),
+                        Err(e) => {
+                            self.notify(ctx, format!("Could not create {}: {e}", path.display()), true)
+                        }
+                    }
                 }
             }
             "file::NewFile" => self.workspace.open(TabKind::Editor {
@@ -883,8 +897,9 @@ impl OrressApp {
         egui::Panel::top("orress::menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    self.menu_entry(ui, "workspace::NewProject", &mut clicked);
+                    self.menu_entry(ui, "workspace::OpenProject", &mut clicked);
                     self.menu_entry(ui, "workspace::Open", &mut clicked);
-                    self.menu_entry(ui, "workspace::OpenFolder", &mut clicked);
                     ui.menu_button("Open Recent", |ui| {
                         if self.settings.recent_files.is_empty() {
                             ui.label(RichText::new("No recent files").weak());
