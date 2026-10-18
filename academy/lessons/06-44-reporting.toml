@@ -4,9 +4,16 @@ order = 44
 title = "Writing the report"
 summary = "The deliverable: how to structure a malware report, write for your readers, and start from ORRESS's Markdown export."
 badge = "Reporter"
+goals = [
+    "explain why the report is the real deliverable of analysis",
+    "lay out the standard sections of a malware report and who each is for",
+    "say why IOCs and detections are the urgent part during an incident",
+    "start a report from ORRESS's Markdown export and finish it well",
+]
 
 [[steps]]
 title = "Why the report is the point"
+goal = "See that analysis only has value once it is communicated."
 text = '''
 You've triaged the sample, run it in the lab, watched its behaviour and written a YARA rule. None of it helps anyone until you **communicate it**. The report is the deliverable — the thing other people act on.
 
@@ -59,23 +66,35 @@ You don't write a report from a blank page. ORRESS's **Triage** tab has a **Copy
 
 It exports in a plain-text, diff-able markup format that drops straight into a ticket, wiki or pull request. What is that format called? (One word.)
 '''
+instructions = ["Type the one-word name of the export format and press Check."]
 check = { kind = "answer", answers = ["markdown", "md"], number = false, case_sensitive = false }
 hints = ["It's the same lightweight markup used for README files and these lessons.", "The button is literally labelled \"Copy report (Markdown)\"."]
 success = "Markdown — the Copy report button gives you a Markdown skeleton, so most of the report's facts are already filled in."
 
 [[steps]]
 title = "Get your skeleton"
+goal = "Open Triage and find the Copy report button that exports your first draft."
 text = '''
-Open the **Triage** tab (the View menu or the command palette) and find the **Copy report (Markdown)** button at the top. That export is your first draft: the facts are already there, ready for you to add the narrative, the behaviour timeline, and your YARA rule.
+Open the **Triage** tab and find the **Copy report (Markdown)** button near the top. That export
+is your first draft: the facts -- identification, hashes, capabilities with ATT&CK tags, imports
+by behaviour, defanged IOCs -- are already there, ready for you to add the narrative, the
+behaviour timeline, and your YARA rule.
 
-Open Triage now.
+Open Triage now. (If the training sample from the earlier lessons is still open, the button
+exports its report.)
 '''
+instructions = [
+    "Press **Ctrl+Shift+T**, or the **View** menu -> **Open View** -> **Open Triage Report**.",
+    "Find the **Copy report (Markdown)** button at the top of the tab (clicking it copies the report to the clipboard).",
+]
 check = { kind = "action", id = "view::Triage" }
 spotlight = "view.Triage"
-hints = ["Ctrl+Shift+P, then type \"Triage\" — or the View menu. The Copy report button is at the top of the tab."]
+hints = ["Ctrl+Shift+T opens the Triage report.", "The Copy report (Markdown) button is at the top of the tab."]
+success = "That Markdown export is your head start: most of the report's facts are already filled in. Now you turn it into something people trust."
 
 [[steps]]
 title = "Finish and share it"
+goal = "Turn the export into a trustworthy, actionable report."
 text = '''
 Turn the export into a report people trust:
 

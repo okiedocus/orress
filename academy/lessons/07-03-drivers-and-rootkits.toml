@@ -1,8 +1,14 @@
 id = "l7-drivers-and-rootkits"
 level = 7
-order = 52
+order = 3
 title = "Drivers and rootkits"
 summary = "Reverse-engineering kernel-mode code: how to spot a driver, how rootkits hide, and why ring 0 raises the stakes."
+goals = [
+    "explain user mode and kernel mode, and the privilege rings",
+    "recognise a Windows driver (.sys) by its subsystem, entry point and imports",
+    "describe how a driver handles requests through DriverEntry and IRP dispatch routines",
+    "name the main tricks rootkits use to hide, and how to analyse kernel code safely",
+]
 badge = "Ring Zero"
 
 [[steps]]
@@ -34,6 +40,11 @@ The quickest check is the file overview. ORRESS's **"What Is This File?"** view 
 
 Open the **What Is This File?** view (the command palette, or the File menu) and find the Subsystem field.
 '''
+instructions = [
+    "Make sure a file is open (for example crackme17).",
+    "Press **Ctrl+I**, or open the menu **View > This File** and click **File: What Is This File?**.",
+    "In the card **Windows details**, find the row **Subsystem**.",
+]
 check = { kind = "action", id = "file::Info" }
 hints = ["Ctrl+Shift+P, then type \"What Is This File\" — or the File menu. Look for the Subsystem row."]
 
@@ -61,6 +72,9 @@ Kernel mode is often called by its x86 privilege level, a single-digit number. U
 
 What is the privilege-ring number of kernel mode? (One digit.)
 '''
+instructions = [
+    "Type the ring number of kernel mode in the answer box and press **Check**.",
+]
 check = { kind = "answer", answers = ["0"], number = true }
 hints = ["The rings go from 0 (most privileged) to 3 (least). Applications run in ring 3.", "Kernel mode is the most privileged ring."]
 success = "Ring 0 — the most privileged level. A mistake here doesn't crash one app; it can blue-screen or compromise the whole machine."

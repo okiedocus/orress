@@ -1,0 +1,473 @@
+id = "l2-file-formats"
+level = 2
+order = 2
+title = "Inside an executable: the PE format"
+summary = "Headers, sections, imports and the difference between a file offset and an address, read from a real Windows program."
+goals = [
+    "find the DOS header, the PE header and the section table in the raw bytes",
+    "read the image base and the entry point, and explain what an RVA is",
+    "convert between a file offset and a memory address with the section table",
+    "explain what imports, exports and the Import Address Table are",
+    "recognise the same ideas in ELF (Linux) and Mach-O (macOS) files",
+]
+badge = "Format Reader"
+
+[[steps]]
+title = "A file with a fixed layout"
+goal = "See an executable as a structure with known fields, like a Rust struct."
+text = '''
+When you double-click an `.exe`, the Windows **program loader** reads the file, copies its parts
+into memory, connects it to the libraries it needs and jumps to its first instruction. To
+do that, the file must have a layout the program loader understands: an **executable format**.
+Windows uses **PE** (Portable Executable), Linux uses **ELF**, macOS uses **Mach-O**.
+
+You can think of a PE file as a Rust struct written to disk, field after field:
+
+```rust
+struct PeFile {
+    dos_header: DosHeader,       // starts with "MZ"; says where the PE header is
+    pe_header: PeHeader,         // "PE\0\0", processor type, number of sections
+    optional_header: OptHeader,  // image base, entry point, where the tables are
+    sections: Vec<SectionHeader>,// the section table: name, offset, size, address
+    // ... then the sections themselves: .text, .rdata, .data, ...
+}
+```
+
+The headers are small (crackme #10's take about 0x400 bytes, out of 136 KB). Most of the
+file is the sections: code in `.text`, constants in `.rdata`, variables in `.data`.
+
+Level 0 gave you the big picture of headers, sections, file offsets and imports. In this
+lesson you read them yourself, in the raw bytes and in the Info, Sections and Imports
+views, so you know exactly where every number in ORRESS comes from. Keep crackme #10 open; if you closed it, open it again in the next step.
+'''
+
+[[steps]]
+title = "Open crackme #10"
+goal = "Have the practice program open."
+text = '''
+This lesson reads the headers of crackme #10. If it is still open from the previous
+lesson, pressing the button opens it again; that does no harm.
+'''
+instructions = [
+    "Press the **Open crackme10** button below.",
+]
+check = { kind = "open_crackme", name = "crackme10" }
+
+[[steps]]
+title = "MZ: the DOS header"
+goal = "Find where the PE header starts, using the bytes at offset 0x3C."
+text = '''
+Every PE file starts with the two bytes `4D 5A`, the letters `MZ`. They begin the
+**DOS header**, a leftover from MS-DOS in the 1980s: if you start the program under DOS,
+a tiny program in it prints *This program cannot be run in DOS mode.* (find that text near
+the top of the Hex view).
+
+Only one field of the DOS header still matters. At **file offset 0x3C** (60 bytes from the
+start) are 4 bytes called **e_lfanew**: a little-endian `u32` with the file offset of the
+real PE header. In Rust the program loader does this:
+
+```rust
+let pe_offset = u32::from_le_bytes([file[0x3C], file[0x3D], file[0x3E], file[0x3F]]);
+```
+
+Remember little-endian from Level 0: the lowest byte comes first. The bytes `10 01 00 00`
+mean 0x00000110 = 0x110.
+
+Read e_lfanew of crackme #10 yourself. The **Hex** view shows the offset of each row on the
+left (`00000030` is the row with offsets 0x30 to 0x3F) and 16 bytes per row. The toolbar
+shows `cursor 0x...`: the offset of the byte the cursor is on.
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Hex**.",
+    "Click into the Hex view, then press **Ctrl+G**. A **Go to** bar opens at the top.",
+    "Make sure **File offset** is selected, type `3C` in the box and press **Enter** (or click **Go**).",
+    "The cursor is now on the byte at offset 0x3C. Read it and the three bytes after it.",
+    "Put the four bytes together as a little-endian number and type it in hex (for example `0x1A2`) in the answer box.",
+]
+spotlight = "tree.Hex"
+check = { kind = "answer", answers = ["0xE8"], number = true }
+hints = [
+    "The row starting with `00000030`: the byte at 0x3C is the 13th byte of that row.",
+    "The four bytes are `E8 00 00 00`. Little-endian: the first byte is the lowest.",
+    "The number is 0x000000E8, so type `0xE8`.",
+]
+success = '''
+e_lfanew = 0xE8: the PE header starts 232 bytes into the file. Everything before it (the
+DOS header, the DOS program and Microsoft's hidden *Rich header*) is history the program
+loader skips. Tip: click a byte and open the **Inspector** tab on the right; its row `u32 / i32`
+does the little-endian conversion for you.
+'''
+
+[[steps]]
+title = "PE: the file header"
+goal = "Read the processor type and the number of sections from the PE header."
+text = '''
+At offset 0xE8 you find the **PE header**. It starts with a signature of 4 bytes:
+`50 45 00 00`, which is `P`, `E` and two zero bytes. Then come 20 bytes of the COFF file
+header. The first two fields are:
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0xE8 | 4 | Signature | `50 45 00 00` = "PE\0\0" |
+| 0xEC | 2 | Machine | the processor: `64 86` = 0x8664 = x86-64 |
+| 0xEE | 2 | NumberOfSections | how many entries the section table has |
+
+`64 86` is little-endian again: the number is 0x8664, Microsoft's code for x86-64. A
+32-bit x86 program has 0x014C, an ARM64 program 0xAA64. This is where the Info view got
+"x86-64" from.
+
+Go to offset 0xE8 and read the number of sections: the two bytes right after `64 86`.
+'''
+instructions = [
+    "Click into the Hex view and press **Ctrl+G**.",
+    "With **File offset** selected, type `E8` and press **Enter**.",
+    "Check that you see `50 45 00 00 64 86` starting at the cursor.",
+    "Read the next two bytes (at offsets 0xEE and 0xEF) as a little-endian number and type it in the answer box.",
+]
+check = { kind = "answer", answers = ["5"], number = true }
+hints = [
+    "The bytes after `64 86` are `05 00`.",
+    "`05 00` little-endian is 0x0005.",
+    "The answer is 5.",
+]
+success = '''
+5 sections. You can check it: in the **Project** panel, the entry **Sections** shows the
+count in brackets. You just parsed the same bytes Windows parses before it runs a
+program.
+'''
+
+[[steps]]
+title = "Image base, entry point and RVAs"
+goal = "Understand the image base and the RVA of the entry point."
+text = '''
+After the COFF header comes the **optional header** (it is not optional for programs). Two
+of its fields are on the Info view:
+
+- **Image base**: the address where the program would like to be loaded in memory. For
+  64-bit Windows programs it is almost always `0x140000000`.
+- **Entry point**: the address of the first instruction that runs.
+
+The header does not store the entry point as a full address. It stores an **RVA**, a
+*relative virtual address*: the distance from the image base. The full address (the
+*virtual address*, or VA) is a sum:
+
+```rust
+let image_base = 0x1_4000_0000u64;
+let entry_rva = 0x1_63A0u64;            // what the header stores
+let entry_va = image_base + entry_rva;  // 0x1400163A0: what ORRESS shows
+```
+
+Why relative? Because of **ASLR**, Windows may load the program at a different address on
+each run. An RVA stays correct wherever the program lands; only the image base changes.
+That is also why ORRESS shows every address as if the program sat at its image base: those
+numbers match the file.
+
+Read **Image base** and **Entry point** on the Info view, and compute the RVA of the entry
+point: entry point minus image base.
+'''
+instructions = [
+    "Click the tab **crackme10.exe · Info**.",
+    "In the **What is this file?** card, read **Image base** and **Entry point**. Leading zeros do not matter: `0x0000000140000000` is `0x140000000`.",
+    "Subtract: entry point - image base. Type the result in hex, for example `0x1234`.",
+]
+spotlight = "view.Info"
+check = { kind = "answer", answers = ["0x163A0"], number = true }
+widget = "number_converter"
+hints = [
+    "The entry point is `0x1400163A0` and the image base is `0x140000000`.",
+    "Subtracting 0x140000000 removes the leading `14000` part.",
+    "0x1400163A0 - 0x140000000 = 0x163A0.",
+]
+success = '''
+RVA 0x163A0. Note that this entry point is **not** your `main`: it is the start-up code of
+Microsoft's C runtime and of Rust's standard library, which runs first and calls `main`
+later. The next lesson shows how ORRESS finds `main` from here.
+'''
+
+[[steps]]
+title = "The section table"
+goal = "Read what each section is for and where it is."
+text = '''
+After the optional header comes the **section table**: one entry per section, with its
+name, where it is in the file and where it goes in memory. The **Sections** view shows it
+as a table:
+
+- **Name**: chosen by the compiler. `.text` is code, `.rdata` read-only data (string
+  literals, constants, and on Windows the import tables), `.data` global variables,
+  `.pdata` a list of functions for exception handling, `.reloc` relocations (fixes for
+  when the program is not loaded at its image base).
+- **Offset** and **Size**: where the section's bytes are in the **file**.
+- **Address** and **Mem size**: where they go in **memory**.
+- **Perms**: R = readable, W = writable, X = executable. Code is `R-X`, constants `R--`,
+  variables `RW-`.
+- **Entropy** and **Usually contains**: how random the bytes are, and what such a section
+  normally holds.
+
+Compare the **Offset** and **Address** of `.text`. The section starts at file offset
+0x400, but it is loaded at address 0x140001000 (RVA 0x1000). The file packs sections
+tightly, in steps of 0x200 bytes; memory uses steps of 0x1000 bytes (one memory page), so
+the numbers do not match. Click a row to see that section's bytes in the Hex view.
+
+Which section is both readable and writable?
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Sections**.",
+    "Read the **Perms** column for every row.",
+    "Type the name of the section with the permissions `RW-` (with its dot) in the answer box.",
+]
+spotlight = "tree.Sections"
+check = { kind = "answer", answers = [".data", "data"] }
+hints = [
+    "Only one row has a W.",
+    "It holds the global variables.",
+    "Type `.data`.",
+]
+success = '''
+`.data` is the only writable section: global variables live there. Code is never writable
+in a normal program, and data is never executable. A section with `RWX` would be a
+warning sign: the program may write new code into memory while it runs, as packers do.
+'''
+
+[[steps]]
+title = "File offset or address?"
+goal = "Convert an address to a file offset with the section table."
+text = '''
+Every byte has two numbers:
+
+- its **file offset**: where it is in the file (the Hex view, the Strings view's
+  **Offset** column);
+- its **virtual address**: where it is in memory (the disassembly, the debugger, the
+  Strings view's **Address** column).
+
+The section table connects them. For a byte inside a section:
+
+```rust
+// offset -> address
+let va = section.address + (offset - section.offset);
+// address -> offset
+let offset = section.offset + (va - section.address);
+```
+
+**Worked example.** Where in the file is the entry point, 0x1400163A0? It is in `.text`
+(that section covers 0x140001000 up to 0x140017FEE). `.text` starts at address
+0x140001000 and at file offset 0x400. So:
+
+```text
+offset = 0x400 + (0x1400163A0 - 0x140001000)
+       = 0x400 + 0x153A0
+       = 0x157A0
+```
+
+Check it yourself. On the Info view, next to **Entry point**, there is a small button
+**show bytes**. It opens the Hex view at the entry point's file offset. The Hex view's
+toolbar then says `cursor 0x...`: the file offset of the cursor. The **Inspector** tab in
+the dock on the right shows both numbers for the byte under the cursor: **Offset** and
+**Address**.
+'''
+instructions = [
+    "Click the tab **crackme10.exe · Info**.",
+    "Next to **Entry point**, click **show bytes**. The Hex view opens with the cursor on the first byte of the entry point.",
+    "Read the file offset in the Hex view's toolbar, after the word `cursor`.",
+    "Type that file offset in the answer box, in hex.",
+    "Optional: in the dock on the right, click the **Inspector** tab to see **Offset** and **Address** of the same byte. Click the **Lesson** tab to come back here.",
+]
+check = { kind = "answer", answers = ["0x157A0"], number = true }
+hints = [
+    "The worked example above computes it.",
+    "Type `0x157A0`.",
+]
+success = '''
+The same byte: offset 0x157A0 in the file, address 0x1400163A0 in memory. Mixing up the
+two is the most common beginner mistake in reverse engineering. When a number "does not
+work" in a view, ask yourself first: is this an offset or an address?
+'''
+
+[[steps]]
+title = "Your turn: a string's address"
+goal = "Convert a file offset to an address by yourself."
+text = '''
+Now the other direction. The Strings view says the title
+`=== ORRESS Academy - Crackme #10 ===` is at **file offset 0x177E0**, in section `.rdata`.
+
+The Sections view says `.rdata` starts at **file offset 0x17400** and is loaded at
+**address 0x140018000**.
+
+What is the string's address in memory? Use
+
+```rust
+let va = section.address + (offset - section.offset);
+```
+
+Then check your answer: in the Strings view, the **Address** column shows the same
+number, and in the next lesson you will see the disassembly load the string from exactly
+this address.
+'''
+instructions = [
+    "Compute `0x140018000 + (0x177E0 - 0x17400)`. The number converter below helps with hex.",
+    "Type the result in hex in the answer box and press **Check**.",
+    "Optional: in the **Project** panel click **Strings**, filter for `crackme #10` and compare with the **Address** column.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x1400183E0"], number = true }
+hints = [
+    "First the distance into the section: 0x177E0 - 0x17400 = 0x3E0.",
+    "Then add the section address: 0x140018000 + 0x3E0.",
+    "0x1400183E0.",
+]
+success = '''
+0x1400183E0. You can now go from any byte in the Hex view to its place in memory and back.
+ORRESS does this for you all the time (the **Go to** bar in the Hex view has an
+**Address** option for it), but now you know what it computes.
+'''
+
+[[steps]]
+title = "Imports: borrowed functions"
+goal = "See which library functions the program uses."
+text = '''
+Your Rust code calls `println!`, which in the end asks Windows to write text with a
+function called `WriteConsoleW`. That function is not inside `crackme10.exe`. It is in a
+**DLL** (dynamic-link library), `KERNEL32.dll`, that Windows loads next to every program.
+The `.exe` only contains a list: "I need `WriteConsoleW` from `KERNEL32.dll`". That list is
+the **import table**, and each entry is an **import**.
+
+The **Imports** view groups the imports by DLL. Functions ORRESS knows get a coloured
+category (Input, Comparison, Anti-debugging, Network, ...) and an explanation when you
+hover them. The link **N »** after a function jumps to the places that call it.
+
+Imports are the quickest way to learn what a program can do: `ReadConsoleW` reads input,
+`memcmp` compares memory, `CreateFileW` opens files, `connect` talks to the network. A
+small Rust program imports around 90 functions, almost all for the standard library's own
+use.
+
+Under the group header you can see how many functions come from each DLL. How many
+functions does crackme #10 import from `KERNEL32.dll`?
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Imports**.",
+    "Find the group header that starts with `KERNEL32.dll`. The number in brackets is the number of functions.",
+    "Type that number in the answer box.",
+]
+spotlight = "tree.Imports"
+check = { kind = "answer", answers = ["48"], number = true }
+hints = [
+    "The groups are sorted by name; `KERNEL32.dll` is written in capitals.",
+    "The header looks like `KERNEL32.dll (NN)`.",
+    "It is 48.",
+]
+success = '''
+48 functions from `KERNEL32.dll`, the core Windows library. The other DLLs with long names
+like `api-ms-win-crt-runtime-l1-1-0.dll` belong to Microsoft's C runtime, and
+`VCRUNTIME140.dll` provides `memcmp`, `memcpy` and friends.
+'''
+
+[[steps]]
+title = "How a call reaches a DLL"
+goal = "Understand the Import Address Table."
+text = '''
+When the program is built, nobody knows where `KERNEL32.dll` will be in memory. So the
+program cannot contain `call 0x7FF812345678`. Instead it calls **through a pointer**:
+
+```text
+call qword ptr [0x140018xxx]    ; "call the address stored at 0x140018xxx"
+```
+
+The pointers live in the **Import Address Table** (**IAT**), one slot per import. In the
+file the slots hold placeholders. When the program starts, the program loader looks up each
+imported function and writes its real address into its slot. In Rust terms, the IAT is a
+`static mut IAT: [fn(); N]` that Windows fills before `main` runs.
+
+ORRESS knows which slot belongs to which import, so instead of a bare pointer you read
+`call WakeByAddressSingle` in the disassembly. In crackme #10 the IAT is at the very start
+of `.rdata` (RVA 0x18000).
+
+The other side of imports are **exports**: functions a file offers to others. DLLs export
+functions; normal programs usually export nothing. Look at the bottom of the Imports view:
+crackme #10 has **Exports (0)**.
+
+Why does the program call an imported function through a pointer?
+'''
+check = { kind = "choice", options = [
+    "The DLL's address is only known when the program runs, so the program loader fills the pointer in at start-up",
+    "Calls through pointers are faster than direct calls",
+    "To hide the function name from reversers",
+], correct = 0, explain = [
+    "Right. The IAT slot is filled by the program loader, so the same .exe works wherever Windows puts the DLL.",
+    "They are not faster; they are needed because the address is unknown when the file is built.",
+    "The name is not hidden at all: it is in the import table, and ORRESS shows it in the disassembly.",
+] }
+hints = [
+    "What does the program not know when it is compiled?",
+    "Think about ASLR: DLLs move too.",
+]
+
+[[steps]]
+title = "ELF and Mach-O"
+goal = "Recognise the same ideas in Linux and macOS programs."
+text = '''
+Linux and macOS programs use other formats, but the ideas are the same. When you meet one,
+translate:
+
+| Idea | PE (Windows) | ELF (Linux) | Mach-O (macOS) |
+|---|---|---|---|
+| First bytes | `MZ` | `7F 45 4C 46` (`\x7fELF`) | `CF FA ED FE` (64-bit) |
+| Code | `.text` | `.text` | `__TEXT,__text` |
+| Constants | `.rdata` | `.rodata` | `__TEXT,__cstring` / `__const` |
+| Variables | `.data` | `.data`, `.bss` | `__DATA,__data` |
+| Imported functions | import table + IAT | `.plt` stubs + `.got` | `__stubs` + `__la_symbol_ptr` |
+| Typical base | `0x140000000` | `0x0` (PIE) or `0x400000` | `0x100000000` |
+
+On Linux a call to a library function goes to a small stub, `puts@plt`, which jumps
+through an address in the `.got` table, the same trick as the IAT with another name. ELF
+files also have **segments** (program headers): the larger parts the program loader actually maps,
+each covering one or more sections. ORRESS shows them under **Segments** at the bottom of
+the Sections view.
+
+ORRESS reads all three formats, and every view you learn in this level works the same for
+them.
+
+Test yourself: which format starts with the bytes `7F 45 4C 46`?
+'''
+check = { kind = "choice", options = [
+    "ELF (a Linux program)",
+    "PE (a Windows program)",
+    "Mach-O (a macOS program)",
+], correct = 0, explain = [
+    "Right: 7F 45 4C 46 is \\x7fELF, the start of every ELF file.",
+    "A PE file starts with 4D 5A (MZ).",
+    "A 64-bit Mach-O file starts with CF FA ED FE.",
+] }
+hints = ["Look at the row **First bytes** of the table."]
+deep_dive = '''
+If you are curious about the full PE layout: Microsoft documents it as the
+"PE Format" specification, and the optional header of crackme #10 starts at offset 0x100
+with the magic number `0B 02` (0x20B), which means PE32+, the 64-bit variant.
+'''
+
+[[steps]]
+title = "What you can read now"
+goal = "Summarise the structure of an executable."
+text = '''
+You now know what is inside a program file, and where each ORRESS view gets its data:
+
+- **DOS header** (`MZ`) -> **e_lfanew** at 0x3C -> **PE header** (`PE\0\0`, machine,
+  number of sections): the **Info** view's format and architecture.
+- **Optional header**: **image base** and **entry point** (an RVA): the Info view's
+  addresses.
+- **Section table**: the **Sections** view, and the key to converting between **file
+  offsets** and **virtual addresses**.
+- **Import table** and **IAT**: the **Imports** view, and the names you see on calls in
+  the disassembly.
+
+Three formulas to remember:
+
+```rust
+va = image_base + rva;
+va = section.address + (offset - section.offset);
+offset = section.offset + (va - section.address);
+```
+
+Next lesson: you leave the headers behind and go into the code. You will find `main`
+starting from the entry point, use the Functions view, and follow cross-references from
+the *Invalid licence code.* message to the check.
+'''
+success = "Lesson complete. You can read an executable's structure like a reverser."

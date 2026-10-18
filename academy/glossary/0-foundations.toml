@@ -1,0 +1,914 @@
+# Level 0 (Foundations) glossary: the words lessons 00-01 to 00-09 introduce.
+# Terms that later levels explain in more depth (PE, ELF, sections like .text,
+# imports, image base, file offset, ASLR, DEP, static/dynamic analysis, malware)
+# are defined in their own glossary files.
+
+# ---------------------------------------------------------------- the course
+
+[[term]]
+term = "reverse engineering"
+aliases = ["reverse engineer", "reverse engineers", "reverser", "reversers", "reversing", "reverse-engineering"]
+short = "Working out how a program works when you only have the finished program, not its source code."
+text = '''
+Building software goes forward: source code -> compiler -> program. Reverse engineering goes backward: you start with the program file and rebuild an understanding of what it does, by reading its machine code, looking at the data inside it, and watching it run.
+
+People reverse programs to solve CTF challenges, analyze malware, find security bugs, and make old file formats work with new software.
+'''
+see = ["source code", "machine code", "CTF"]
+
+[[term]]
+term = "source code"
+
+short = "The human-readable text a programmer writes, such as a .rs file."
+text = '''
+Source code is what you write in Rust, C or any other language. The compiler translates it into machine code. The finished program does not contain the source code: names, comments and structure are mostly lost, which is why reverse engineering is needed.
+'''
+see = ["compiler", "machine code"]
+
+[[term]]
+term = "CTF"
+aliases = ["CTFs", "Capture The Flag"]
+short = "Capture The Flag: a competition where teams solve security puzzles to find secret texts (flags) for points."
+text = '''
+CTF events have categories such as web, cryptography and reversing. In a reversing challenge you get a program that hides a flag, for example `flag{y0u_f0und_m3}`, and you find it by understanding the program.
+'''
+see = ["CTF flag", "crackme"]
+
+[[term]]
+term = "CTF flag"
+aliases = ["CTF flags", "flag{...}"]
+short = "The secret text you find in a CTF challenge and submit for points, often shaped like flag{...}."
+see = ["CTF"]
+
+[[term]]
+term = "crackme"
+aliases = ["crackmes"]
+short = "A small practice program made to be reversed, usually one that asks for a password."
+text = '''
+The Academy has its own crackmes: small Rust programs for Windows on x86-64, stripped like real challenges. A lesson opens them with a button. Opening a program in ORRESS never runs it.
+'''
+see = ["CTF", "stripping"]
+
+[[term]]
+term = "Explain Mode"
+short = "An ORRESS setting that shows a plain-language tooltip for almost everything you hover over."
+text = '''
+Switch it with the **Explain: on / off** button in the status bar, with **View > Toggle Explain Mode**, or with **Ctrl+Alt+E**. The **Explain** panel in the right dock keeps the last explanation, so you can read it calmly.
+'''
+see = ["status bar", "dock"]
+
+[[term]]
+term = "command palette"
+aliases = ["palette"]
+short = "A search box for every ORRESS command: press Ctrl+Shift+P, type a few letters, and pick a command."
+text = '''
+The palette shows matching commands with their keyboard shortcuts and a short explanation of the highlighted one. Click a command or press **Enter** to run it; press **Esc** to close the palette.
+'''
+
+[[term]]
+term = "dock"
+aliases = ["docks", "left dock", "right dock", "bottom dock"]
+short = "One of the side areas of the ORRESS window (left, right, bottom) that hold panels as tabs."
+text = '''
+The left dock holds the **Project** panel; the right dock the **Explain** and **Inspector** panels and the **Lesson**; the bottom dock tools such as **Cross-references** and **Terminal**. **Ctrl+B**, **Ctrl+Alt+B** and **Ctrl+J** show or hide them.
+'''
+see = ["Project panel"]
+
+[[term]]
+term = "status bar"
+short = "The thin bar along the bottom of the ORRESS window: focused tab, cursor position, Explain Mode switch and zoom."
+text = '''
+When a file is open, the status bar shows where the cursor is: the file offset, the address, the section, and the function (for example `main+0x0`).
+'''
+see = ["Explain Mode"]
+
+[[term]]
+term = "Project panel"
+aliases = ["Project tree"]
+short = "The panel in the left dock that lists the open files and, for each file, the views you can open."
+text = '''
+Under each file name it shows the format and architecture (for example `PE (Windows executable) · x86-64`), followed by the views: Info, Functions, Disassembly, Graph, Strings, Imports, Sections and Hex. Numbers in brackets tell how many items a view lists.
+'''
+see = ["dock"]
+
+[[term]]
+term = "Inspector"
+aliases = ["Inspector panel", "data inspector"]
+short = "An ORRESS panel that shows the bytes under the cursor read as numbers, characters, pointers and dates."
+text = '''
+Click a byte in the Hex view and the Inspector shows it as binary, `u8 / i8`, a character, and the bytes starting there as `u16`, `u32`, `u64`, a pointer, floats and text. It reads little-endian by default; you can switch to big-endian.
+'''
+see = ["endianness", "hex dump"]
+
+[[term]]
+term = "hex dump"
+aliases = ["hex dumps", "hex view"]
+short = "Bytes shown as pairs of hex digits, usually 16 per row, with the offset on the left and the text on the right."
+text = '''
+```text
+00000000  4D 5A 90 00 03 00 00 00 04 00 00 00 FF FF 00 00  MZ..............
+```
+
+Bytes that are not printable characters are shown as a dot in the text column. The **Hex** view of ORRESS is a hex dump of the whole file.
+'''
+see = ["hexadecimal", "byte"]
+
+# ---------------------------------------------------------------- the computer
+
+[[term]]
+term = "CPU"
+aliases = ["CPUs", "processor", "processors", "central processing unit"]
+short = "The part of the computer that runs instructions: it calculates, compares and decides what to do next."
+text = '''
+The CPU repeats one loop billions of times per second: fetch the next instruction from memory, decode it, execute it. It holds only a few values at a time, in its registers; everything else is in memory.
+'''
+see = ["instruction", "register", "memory"]
+
+[[term]]
+term = "memory"
+aliases = ["RAM", "main memory"]
+short = "The computer's working space (RAM): a long row of numbered bytes that holds running programs and their data."
+text = '''
+Memory is fast, much bigger than what the CPU can hold, and cleared when the power goes off. Every byte has a number, its address. In Rust terms it behaves like one huge `Vec<u8>`:
+
+```rust
+let mut memory = vec![0u8; 16];
+memory[3] = 200;   // write the byte at address 3
+```
+'''
+see = ["address", "byte", "storage"]
+
+[[term]]
+term = "storage"
+aliases = ["SSD", "hard disk", "disk"]
+short = "Where files are kept when the power is off, such as an SSD or hard disk. Large, but slower than memory."
+text = '''
+A program file lives in storage. When you start it, the operating system copies it into memory, and the CPU runs it from there.
+'''
+see = ["memory", "executable"]
+
+[[term]]
+term = "operating system"
+aliases = ["OS", "operating systems"]
+short = "The program that manages the computer, such as Windows, Linux or macOS: it loads programs and offers services."
+text = '''
+The operating system loads programs into memory, creates processes, keeps them apart, shares the CPU, and offers services (files, windows, console, network) through system calls and libraries. Normal programs may not touch the hardware directly; they ask the OS.
+'''
+see = ["process", "system call", "library"]
+
+[[term]]
+term = "process"
+aliases = ["processes"]
+short = "A running program: the operating system's copy of a program in memory, with its own memory and state."
+text = '''
+One program file can run as several processes at the same time, each with its own memory. On Windows the Task Manager lists them. Static analysis studies the program file; dynamic analysis studies a running process.
+'''
+see = ["executable", "virtual memory"]
+
+[[term]]
+term = "executable"
+aliases = ["executables", "executable file", "executable files", "program file", "program files"]
+short = "A program file that the operating system can load and run, such as an .exe on Windows."
+text = '''
+An executable contains machine code, data such as string literals, and headers that tell the operating system how to load it. On Windows executables are PE files, on Linux ELF files, on macOS Mach-O files.
+'''
+see = ["machine code", "header", "section"]
+
+[[term]]
+term = "machine code"
+short = "Instructions stored as numbers (bytes): the only thing a CPU can execute."
+text = '''
+The compiler turns source code into machine code. For example, on x86-64 the three bytes `48 01 D8` mean "add rbx to rax". Every architecture has its own machine code. A disassembler turns machine code into readable assembly.
+'''
+see = ["instruction", "assembly language", "disassembler"]
+
+[[term]]
+term = "instruction"
+aliases = ["instructions"]
+short = "One small command for the CPU, such as add two numbers, copy a value, compare, or continue somewhere else."
+text = '''
+A program is a long list of instructions. Each one does very little, but a CPU runs billions per second. In machine code an instruction is one or more bytes (1 to 15 on x86-64); in assembly it is a short line of text like `add rax, rbx`.
+'''
+see = ["opcode", "machine code", "assembly language"]
+
+[[term]]
+term = "opcode"
+aliases = ["opcodes"]
+short = "The number that says which operation an instruction performs."
+text = '''
+In the Academy's toy machine, opcode `1` means "add" and `2` means "multiply". Real CPUs work the same way: the first byte(s) of an instruction say what it does, the following bytes say with which values.
+'''
+see = ["instruction"]
+
+[[term]]
+term = "instruction pointer"
+aliases = ["program counter"]
+short = "The place where the CPU keeps the address of the next instruction to run."
+text = '''
+After each instruction the CPU moves the instruction pointer to the next one. A jump or a call changes it, which is how `if`, loops and function calls work underneath. On x86-64 it is the register `rip`.
+'''
+see = ["CPU", "instruction"]
+
+[[term]]
+term = "execute"
+aliases = ["executes", "executed", "executing", "execution"]
+short = "To run an instruction or a program: the CPU fetches, decodes and does what the instructions say."
+see = ["CPU", "instruction"]
+
+[[term]]
+term = "assembly language"
+aliases = ["assembly"]
+short = "The text form of machine code: one short line per instruction, like add rax, rbx."
+text = '''
+Assembly is written for people; the CPU only sees the bytes. Each assembly line corresponds to exactly one machine code instruction:
+
+```text
+48 01 D8    add rax, rbx
+```
+
+Level 1 teaches you to read x86-64 assembly.
+'''
+see = ["machine code", "disassembler", "instruction"]
+
+[[term]]
+term = "register"
+aliases = ["registers"]
+short = "A tiny, very fast storage slot inside the CPU that instructions work on, like rax or rcx."
+text = '''
+An x86-64 CPU has 16 general registers of 64 bits each, with names such as `rax`, `rbx`, `rcx` and `rdx`. Think of them as the CPU's own local variables. Some have a fixed job: on Windows the first argument of a function arrives in `rcx`, and the return value is left in `rax`. Level 1 explains them in detail.
+'''
+see = ["CPU", "instruction"]
+
+[[term]]
+term = "disassembler"
+aliases = ["disassemble", "disassembled", "disassembling"]
+short = "A tool that turns machine code bytes back into readable assembly text."
+text = '''
+The **Disassembly** view of ORRESS is a disassembler: it shows each instruction with its address and adds comments, for example the text of a string an instruction uses.
+'''
+see = ["machine code", "assembly language"]
+
+[[term]]
+term = "architecture"
+aliases = ["architectures", "CPU architecture", "instruction set"]
+short = "A family of CPUs that understand the same machine code, such as x86-64 or ARM64."
+text = '''
+A program is built for one architecture. The same bytes mean different things on different architectures, so an x86-64 program cannot run directly on an ARM64 CPU. In Rust you choose it with the build target, for example `x86_64-pc-windows-msvc`.
+'''
+see = ["x86-64", "ARM64", "32-bit"]
+
+[[term]]
+term = "x86-64"
+aliases = ["x64", "AMD64", "x86_64"]
+short = "The 64-bit architecture of almost all Windows PCs and most servers. The Academy's crackmes are x86-64 programs."
+see = ["architecture", "ARM64"]
+
+[[term]]
+term = "32-bit"
+aliases = ["64-bit"]
+short = "The size of the numbers and addresses a CPU works with most easily. Modern computers are 64-bit."
+text = '''
+On a 64-bit computer, registers and addresses are 64 bits (8 bytes), and a Rust `usize` is 8 bytes. On a 32-bit computer they are 4 bytes. Older programs and small devices are often 32-bit.
+'''
+see = ["architecture", "usize"]
+
+[[term]]
+term = "system call"
+aliases = ["system calls", "syscall", "syscalls"]
+short = "The low-level way a program asks the operating system to do something, such as read a file."
+text = '''
+Most programs do not make system calls themselves; they call library functions (on Windows in DLLs such as `kernel32.dll`), which make the system calls for them.
+'''
+see = ["operating system", "library"]
+
+[[term]]
+term = "library"
+aliases = ["libraries"]
+short = "A collection of ready-made functions that programs can use."
+text = '''
+Rust's standard library is one; on Windows the operating system offers its functions in DLLs such as `kernel32.dll`. A library can be copied into the program (static linking) or loaded when the program starts (dynamic linking).
+'''
+see = ["standard library", "static linking", "dynamic linking", "API"]
+
+[[term]]
+term = "API"
+aliases = ["APIs"]
+short = "Application programming interface: the set of functions a library or system offers to programs."
+text = '''
+The Windows API is the set of functions Windows offers, such as `WriteConsoleW` to write text to the console. Which API functions a program uses tells a lot about what it does.
+'''
+see = ["library", "operating system"]
+
+# ---------------------------------------------------------------- numbers
+
+[[term]]
+term = "bit"
+aliases = ["bits"]
+short = "The smallest unit of data: a single 0 or 1. A bit has two possible values."
+text = '''
+A bit is like a switch: off (0) or on (1). Eight bits make a byte. Every extra bit doubles the number of values: 1 bit has 2 values, 2 bits have 4, 8 bits have 256.
+
+```rust
+let flags: u8 = 0b0000_0101;   // bits 0 and 2 are set
+```
+'''
+see = ["byte", "binary"]
+
+[[term]]
+term = "byte"
+aliases = ["bytes"]
+short = "Eight bits: a number from 0 to 255 (0x00 to 0xFF). Memory is a long row of bytes."
+text = '''
+A byte is written as two hex digits, from `00` to `FF`. In Rust it is a `u8`. Every byte in memory has its own address; bigger values use several bytes next to each other.
+
+```rust
+assert_eq!(u8::MAX, 0xFF);
+assert_eq!(b'A', 0x41);   // the character A is the byte 0x41
+```
+'''
+see = ["bit", "hexadecimal", "memory"]
+
+[[term]]
+term = "nibble"
+aliases = ["nibbles"]
+short = "Four bits, half a byte: exactly one hex digit."
+see = ["hexadecimal", "bit"]
+
+[[term]]
+term = "decimal"
+aliases = ["base 10"]
+short = "The everyday number system with the ten digits 0 to 9, where each place is worth ten times the next."
+see = ["binary", "hexadecimal"]
+
+[[term]]
+term = "binary"
+aliases = ["base 2", "binary number", "binary numbers"]
+short = "The base-2 number system with only the digits 0 and 1, written with 0b in Rust. Also an informal word for a compiled program."
+text = '''
+Each place is worth twice the place to its right: 1, 2, 4, 8, 16, 32, 64, 128. To read a binary number, add the place values where there is a 1:
+
+```rust
+assert_eq!(0b1011, 8 + 2 + 1);   // 11
+println!("{:b}", 11);            // prints 1011
+```
+
+Reversers also say "a binary" for a compiled program file, because it holds machine code instead of text.
+'''
+see = ["bit", "decimal", "hexadecimal"]
+
+[[term]]
+term = "hexadecimal"
+aliases = ["hex", "base 16"]
+short = "The base-16 number system with digits 0-9 and A-F, written with 0x. Two hex digits are exactly one byte."
+text = '''
+A is 10, B is 11 ... F is 15. Each place is worth 16 times the place to its right: `0x2A` = 2 x 16 + 10 = 42. One hex digit is exactly 4 bits, so binary converts to hex group by group: `0b1101_0110` = `0xD6`.
+
+```rust
+assert_eq!(0x2A, 42);
+println!("{:x} {:#X}", 42, 42);   // 2a 0x2A
+```
+
+Addresses, bytes and constants in ORRESS are all shown in hex.
+'''
+see = ["binary", "byte", "nibble"]
+
+[[term]]
+term = "place value"
+aliases = ["place values"]
+short = "What a digit is worth because of its position: in decimal 1, 10, 100; in binary 1, 2, 4; in hex 1, 16, 256."
+see = ["decimal", "binary", "hexadecimal"]
+
+[[term]]
+term = "unsigned"
+aliases = ["unsigned integer", "unsigned integers", "u8", "u16", "u32", "u64"]
+short = "An integer type for zero and positive numbers only, like Rust's u8 to u64."
+text = '''
+| type | bytes | largest value |
+|---|---|---|
+| `u8` | 1 | `0xFF` (255) |
+| `u16` | 2 | `0xFFFF` (65535) |
+| `u32` | 4 | `0xFFFF_FFFF` |
+| `u64` | 8 | `0xFFFF_FFFF_FFFF_FFFF` |
+
+The largest value always has all bits set.
+'''
+see = ["signed", "byte"]
+
+[[term]]
+term = "signed"
+aliases = ["signed integer", "signed integers", "i8", "i16", "i32", "i64"]
+short = "An integer type that can also be negative, like Rust's i8 to i64. Stored in two's complement."
+text = '''
+An `i8` goes from -128 to 127. If the top bit (the sign bit) is 1, the number is negative. The same bits can be read as signed or unsigned:
+
+```rust
+assert_eq!(0xFFu8 as i8, -1);
+assert_eq!(-1i32 as u32, 0xFFFF_FFFF);
+```
+'''
+see = ["two's complement", "unsigned", "sign bit"]
+
+[[term]]
+term = "usize"
+aliases = ["isize"]
+short = "Rust's integer type with the size of an address: 8 bytes on a 64-bit computer. Used for lengths and indexes."
+see = ["32-bit", "pointer"]
+
+[[term]]
+term = "dword"
+aliases = ["double word"]
+short = "Assembly name for a 4-byte value, like a u32 or i32. A word is 2 bytes, a byte is 1."
+see = ["qword"]
+
+[[term]]
+term = "qword"
+aliases = ["quad word"]
+short = "Assembly name for an 8-byte value, like a u64, i64 or a pointer."
+text = '''
+`mov qword ptr [rsp+0x30], 0` stores the 8-byte number 0 in memory. `dword ptr` would store 4 bytes, `byte ptr` 1 byte.
+'''
+see = ["dword"]
+
+[[term]]
+term = "overflow"
+aliases = ["overflows", "integer overflow", "overflowed"]
+short = "When the result of a calculation does not fit in the number's size. The bits that do not fit are dropped."
+text = '''
+255 + 1 does not fit in a `u8`. A debug build of Rust panics ("attempt to add with overflow"); a release build, like the CPU itself, wraps around to 0.
+'''
+see = ["wrapping"]
+
+[[term]]
+term = "wrapping"
+aliases = ["wrapping_add", "wraps around", "wrap around", "wrapping arithmetic"]
+short = "Overflow that continues from the other end, like an odometer: 255u8 + 1 becomes 0."
+text = '''
+```rust
+assert_eq!(255u8.wrapping_add(1), 0);
+assert_eq!(250u8.wrapping_add(10), 4);   // 260 - 256
+```
+
+This is the CPU's normal behavior, and the reason two's complement works.
+'''
+see = ["overflow", "two's complement"]
+
+[[term]]
+term = "two's complement"
+short = "The way computers store negative numbers: -n is stored as 2^bits - n, so -1 in a byte is 0xFF."
+text = '''
+Two ways to calculate it, for 8 bits:
+
+- 256 - n: -5 is 256 - 5 = 251 = `0xFB`;
+- flip all bits of n and add 1: 5 = `0000_0101`, flipped `1111_1010`, plus 1 = `1111_1011` = `0xFB`.
+
+Small negative numbers look like a row of Fs: -1 is `0xFF`, `0xFFFF`, `0xFFFFFFFF` depending on the size. The same addition works for signed and unsigned numbers.
+'''
+see = ["signed", "sign bit", "wrapping"]
+
+[[term]]
+term = "sign bit"
+short = "The top bit of a signed number: 1 means negative."
+see = ["two's complement", "signed"]
+
+[[term]]
+term = "sign extension"
+aliases = ["sign-extend", "sign-extended", "sign-extends"]
+short = "Making a signed number bigger by filling the new bits with copies of the sign bit, so the value stays the same."
+text = '''
+```rust
+assert_eq!(-1i8 as i32, -1);   // 0xFF becomes 0xFFFF_FFFF
+```
+'''
+see = ["zero extension", "sign bit"]
+
+[[term]]
+term = "zero extension"
+aliases = ["zero-extend", "zero-extended", "zero-extends"]
+short = "Making an unsigned number bigger by filling the new bits with zeros."
+text = '''
+```rust
+assert_eq!(0xFFu8 as u32, 0x0000_00FF);   // 255 stays 255
+```
+'''
+see = ["sign extension"]
+
+[[term]]
+term = "truncation"
+aliases = ["truncate", "truncated", "truncates"]
+short = "Making a number smaller by cutting off its upper bytes: 0x1234u16 as u8 is 0x34."
+see = ["zero extension"]
+
+# ---------------------------------------------------------------- text
+
+[[term]]
+term = "ASCII"
+short = "The basic code table that gives English letters, digits and symbols the numbers 0 to 127: 'A' is 0x41."
+text = '''
+Useful landmarks: space `0x20`, `'0'` to `'9'` = `0x30` to `0x39`, `'A'` to `'Z'` = `0x41` to `0x5A`, `'a'` to `'z'` = `0x61` to `0x7A`. A lower-case letter is its upper-case letter plus `0x20`.
+
+```rust
+assert_eq!(b'A', 0x41);
+assert_eq!(b'7' - b'0', 7);
+```
+'''
+see = ["UTF-8", "control character"]
+
+[[term]]
+term = "control character"
+aliases = ["control characters"]
+short = "A non-printable character code below 0x20, such as newline (0x0A), carriage return (0x0D) and tab (0x09)."
+see = ["ASCII", "line ending", "NUL"]
+
+[[term]]
+term = "line ending"
+aliases = ["line endings", "newline", "carriage return"]
+short = "The character(s) that end a line of text: \\n (0x0A) on Linux and macOS, \\r\\n (0x0D 0x0A) on Windows."
+text = '''
+When you type a password and press Enter, the program receives the line ending too. That is why the crackmes remove it with `strip_suffix('\n')` and `strip_suffix('\r')`.
+'''
+see = ["control character"]
+
+[[term]]
+term = "NUL"
+aliases = ["null byte", "zero byte", "NUL byte", "string terminator"]
+short = "The byte 0x00. C strings end with it."
+see = ["C string"]
+
+[[term]]
+term = "Unicode"
+aliases = ["code point", "code points"]
+short = "The standard that gives every character of every writing system a number, its code point, such as U+20AC for the euro sign."
+see = ["UTF-8", "UTF-16"]
+
+[[term]]
+term = "UTF-8"
+short = "The most common way to store Unicode text as bytes: ASCII characters take 1 byte, others 2 to 4. Rust strings are always UTF-8."
+text = '''
+```rust
+assert_eq!("A".as_bytes(), [0x41]);
+assert_eq!("é".as_bytes(), [0xC3, 0xA9]);
+assert_eq!("héllo".len(), 6);   // len() counts bytes, not characters
+```
+'''
+see = ["Unicode", "ASCII", "UTF-16"]
+
+[[term]]
+term = "UTF-16"
+aliases = ["wide string", "wide strings"]
+short = "A way to store text with 2 bytes per character (sometimes 4). Windows uses it for its wide strings."
+text = '''
+For English text every second byte is zero: `"Hi"` is stored as `48 00 69 00` (little-endian). In the text column of a hex view it looks like `H.i.`. The Strings view of ORRESS marks such strings as UTF-16.
+'''
+see = ["UTF-8", "endianness"]
+
+[[term]]
+term = "C string"
+aliases = ["C strings", "null-terminated string", "null-terminated strings", "NUL-terminated"]
+short = "Text that ends with a zero byte (NUL) instead of having a stored length. Used by C and most operating system functions."
+text = '''
+```text
+"hi" as a Rust &str:  68 69       (length 2 stored separately)
+"hi" as a C string:   68 69 00
+```
+
+In Rust you build one with `std::ffi::CString`.
+'''
+see = ["NUL", "string literal"]
+
+[[term]]
+term = "string literal"
+aliases = ["string literals"]
+short = "Text written directly in the source code, like \"Wrong password\". It is stored in the program file's read-only data."
+text = '''
+String literals survive compiling, which is why the Strings view is often the first place a reverser looks. Rust literals have no end marker, so they are stored back to back and a strings tool may show two of them as one: `Password: Wrong password. Try again!`.
+'''
+see = ["C string", "UTF-8"]
+
+[[term]]
+term = "endianness"
+aliases = ["byte order", "little-endian", "big-endian", "little endian", "big endian"]
+short = "The order in which the bytes of a number are stored. x86-64 and ARM are little-endian: lowest byte first."
+text = '''
+```rust
+let n: u32 = 0x1234_5678;
+assert_eq!(n.to_le_bytes(), [0x78, 0x56, 0x34, 0x12]);  // little-endian
+assert_eq!(n.to_be_bytes(), [0x12, 0x34, 0x56, 0x78]);  // big-endian
+```
+
+To read a little-endian number from a hex dump, reverse the order of its bytes. Network protocols and some file formats use big-endian.
+'''
+see = ["byte", "Inspector"]
+
+# ---------------------------------------------------------------- memory
+
+[[term]]
+term = "address"
+aliases = ["addresses"]
+short = "The number of a byte in memory, usually written in hex, like 0x140001000."
+text = '''
+A value of several bytes has the address of its first byte. A `u32` at `0x1000` covers `0x1000` to `0x1003`, and the next value can start at `0x1004`. Every process has its own addresses (virtual memory).
+'''
+see = ["memory", "pointer", "virtual memory"]
+
+[[term]]
+term = "pointer"
+aliases = ["pointers", "raw pointer", "raw pointers"]
+short = "A value that holds an address: it says where data is, instead of containing the data. 8 bytes on a 64-bit computer."
+text = '''
+```rust
+let x: u32 = 42;
+let r = &x;                                   // a reference: a pointer underneath
+println!("{:p}", r);                          // prints the address
+let p = r as *const u32;                      // a raw pointer
+assert_eq!(std::mem::size_of::<&u8>(), 8);
+```
+
+In machine code, references, `Box` and raw pointers are all just addresses.
+'''
+see = ["address", "dereference", "Rust reference"]
+
+[[term]]
+term = "Rust reference"
+aliases = ["&T", "&mut T"]
+short = "A Rust &T or &mut T: a pointer that the compiler checks (never null, never dangling). In machine code it is an address."
+see = ["pointer"]
+
+[[term]]
+term = "dereference"
+aliases = ["dereferencing", "dereferenced", "dereferences"]
+short = "Reading (or writing) the value at the address a pointer holds: *r in Rust."
+see = ["pointer"]
+
+[[term]]
+term = "offset"
+aliases = ["offsets", "field offset"]
+short = "A distance in bytes from a starting point, such as the start of a struct, an array or a file."
+text = '''
+```rust
+#[repr(C)]
+struct Player { health: u32, score: u32, level: u32 }
+// offsets: health 0, score 4, level 8
+```
+
+Machine code reaches a field as "address of the struct + offset". The status bar and Hex view show the **file offset**: the distance from the start of the file.
+'''
+see = ["address", "padding"]
+
+[[term]]
+term = "padding"
+short = "Unused bytes the compiler inserts in a struct so that each field starts at a suitable address."
+see = ["offset"]
+
+[[term]]
+term = "fat pointer"
+aliases = ["fat pointers", "wide pointer"]
+short = "A pointer that carries extra data: a &str or slice is a pointer plus a length (16 bytes)."
+see = ["pointer", "capacity"]
+
+[[term]]
+term = "capacity"
+short = "How many elements fit in the memory a Vec or String has reserved, before it must grow."
+text = '''
+A `Vec` or `String` is three 8-byte numbers: a pointer to the elements, the capacity and the length (24 bytes in total). The order is chosen by the compiler.
+
+```rust
+assert_eq!(std::mem::size_of::<String>(), 24);
+```
+'''
+see = ["fat pointer", "heap"]
+
+[[term]]
+term = "stack"
+aliases = ["the stack"]
+short = "The memory area for local variables: each function call gets a block that is given back automatically when it returns."
+text = '''
+The stack is fast and needs no bookkeeping, but the size of everything on it must be known when compiling. The CPU has special instructions for it; Level 1 explains them.
+
+```rust
+fn f() {
+    let n = 5u32;          // on the stack
+    let v = vec![1, 2];    // the Vec value on the stack, the elements on the heap
+}
+```
+'''
+see = ["heap", "local variable"]
+
+[[term]]
+term = "heap"
+aliases = ["the heap"]
+short = "The memory area for data whose size is only known at run time or that lives long. Box, Vec and String use it."
+text = '''
+The program asks for a block of heap memory (allocation) and gives it back later. In Rust this happens automatically: a `Vec` frees its heap block when it is dropped.
+'''
+see = ["stack", "allocation"]
+
+[[term]]
+term = "allocation"
+aliases = ["allocate", "allocates", "allocated", "allocating", "allocations"]
+short = "Reserving a block of heap memory while the program runs. Freeing gives it back."
+see = ["heap"]
+
+[[term]]
+term = "local variable"
+aliases = ["local variables"]
+short = "A variable declared inside a function. It usually lives on the stack (or only in a register)."
+see = ["stack", "global variable"]
+
+[[term]]
+term = "global variable"
+aliases = ["global variables", "static variable", "static variables"]
+short = "A variable that exists for the whole run of the program, like a Rust static. Stored in the program's data section."
+see = ["local variable"]
+
+[[term]]
+term = "virtual memory"
+short = "Every process gets its own private range of addresses, which the OS and CPU map to the real memory."
+text = '''
+Address `0x1000` in one process and `0x1000` in another are different bytes, so processes cannot see each other's memory. An address only has a meaning inside one process.
+'''
+see = ["address", "process"]
+
+# ---------------------------------------------------------------- compiling
+
+[[term]]
+term = "compiler"
+aliases = ["compilers", "compile", "compiles", "compiled", "compiling", "rustc"]
+short = "The tool that translates source code into machine code, like rustc for Rust."
+text = '''
+`cargo build` calls `rustc`, which checks your code and translates it, using LLVM to produce optimized machine code. The output of each crate is an object file, which the linker turns into an executable.
+'''
+see = ["LLVM", "linker", "object file", "optimization"]
+
+[[term]]
+term = "LLVM"
+short = "The code generator that rustc (and other compilers such as clang) uses to produce and optimize machine code."
+see = ["compiler"]
+
+[[term]]
+term = "object file"
+aliases = ["object files"]
+short = "The compiler's output for one crate or source file: machine code and data, not yet a complete program."
+see = ["compiler", "linker"]
+
+[[term]]
+term = "linker"
+aliases = ["linkers", "linking"]
+short = "The tool that combines object files and libraries into one executable and connects all calls."
+see = ["object file", "static linking", "dynamic linking"]
+
+[[term]]
+term = "static linking"
+aliases = ["statically linked"]
+short = "Copying library code into the executable itself. Rust does this with its standard library."
+text = '''
+That is why a tiny Rust program contains hundreds of functions: the parts of `std` it uses (printing, strings, panics, memory allocation) are inside the file.
+'''
+see = ["dynamic linking", "standard library"]
+
+[[term]]
+term = "dynamic linking"
+aliases = ["dynamically linked", "dynamically linking"]
+short = "Leaving library code in a separate file (like a DLL) that the operating system loads and connects when the program starts."
+text = '''
+The program only records which functions it needs from which library, in its import table. Those names survive stripping, which makes them a great clue for reversers.
+'''
+see = ["static linking", "library"]
+
+[[term]]
+term = "standard library"
+aliases = ["std", "Rust standard library"]
+short = "The library that comes with Rust (std): String, Vec, println!, files, threads and more."
+see = ["library", "static linking"]
+
+[[term]]
+term = "debug build"
+aliases = ["debug builds", "debug mode"]
+short = "What cargo build makes by default: little optimization, extra checks (such as overflow), easy to debug."
+see = ["release build"]
+
+[[term]]
+term = "release build"
+aliases = ["release builds", "release mode", "--release"]
+short = "What cargo build --release makes: optimized machine code, faster, without the debug checks."
+see = ["debug build", "optimization"]
+
+[[term]]
+term = "optimization"
+aliases = ["optimizations", "optimize", "optimizes", "optimized", "optimizer", "optimizing"]
+short = "The compiler rewriting code into something faster that gives the same results."
+text = '''
+Common optimizations are constant folding (`2 + 3` becomes `5`), inlining (copying a small function into its caller) and removing dead code. Optimized code often looks quite different from the source.
+'''
+see = ["constant folding", "inlining", "dead code", "release build"]
+
+[[term]]
+term = "constant folding"
+short = "An optimization that calculates expressions with known values at compile time: let x = 2 + 3 becomes 5."
+see = ["optimization"]
+
+[[term]]
+term = "inlining"
+aliases = ["inlined", "inline", "inlines"]
+short = "An optimization that copies the body of a small function into its caller, so the call disappears."
+see = ["optimization"]
+
+[[term]]
+term = "dead code"
+short = "Code whose result is never used. The optimizer removes it."
+see = ["optimization"]
+
+[[term]]
+term = "symbol"
+aliases = ["symbols", "symbol table"]
+short = "A name attached to an address, such as the name of a function. Stripping removes them."
+text = '''
+With symbols, a tool can show `check_password` instead of `sub_140001080`. Debug information goes further and maps every instruction back to a source line.
+'''
+see = ["stripping", "debug information"]
+
+[[term]]
+term = "stripping"
+aliases = ["strip", "stripped"]
+short = "Removing symbols and debug information from a program, so its own functions have no names any more."
+text = '''
+```toml
+# Cargo.toml
+[profile.release]
+strip = true
+```
+
+ORRESS then makes up names from the address, like `sub_140001010`. Names of imported operating system functions survive, because the loader needs them.
+'''
+see = ["symbol", "debug information"]
+
+[[term]]
+term = "debug information"
+aliases = ["debug info", "PDB", "DWARF", "debug symbols"]
+short = "Extra data that maps machine code back to source files, lines, variable names and types. PDB files on Windows, DWARF on Linux."
+see = ["symbol", "stripping"]
+
+[[term]]
+term = "name mangling"
+aliases = ["mangling", "mangled", "demangle", "demangled", "demangling"]
+short = "Encoding a full function path into one unique symbol name, like _ZN6myapp4main17h...E. Demangling turns it back."
+see = ["symbol"]
+
+[[term]]
+term = "entry point"
+aliases = ["entry points"]
+short = "The address where the operating system starts running a program. It runs start-up code, which later calls main."
+text = '''
+The entry point is stored in the program's header. In a Rust program on Windows the chain is roughly: entry point -> C runtime start-up -> Rust's `lang_start` -> your `fn main`. The **Info** view shows the entry point; **Go > Go to main** skips the start-up code.
+'''
+see = ["start-up code", "main function", "header"]
+
+[[term]]
+term = "start-up code"
+aliases = ["startup code", "C runtime", "CRT"]
+short = "Code from the C runtime and Rust's standard library that runs before main: it prepares the program and then calls main."
+see = ["entry point", "main function"]
+
+[[term]]
+term = "main function"
+aliases = ["fn main", "main()"]
+short = "The function where the programmer's own code begins. ORRESS finds it for you with Go to main (Ctrl+Shift+M)."
+see = ["entry point", "start-up code"]
+
+# ---------------------------------------------------------------- executable files
+
+[[term]]
+term = "magic bytes"
+aliases = ["magic number", "magic numbers", "file signature"]
+short = "Fixed bytes at the start of a file that identify its format, like 4D 5A (MZ) for Windows programs."
+text = '''
+| format | first bytes |
+|---|---|
+| PE (Windows) | `4D 5A` (`MZ`) |
+| ELF (Linux) | `7F 45 4C 46` (`.ELF`) |
+| Mach-O (macOS, 64-bit) | `CF FA ED FE` |
+'''
+see = ["header", "executable"]
+
+[[term]]
+term = "header"
+aliases = ["headers"]
+short = "A block of fields at a fixed place in a file that describes the rest of the file."
+text = '''
+An executable's headers say which CPU it is for, whether it is 32- or 64-bit, where the entry point is, which sections there are and where the import table is. The **Info** view reads them for you.
+'''
+see = ["magic bytes", "section", "entry point"]
+
+[[term]]
+term = "section"
+aliases = ["sections"]
+short = "A named block of an executable, such as .text for code or .rdata for read-only data, loaded into memory as one area."
+text = '''
+Each section has a start in the file, a start in memory, a size and permissions (read, write, execute). Typical Windows sections are `.text`, `.rdata`, `.data`, `.pdata` and `.reloc`. The **Sections** view lists them.
+'''
+see = ["header", "executable"]
+
+[[term]]
+term = "program loader"
+aliases = ["operating system's loader", "Windows loader"]
+short = "The part of the operating system that reads an executable, copies its sections into memory, connects its imports and starts it."
+see = ["operating system", "entry point"]

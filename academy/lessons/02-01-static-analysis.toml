@@ -1,0 +1,366 @@
+id = "l2-static-analysis"
+level = 2
+order = 1
+title = "Static analysis: a first look"
+summary = "What static analysis is, and a fixed routine for your first five minutes with any unknown program."
+goals = [
+    "explain what static analysis is, and what it can and cannot tell you",
+    "read the Info view of a program: format, architecture, detections and protections",
+    "use the Observations and tips and the Strings view to find a first lead",
+    "follow the same first-look routine for every new program",
+]
+badge = "First Look"
+
+[[steps]]
+title = "Reading without running"
+goal = "Know what static analysis is and why you start with it."
+text = '''
+In Level 1 you read assembly line by line. Real programs are much bigger than one
+function, so now you learn to find your way around a whole program. That is
+**static analysis**: understanding a program by reading its file, **without running it**.
+
+Think of a Rust project you did not write. You could run `cargo run` and watch what it
+prints. Or you could open `src/main.rs` and read. Reading takes longer, but it shows you
+everything: every `if`, every error message, also the paths that one run never takes.
+Static analysis is the "open the source and read" approach, except that the "source" is
+the machine code inside the `.exe`.
+
+Static analysis has three big advantages:
+
+- **It is safe.** Nothing runs, so even a harmful program cannot do anything.
+- **It is complete.** You can see every path through the code.
+- **It needs only the file.** No special computer, no debugger.
+
+It also has a limit. Values that only exist while the program runs are not in the file:
+what you type, what a server answers, data the program decrypts in memory. For those you
+will run the program under a debugger in Level 3 (that is *dynamic analysis*).
+
+Experienced reversers always start statically, and ORRESS is built for it. In this level
+you learn the tools: the Info view, the file format, navigation, names and comments, the
+graph view and the decompiler. At the end you decode a hidden password and write a key
+generator.
+'''
+
+[[steps]]
+title = "Meet crackme #10"
+goal = "Open the practice program for the first six lessons of this level."
+text = '''
+For the next six lessons you work with one program: **crackme #10**, a small "licence
+checker" written in Rust. It asks for a licence code and answers *Licence accepted* or
+*Invalid licence code.* By the end of the decompiler lesson you will know exactly which
+codes it accepts, without ever guessing.
+
+Each lesson uses this program to practise one skill. That is how real analysis works too:
+you come back to the same program again and again, and every visit adds to what you know.
+
+When you press the button, ORRESS copies the program to its configuration folder (in a
+subfolder `academy/crackmes`) and opens it. It does not run it. The program is harmless: it
+only reads one line and prints one answer. If you want to try codes later, you can run
+`crackme10.exe` from a terminal in that folder.
+'''
+instructions = [
+    "Press the **Open crackme10** button below.",
+    "Wait a moment: the tabs `crackme10.exe · Hex` and `crackme10.exe · Info` open in the middle of the window.",
+]
+check = { kind = "open_crackme", name = "crackme10" }
+success = '''
+ORRESS opened the file in two views and started analysing it in the background. The
+**Info** tab is in front: it is the "What is this file?" overview, and it is always your
+first stop.
+'''
+
+[[steps]]
+title = "A routine for the first five minutes"
+goal = "Learn the fixed checklist you will use on every new program."
+text = '''
+Faced with an unknown program, beginners click around at random. Professionals follow a
+short, fixed routine, a kind of **first look** (malware analysts call it *triage*). It
+answers five questions in five minutes:
+
+1. **What is it?** Which file format, which processor, is it a program or a library?
+2. **Who made it?** Which language and compiler? Is it packed (squeezed and hidden)?
+3. **How is it protected?** Which security features are on? Does it have function names?
+4. **What does it say?** Which messages and other text are inside?
+5. **What can it do?** Which library functions does it use (its imports)?
+
+The answers decide what you do next. A program written in Rust needs different habits than
+one written in C#. A packed program must be unpacked first. A program that imports network
+functions talks to the internet.
+
+The **Info** view answers questions 1 to 3 on one page, and it gives tips for 4 and 5. The
+**Strings** view answers question 4, the **Imports** view question 5. In the next steps
+you work through the routine on crackme #10, one question at a time.
+
+Remember the order. You will use it for every program in this course, and for every
+program after it.
+'''
+
+[[steps]]
+title = "What is it?"
+goal = "Read the format and the processor from the Info view."
+text = '''
+Look at the first card of the Info view, **What is this file?**. It shows:
+
+- the **format** in large text, with one line explaining it. *PE (Windows executable)*
+  means a Windows program. Linux programs say *ELF*, macOS programs *Mach-O*.
+- **Size**: the file size in bytes.
+- **Kind**: a program you run (*Executable program*), a library other programs use, or an
+  object file (a half-finished piece of a program).
+- **Architecture**: the processor the machine code is written for, and the byte order.
+- **Image base** and **Entry point**: two addresses you will meet in the next lesson.
+- **Imports / exports** and **Symbols**: how many library functions it uses, how many it
+  offers, and how many names are stored in the file.
+- **Entropy**: how random the bytes look, from 0 to 8 (more about it in the deep dive).
+
+Hover over any label with Explain Mode on and ORRESS explains it.
+
+The architecture matters most: assembly for an ARM64 phone looks completely different from
+the x86-64 assembly you learned in Level 1. Read it off the card.
+'''
+deep_dive = '''
+**Entropy** measures how unpredictable the bytes are. English text uses few different
+byte values and scores about 4 to 5. Machine code scores about 6. Compressed or encrypted
+data uses all 256 byte values evenly and scores close to 8. The **Entropy graph** card at
+the bottom of the Info view draws it along the file. One part near 8 means "this cannot
+be read yet": it is packed or encrypted, and you must find the code that unpacks it.
+'''
+instructions = [
+    "Click the tab **crackme10.exe · Info** in the middle of the window (it is probably already in front).",
+    "In the **What is this file?** card, find the row **Architecture**.",
+    "Type the processor name (the part before the dot) in the answer box below and press **Check**.",
+]
+spotlight = "view.Info"
+check = { kind = "answer", answers = ["x86-64", "x86_64", "x64", "amd64", "x86-64 little-endian"] }
+hints = [
+    "It is the row between **Kind** and **Image base**.",
+    "It is the 64-bit PC processor you learned in Level 1.",
+    "Type `x86-64`.",
+]
+success = '''
+x86-64: the 64-bit PC processor, little-endian (the lowest byte of a number is stored
+first). Everything you learned in Level 1 applies. Good to know before you read a single
+instruction.
+'''
+
+[[steps]]
+title = "Who made it?"
+goal = "Understand what the Detected card tells you about the compiler."
+text = '''
+Scroll down to the card **Detected**. ORRESS recognises languages, compilers and packers by
+traces they leave in the file. Each line shows the kind of detection, the name, and the
+evidence in brackets.
+
+For crackme #10 you see two lines:
+
+- **Language: Rust**, because the file contains paths like `/rustc/...`. The Rust standard
+  library keeps its source file names for panic messages, and they survive compiling.
+- **Compiler: Microsoft Visual C++**, because of a *Rich header*: hidden data that
+  Microsoft's linker writes into every file it builds.
+
+A Rust program built by Microsoft Visual C++? Both are true. `rustc` compiles your Rust
+code, but on Windows it uses Microsoft's **linker** to glue the pieces into an `.exe`, and
+Microsoft's C runtime start-up code runs before your `main`. So you will meet some
+Microsoft code before you reach the Rust code.
+
+Why does the language matter? Because every language leaves typical patterns. In Rust you
+will see slices passed as a pointer plus a length, bounds checks before indexing, and
+`String`s made of a capacity, a pointer and a length. In C you would see zero-terminated
+strings instead. Knowing the language tells you which patterns to expect.
+'''
+check = { kind = "choice", options = [
+    "The Rust code was compiled by rustc, and Microsoft's linker and C runtime start-up code put the .exe together",
+    "Someone rewrote the Rust program in C++",
+    "ORRESS made a mistake: a file can only be one of the two",
+], correct = 0, explain = [
+    "That is how every Rust program on Windows is built. Expect some Microsoft start-up code before your main.",
+    "Nobody rewrote anything. The C++ detection comes from the linker's Rich header, not from C++ code.",
+    "Both detections are right: they describe different tools in the build chain.",
+] }
+hints = [
+    "Look at the evidence in brackets after each detection.",
+    "On Windows, rustc does not write the final .exe on its own.",
+]
+
+[[steps]]
+title = "How is it protected?"
+goal = "Know what each protection means for you as a reverser."
+text = '''
+The card **Protections** lists security features of the file, with **yes**, **no** or
+**partial** and a short detail. For crackme #10:
+
+- **ASLR: yes.** Windows loads the program at a random address each time. In ORRESS
+  addresses are always shown as if it were loaded at its preferred address, so this does
+  not bother you now.
+- **DEP / NX: yes.** Data in memory (stack, heap) may not be run as code. Normal for every
+  modern program.
+- **Control Flow Guard: no.** An extra check on indirect calls. When it is on, the
+  disassembly gets a bit noisier, nothing more.
+- **Signed: no.** No certificate that proves who published it. Crackmes and most malware
+  are not signed; Windows itself is.
+- **Stripped: yes.** The file contains no names for its own functions, only the names of
+  the library functions it imports.
+
+For a reverser the last line is the most important one. A stripped program shows its
+functions with generated names such as `sub_1400012c0`: "the function at address
+0x1400012c0". Naming them is your job, and you will learn it in lesson 4.
+'''
+deep_dive = '''
+These protections were made against attackers who exploit bugs, not against reversers.
+None of them hides code from static analysis. Protections that *do* fight reversers are
+packers, obfuscation and anti-debugging tricks; the Info view warns about those under
+**Detected** and **Observations and tips** when it finds them. Level 3 and Level 5 teach
+you to beat them.
+'''
+check = { kind = "choice", options = [
+    "Its functions have generated names like sub_1400012c0 instead of their real names",
+    "Its machine code is encrypted and cannot be read",
+    "It cannot be opened in a disassembler",
+], correct = 0, explain = [
+    "Right. The compiler kept no names in the file, so ORRESS names functions by their address until you rename them.",
+    "Stripping only removes names. Encrypted code is what a packer does, and it would show high entropy.",
+    "A stripped program disassembles like any other; it only lacks names.",
+] }
+hints = [
+    "Stripping removes something from the file, but not the code.",
+    "What do you call a function when you do not know its name?",
+]
+
+[[steps]]
+title = "Observations and tips"
+goal = "Use ORRESS's tips to find out where the input comes from."
+text = '''
+The card **Observations and tips** turns the facts above into advice. Each tip has a tag:
+**TIP** (worth doing), **INFO** (good to know) or **WARNING** (be careful).
+
+Many tips come from the **imports**: the library functions a program uses. A program
+cannot read the keyboard or compare memory on its own; it asks Windows or the C runtime to
+do it, by calling a function with a well-known name. So the import list reveals what a
+program can do, before you read any code.
+
+For crackme #10 you see, among others:
+
+- **It compares strings**: it imports `memcmp`, a function that compares two blocks of
+  memory. In a crackme, that is often where your input meets the expected value.
+- **Where input comes from**: it names the Windows function that reads text typed in the
+  console window.
+- **Debugger checks (probably harmless)**: imports that almost every Windows program has
+  because of the C runtime.
+- **No function names**: the program is stripped.
+- **Suggested first steps**: Strings, then Imports, then main.
+
+Read the tip **Where input comes from**. Which function reads the input?
+'''
+instructions = [
+    "In the Info view, scroll to the card **Observations and tips**.",
+    "Find the tip **Where input comes from** and read its text: *Reads input with ...*",
+    "Type the function name in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["ReadConsoleW", "ReadConsole"] }
+hints = [
+    "The tip is tagged INFO.",
+    "Its name starts with `ReadConsole`.",
+    "Type `ReadConsoleW`.",
+]
+success = '''
+`ReadConsoleW` is the Windows function behind Rust's `io::stdin().read_line()`. The `W`
+means "wide": it returns text as UTF-16, two bytes per character, which Rust then converts
+to UTF-8. Now you know where the input enters the program.
+'''
+
+[[steps]]
+title = "What does it say?"
+goal = "List the readable text in the program."
+text = '''
+Question 4 of the routine: what does the program say? A program's messages are a map of
+what it does. A message like *Invalid licence code.* tells you there is a licence check,
+and the code that prints it sits right next to that check.
+
+Every string literal in your Rust code ends up in the file as plain bytes, usually in a
+read-only data section. The **Strings** view finds every run of readable characters and
+lists it with:
+
+- **Offset**: where it is in the file;
+- **Address**: where it is in memory when the program runs (the number the disassembly uses);
+- **Section**: which part of the file it is in;
+- **Type**: ASCII (1 byte per character) or UTF-16 (2 bytes per character);
+- **Refs**: how many instructions use it, with a link to jump there;
+- **Text**: the string itself.
+
+A Rust program contains thousands of strings from the standard library (panic messages,
+file names). Use the filter box to find the interesting ones.
+'''
+instructions = [
+    "In the **Project** panel on the left, under `crackme10.exe`, click **Strings**.",
+    "Click in the filter box at the top of the Strings view (it says *Filter (case-insensitive)...*).",
+    "Type `licence`.",
+]
+spotlight = "tree.Strings"
+check = { kind = "view", view = "Strings" }
+success = '''
+With the filter you see only a few rows. Notice that one row can hold several messages
+glued together, such as `Licence code: Invalid licence code.`. Rust does not end its
+strings with a zero byte, so string literals sit back to back, and the Strings view cannot
+see where one ends. The program knows each length; you will see the lengths in the code.
+'''
+
+[[steps]]
+title = "Read the messages"
+goal = "Find the message the program prints for a wrong code."
+text = '''
+Read the rows the filter left, plus one more you can find with the filter `crackme`.
+You can tell from the messages alone how the program works:
+
+- `=== ORRESS Academy - Crackme #10 ===`: a title, printed first (filter `crackme`);
+- `Licence code: `: the prompt (note the space at the end, ready for your typing);
+- one message for success and one for failure.
+
+From four strings you already know: the program prints a title, asks for a code, checks
+it, and prints one of two answers. You have not read one instruction yet.
+
+What exactly does the program print when the code is wrong? Type the message, with or
+without the full stop at the end.
+'''
+instructions = [
+    "Look at the **Text** column of the Strings view (filter: `licence`).",
+    "Find the message that says the code is not right. It is glued to the end of the `Licence code: ` prompt.",
+    "Type that message in the answer box and press **Check**.",
+]
+spotlight = "view.Strings"
+check = { kind = "answer", answers = ["Invalid licence code.", "Invalid licence code", "Invalid licence code. "] }
+hints = [
+    "It starts with the word `Invalid`.",
+    "Type `Invalid licence code.`",
+]
+success = '''
+*Invalid licence code.* is your first **lead**: somewhere in the code, an instruction loads
+this message, just after the check failed. In lesson 3 you will follow the **Refs** link
+from this string straight to that code.
+'''
+
+[[steps]]
+title = "Your first-look checklist"
+goal = "Summarise what you learned in five minutes."
+text = '''
+You followed the routine once. Here is what you found, without running anything and
+without reading any code:
+
+| Question | Answer for crackme #10 |
+|---|---|
+| What is it? | A 64-bit Windows program (PE, x86-64). |
+| Who made it? | Rust, linked with Microsoft's tools. |
+| How is it protected? | Normal protections, stripped: no function names. |
+| What does it say? | A title, a prompt, *Licence accepted*, *Invalid licence code.* |
+| What can it do? | Read console input (`ReadConsoleW`), compare memory (`memcmp`). |
+
+From this you can already guess the plan: find the code that prints *Invalid licence
+code.*, look at the check just before it, and work out what it wants.
+
+Before you do that, the next lesson looks deeper into the file itself: how a Windows
+program is built up, what the sections and imports really are, and how addresses in
+memory relate to positions in the file. That knowledge makes every view in ORRESS easier
+to understand.
+'''
+success = '''
+Lesson complete. Use this routine on every program you open, from crackmes to real
+software: format, makers, protections, strings, imports.
+'''

@@ -1,0 +1,348 @@
+id = "l4-symbolic-execution"
+level = 4
+order = 27
+title = "Symbolic execution"
+summary = "Let the program solve itself: treat the input as unknowns, collect the conditions a correct input must meet, and let a solver compute it."
+goals = [
+    "explain concrete and symbolic execution with a Rust example",
+    "turn the branches of a check function into constraints",
+    "explain what an SMT solver such as z3 does",
+    "solve crackme14 with the Emulator's Symbolic solve",
+    "know when symbolic execution cannot help",
+]
+badge = "Constraint Breaker"
+reveal_source = "crackme14"
+
+[[steps]]
+title = "When guessing is hopeless"
+goal = "See why brute force fails for real passwords."
+text = '''
+Some check functions are too tangled to invert by hand. Every condition mixes several input characters, the operations are a soup of XORs, additions and rotations, and after an hour you still have no idea which input passes.
+
+The obvious fallback is **brute force**: try every possible input until one works. How long would that take? Count the possibilities. A password of printable ASCII characters has 95 choices per character:
+
+| Length | Possible passwords |
+|---|---|
+| 1 | 95 |
+| 2 | 95 x 95 = 9 025 |
+| 4 | 81 450 625 |
+| 8 | about 6.6 x 10^15 |
+| 12 | about 5.4 x 10^23 |
+
+Each extra character multiplies the work by 95. A computer that tests a billion passwords per second needs about 77 days for 8 characters and about 17 million years for 12.
+
+But brute force ignores something important: **you have the check function**. It describes, precisely, which inputs it accepts. Instead of asking it "is this one right?" a trillion times, you can ask a smarter question: "*what* would make you say yes?"
+
+That is what **symbolic execution** does.
+'''
+deep_dive = '''
+Brute force is still the right tool sometimes: for a 4-digit PIN (10 000 possibilities), or when the check is a real hash function, where nothing smarter exists. The skill is to estimate the number of possibilities first and decide.
+'''
+success = "Exponential growth beats any computer. You need a method that does not guess."
+
+[[steps]]
+title = "Concrete and symbolic"
+goal = "Understand what it means to run code on unknowns."
+text = '''
+Normally a program runs with **concrete** values: real numbers. Take this check:
+
+```rust
+fn check(x: u8) -> bool {
+    let t = x ^ 0x5a;
+    if t == 0x15 {
+        return true;
+    }
+    false
+}
+```
+
+Run it concretely with `x = 0x41`: `t` becomes `0x41 ^ 0x5a = 0x1b`, `0x1b == 0x15` is false, the function returns `false`. You learn that `0x41` is wrong, and nothing else.
+
+Now run it **symbolically**. Do not choose a value for `x`. Keep it as an unknown, a **symbolic variable**, like in algebra at school. Every operation then builds a formula instead of a number:
+
+1. `t = x ^ 0x5a`: `t` is not a number now, it is the formula `x ^ 0x5a`.
+2. `if t == 0x15`: we cannot decide true or false, because it depends on `x`. So we write the condition down: to take the `return true` path, `x ^ 0x5a == 0x15` must hold.
+
+That written-down condition is a **constraint**. Every input-dependent branch on the way to "Correct!" adds one. The list of all constraints on the way to a block is the **path constraint** of that block.
+
+Collect the constraints of the path to the success block, find values that satisfy all of them, and you have an input that reaches success. Without guessing.
+'''
+success = "Run on unknowns, write down the conditions, solve. Next you solve one yourself."
+
+[[steps]]
+title = "Solve a constraint by hand"
+goal = "Solve the single constraint from the last step."
+text = '''
+The path to `return true` in the last step has one constraint:
+
+```text
+x ^ 0x5a == 0x15
+```
+
+To solve it, use the XOR rule from Level 2: XOR with the same value twice cancels out. XOR both sides with `0x5a`:
+
+```text
+x ^ 0x5a ^ 0x5a == 0x15 ^ 0x5a
+x               == 0x15 ^ 0x5a
+```
+
+Compute `0x15 ^ 0x5a`. In binary: `0001 0101` XOR `0101 1010`.
+
+(This is not a made-up example: it is the very first character of crackme03's password check, which you solved in Level 2.)
+'''
+instructions = [
+    "Write `0x15` and `0x5a` in binary (the Number converter below shows both).",
+    "XOR them bit by bit: 1 where the bits differ, 0 where they are equal.",
+    "Type the result (hex with `0x`, decimal, or the character in quotes like `'A'`) and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x4f"], number = true }
+hints = [
+    "0x15 = 0001 0101, 0x5a = 0101 1010.",
+    "The XOR is 0100 1111.",
+    "0100 1111 = 0x4f, the character 'O'.",
+]
+success = "`0x4f`, the character `O`. A constraint with one unknown and one XOR is easy. Real checks have many unknowns and constraints that mix them, and that is where a machine helps."
+
+[[steps]]
+title = "Solvers: z3 and friends"
+goal = "Understand what an SMT solver is."
+text = '''
+A program that finds values satisfying a list of constraints is a **solver**. The kind used in reverse engineering is an **SMT solver** ("satisfiability modulo theories"). Ignore the long name: it means a solver that understands not only true/false logic but also *theories* such as fixed-size integers. It knows that a `u8` wraps at 256, that `<<` loses the top bits, that XOR and rotation work bit by bit.
+
+You give it constraints, it answers one of three things:
+
+- **sat** ("satisfiable"): here are values that make every constraint true,
+- **unsat**: no values can satisfy them all (so that path can never be taken),
+- **unknown**: it gave up (too hard, or out of time).
+
+The most famous SMT solver is **z3**, from Microsoft Research. CTF players use it all the time, usually from Python. Its language for constraints is called **SMT-LIB2**. The constraint from the last step looks like this in SMT-LIB2:
+
+```text
+(declare-const x (_ BitVec 8))
+(assert (= (bvxor x #x5a) #x15))
+(check-sat)
+(get-model)
+```
+
+`BitVec 8` is an 8-bit number, a `u8`. `bvxor` is XOR. z3 answers `sat` and gives `x = #x4f`.
+
+Solvers are not magic. Internally they search, but cleverly: they learn from every dead end and skip whole families of wrong answers at once. For the kind of constraints a crackme produces they usually finish in well under a second.
+'''
+check = { kind = "choice", options = [
+    "A list of constraints; it returns values that satisfy all of them, or says that none exist",
+    "A compiled program; it returns its source code",
+    "A password hash; it returns the password",
+    "A list of passwords to try one by one",
+], correct = 0, explain = [
+    "Right. Constraints in, satisfying values (sat) or a proof that there are none (unsat) out.",
+    "That would be a decompiler, and even a decompiler cannot give back the original source exactly.",
+    "A real hash is a one-way function. A solver cannot invert it in any reasonable time, as you will see at the end of this lesson.",
+    "That is brute force with a dictionary. A solver is exactly the thing that avoids trying candidates one by one.",
+] }
+hints = [
+    "Think about the sat / unsat answers.",
+]
+success = "Constraints in, a solution out. ORRESS has its own small solver built in, and it can also export constraints for z3."
+
+[[steps]]
+title = "Meet crackme14"
+goal = "Open a program that is hard to solve by hand."
+text = '''
+**Crackme #14** asks for a 12-character key. Its check function takes the key two characters at a time. For each pair `(a, b)` it computes two values from *both* characters and compares each with a stored byte:
+
+```rust
+let x = a ^ KA[j];        // KA: a stored key byte per pair
+let y = b ^ 0x3c;
+if x ^ y != MIX[j] { return 0; }
+if x.rotate_left(1).wrapping_add(y) != ROT[j] { return 0; }
+```
+
+Every comparison involves two unknown characters at once. You cannot read one character off one comparison, as you could in crackme03. By hand you would have to solve six small systems of equations. (`rotate_left(1)` shifts all bits one place to the left and moves the top bit around to the bottom.)
+
+This is exactly the situation symbolic execution is made for. Open the program.
+'''
+instructions = [
+    "Click **Open crackme14** below.",
+    "Wait until the Project panel lists the views of `crackme14.exe`.",
+]
+check = { kind = "open_crackme", name = "crackme14" }
+hints = ["The button is directly under this text."]
+success = "Before you can let ORRESS solve it, you need three addresses: the check function, its success block and its failure block."
+
+[[steps]]
+title = "Find the check function"
+goal = "Locate the function that decides."
+text = '''
+Start in `main`, as always. In crackme14's `main` you find this near the end:
+
+```text
+cmp      rax,0xc          ; is the key 12 (0xc) characters long?
+jne      loc_...          ; no: "Wrong key"
+...
+call     sub_1400.....    ; the check function
+cmp      eax,0x600d       ; did it return 0x600d?
+jne      loc_...          ; no: "Wrong key"
+```
+
+So `main` first checks the length, then calls a function and accepts the key only if that function returns `0x600d` (a hex joke: "good"). That function is the **check function**.
+
+What is its address?
+'''
+instructions = [
+    "Press `Ctrl+Shift+M` (Go to main) to jump to `main` in the Disassembly.",
+    "Scroll down to the line `cmp eax,0x600d`.",
+    "The line just above it is `call sub_1400.....`. Read the address in that name.",
+    "Type it with `0x` in front and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x1400012c0"], number = true }
+hints = [
+    "The call is directly above cmp eax,0x600d.",
+    "The function is called sub_1400012c0.",
+    "Type 0x1400012c0.",
+]
+success = "`0x1400012c0`. You could rename it to `check_key` now (press `N` on its name), which makes the next steps easier to follow."
+
+[[steps]]
+title = "Target and avoid"
+goal = "Find the block to reach and the block to stay away from."
+text = '''
+ORRESS's solver needs to know where you want to go. Two kinds of address:
+
+- The **target**: the block that runs only for the right input. Here, the block that sets the return value to `0x600d`.
+- The **avoid** addresses: blocks that mean failure. When a branch depends on the input and one side leads to an avoid address, the solver takes the other side and records the matching constraint.
+
+Jump to the check function and read it in the **Disassembly**. You will see six similar groups, one per pair. Each group ends with two `jne loc_140001489`: "if this comparison fails, jump to `loc_140001489`". At the very end:
+
+```text
+loc_140001478:
+  140001478  mov      dword ptr [rsp+4],0x600d    ; return value = 0x600d
+  ...
+loc_140001489:
+  140001489  pop      rcx                         ; every failure jumps here
+  14000148a  ret
+```
+
+So `loc_140001489` is the failure exit (avoid), and `loc_140001478` is the success block (target). The **Graph** view (press `Space`) shows the same thing as a picture: a ladder of blocks, each with an exit to the same block at the bottom.
+
+What is the target address?
+'''
+instructions = [
+    "Press `Ctrl+G`, type `1400012c0` and press `Enter` to jump to the check function.",
+    "Scroll down to the line with `0x600d`.",
+    "Read the label above it (`loc_...:`).",
+    "Type that address with `0x` in front and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001478"], number = true }
+hints = [
+    "The line is mov dword ptr [rsp+4],0x600d.",
+    "Its block starts at the label loc_140001478.",
+    "Type 0x140001478.",
+]
+success = "Target `0x140001478`, avoid `0x140001489`. You now have everything the solver needs."
+
+[[steps]]
+title = "Solve it"
+goal = "Run ORRESS's symbolic solver."
+text = '''
+The **Emulator** tab has three sections, one below the other: **Run function**, **Side-channel solve** and **Symbolic solve**. The **Function address** and **Input length** fields are shared: what you type in one section appears in the others.
+
+The **Symbolic solve** section asks for:
+
+- **Function address**: the check function. Its first argument becomes a pointer to the input.
+- **Input length**: how many unknown bytes the input has.
+- **Target address**: the block to reach. The **use cursor** button next to it copies the address of the line you clicked in the Disassembly.
+- **Avoid addresses**: failure blocks, separated by commas or spaces.
+
+When you press **Solve symbolically**, ORRESS runs the function with the input as 12 symbolic bytes, steers every input-dependent branch toward the target and away from the avoid block, collects one constraint per branch, and solves them with its built-in solver. The result shows a status line with the number of constraints, and the **Input** it found.
+
+The built-in solver splits the constraints into small groups of bytes that depend on each other (here: the two bytes of each pair) and solves each group separately. That is why it is fast.
+'''
+instructions = [
+    "Press `F7` to open the **Emulator** (or **View**, **Open View**, **Open Emulator**).",
+    "Scroll down to the **Symbolic solve** heading.",
+    "In **Function address** type `0x1400012c0`. In **Input length** type `12`.",
+    "In **Target address** type `0x140001478`. In **Avoid addresses** type `0x140001489`.",
+    "Click **Solve symbolically**. Read the line under **Input:**.",
+    "Type the key it found (without the quotes) into the answer box and press **Check**.",
+]
+spotlight = "view.Emulator"
+check = { kind = "secret", sha256 = "3477863dd51662afda7c84d764b9e3094e5130186482c68e27cc0c1d5f4f9a12" }
+hints = [
+    "The status line should say solved (12 constraints): two comparisons for each of the six pairs.",
+    "If it says 'stopped: ...', check the addresses for typing errors: all three start with 0x1400.",
+    "The key is shown in quotes under Input:, followed by its bytes in hex.",
+]
+success = "Twelve constraints, solved in a moment, and the key even comments on how you got it. You never ran the program with the right key and never guessed once."
+
+[[steps]]
+title = "Check the answer"
+goal = "Verify the solver's answer by running the check function."
+text = '''
+Always verify. A solver gives you values that satisfy the constraints *it collected*. If you gave it a wrong target, or the emulator modelled something differently from the real CPU, the answer can be wrong. The cheapest test: run the check function with the answer and look at what it returns.
+
+The **Run function** section at the top of the Emulator does that. It writes your **Input** text into memory, calls the function with a pointer to it as the first argument, and shows the return value in **RAX** and the number of instructions it ran.
+'''
+instructions = [
+    "In the Emulator, scroll up to **Run function**. The **Function address** still says `0x1400012c0`.",
+    "In the **Input** field (labelled `Input (arg0 ... pointer)`) type the key the solver found.",
+    "Leave **pass input length as arg1** unticked (this function takes only a pointer).",
+    "Click **Run**. Read the value next to **RAX**.",
+    "Type it with `0x` in front and press **Check**.",
+]
+spotlight = "view.Emulator"
+check = { kind = "answer", answers = ["0x600d"], number = true }
+hints = [
+    "RAX is shown in hex first, then in decimal.",
+    "The check function returns 0x600d for the right key and 0 otherwise.",
+]
+success = "`0x600d`: accepted. Try changing the last character and running again: RAX becomes `0x0`, and the instruction count drops, because the check stops early. Remember that drop; it is the subject of the next lesson. You can also run crackme14 itself and type the key: it says `Correct! The solver was right.`"
+
+[[steps]]
+title = "Exporting to z3"
+goal = "Know when and how to use an external solver."
+text = '''
+Under the solve result there is a folded section, **SMT-LIB2 (for external z3)**. Click it to see the constraints ORRESS collected, written in z3's language: one `declare-const` per input byte (`b0` to `b11`) and one `assert` per branch.
+
+Why would you need z3 when ORRESS solved it already? The built-in solver has a limit: it solves each group of bytes that depend on each other by trying combinations, and it gives up when a group gets too big (more than 3 bytes that are all tied together, which means more than 16 million combinations). A check where *every* character influences *every* comparison, for example a hash-like mixing loop over the whole input, creates one giant group. Then the status line is shown in a warning colour and the result is incomplete.
+
+For those, copy the SMT-LIB2 text into a file, add two lines at the end:
+
+```text
+(check-sat)
+(get-model)
+```
+
+and run `z3 file.smt2` (z3 is a separate program you install yourself). z3 reasons about the formulas instead of trying combinations, and solves much bigger problems.
+'''
+success = "Built-in solver for the common cases, z3 for the tough ones. The constraints are the same."
+
+[[steps]]
+title = "Where symbolic execution fails"
+goal = "Know the limits."
+text = '''
+Symbolic execution is powerful, but not almighty. Three classic problems:
+
+1. **Path explosion.** Every input-dependent branch can go two ways. A function with 30 such branches in a row has up to 2^30 (a billion) paths. ORRESS sidesteps this by following only *one* path, steered by your target and avoid addresses, which is why you give it those.
+2. **Symbolic addresses.** When the input is used as an *index*, for example `TABLE[input[0] as usize]`, the address read from depends on the unknown. The engine then cannot know which memory it reads. ORRESS stops with `symbolic memory address`. Lookup tables (like an AES S-box) cause this.
+3. **One-way functions.** A real hash like SHA-256 is designed so that no formula leads back from the output to the input. The constraints are correct, but no solver can solve them in your lifetime.
+
+Some practical limits of ORRESS's implementation: the input is passed as **one** argument (a pointer). A function that also needs the length in a second argument, like crackme03's `check_password(s: &[u8])`, gets the length 0 from the solver, fails its length check, and the solver reports that it was *forced into an avoided block*. And it runs x86-64 code only.
+
+Which check can symbolic execution **not** crack?
+'''
+check = { kind = "choice", options = [
+    "sha256(input) == STORED_DIGEST",
+    "input[i] ^ KEY[i] == EXPECTED[i] for every i",
+    "input[0] + input[1] == 0x9b and input[0] - input[1] == 0x15",
+    "input.rotate_left(3) == 0x2e (for a single byte)",
+], correct = 0, explain = [
+    "Right. SHA-256 is a one-way function: the constraints exist, but no solver can find an input for a given digest. Only guessing (dictionary, brute force) works there.",
+    "Byte-wise XOR and compare: the easiest case for a solver, one tiny constraint per byte.",
+    "Two linear equations with two unknowns. A solver handles that instantly.",
+    "A rotation of one byte is easy to invert, for a solver and for you: rotate right by 3.",
+] }
+hints = [
+    "Which option contains a function designed to be impossible to invert?",
+]
+success = "Hashes resist solvers. Everything that is built from XOR, addition, subtraction, multiplication and rotation on a few bytes at a time is fair game. In the next lesson you meet a check that leaks its secret in a completely different way."

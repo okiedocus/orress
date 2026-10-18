@@ -1,0 +1,314 @@
+id = "l0-compiling"
+level = 0
+order = 7
+title = "From Rust to machine code"
+summary = "What the compiler and linker produce, debug versus release, and what is lost on the way."
+goals = [
+    "describe what happens when you run cargo build",
+    "recognize a small Rust function in its assembly form",
+    "explain the difference between a debug and a release build",
+    "list what compiling throws away, and what symbols and stripping are",
+    "explain why a tiny Rust program contains hundreds of functions",
+]
+
+[[steps]]
+title = "What cargo build does"
+goal = "Know the steps from source code to an executable."
+text = '''
+When you type `cargo build`, several tools work one after another:
+
+1. **Cargo** works out which files and crates need to be built, and calls the Rust compiler, `rustc`, for each crate.
+2. **The compiler** (`rustc`) checks your code (types, borrowing, everything that gives you error messages), and then translates it. Rust uses a code generator called **LLVM** for the last part: LLVM turns the code into **machine code** for the chosen architecture and optimizes it.
+3. The result for each crate is an **object file**: machine code and data, but not yet a complete program. Calls to functions in other crates are still holes to be filled in.
+4. **The linker** combines all object files (your crate, the standard library, every dependency) into one **executable** file, and fills in the holes: every call now points to the right place. It also writes the information the operating system needs to load the program.
+
+The finished program lands in `target/debug/` or `target/release/`, for example `target/debug/myapp.exe` on Windows.
+
+```text
+main.rs --rustc/LLVM--> object files --linker--> myapp.exe
+```
+
+You never see the object files, because Cargo cleans up after itself. But this structure explains much of what you will find inside a program: your code is only a small part of it, and the linker decided where everything went.
+'''
+
+[[steps]]
+title = "A function, three ways"
+goal = "See a Rust function as assembly and as machine code."
+text = '''
+Here is a tiny Rust function:
+
+```rust
+pub fn add(a: u64, b: u64) -> u64 {
+    a + b
+}
+```
+
+`cargo build --release` for 64-bit Windows turns it into two **instructions**, which are five **bytes** of machine code:
+
+```text
+bytes           assembly
+48 8D 04 11     lea rax, [rcx+rdx]   ; rax = a + b
+C3              ret                  ; return to the caller
+```
+
+Let us read it. The CPU has a handful of very fast storage slots called **registers**, each holding one 64-bit number; they have names like `rax`, `rcx` and `rdx`. Level 1 explains them properly. For now you need three facts:
+
+- On Windows, the first argument of a function arrives in the register `rcx`, the second in `rdx`. So `rcx` is `a` and `rdx` is `b`.
+- `lea rax, [rcx+rdx]` calculates `rcx + rdx` and puts the result in `rax`. (`lea` was made for address calculations, but compilers love it as a fast addition.)
+- The return value of a function is always left in `rax`. `ret` then returns to the code that called the function.
+
+The left column is what is actually in the program file. A **disassembler**, like the **Disassembly** view of ORRESS, turns those bytes back into the readable middle column. The comments after `;` are written by the reverser, or by ORRESS.
+'''
+
+[[steps]]
+title = "Where is the result?"
+goal = "Find the return value in the assembly."
+text = '''
+Look at the example from the previous step again:
+
+```text
+lea rax, [rcx+rdx]
+ret
+```
+
+Remember the three facts: the arguments arrive in `rcx` and `rdx`, `lea` calculates the sum and stores it in the register named first, and `ret` returns from the function.
+
+After these two instructions, which register holds the value the function returns?
+'''
+check = { kind = "choice", options = ["rcx", "rdx", "rax", "ret"], correct = 2, explain = [
+    "rcx holds the first argument, a. It is not changed.",
+    "rdx holds the second argument, b. It is not changed.",
+    "Correct: lea stored the sum in rax, and rax is where return values go.",
+    "ret is an instruction, not a register.",
+] }
+hints = ["The register named first after lea receives the result."]
+success = '''
+On x86-64 the return value is in `rax` (or a smaller part of it for small types). You will use this fact in every crackme: "what does this function return?" means "what is in `rax` at its `ret`?".
+'''
+
+[[steps]]
+title = "Numbers in code become hex"
+goal = "Recognize a constant from the source code in the assembly."
+text = '''
+```rust
+pub fn is_secret(x: u32) -> bool {
+    x == 1337
+}
+```
+
+compiles to:
+
+```text
+cmp ecx, 0x539    ; compare the argument with 0x539
+sete al           ; al = 1 if they were equal, else 0
+ret
+```
+
+- `ecx` is the lower 32 bits of `rcx`: the argument `x` is a `u32`, so only 32 bits are used.
+- `cmp` compares two values.
+- `sete al` sets `al` (the lowest byte of `rax`) to 1 if the comparison found them equal, and to 0 otherwise. That is the `bool` result: a `bool` is one byte, 0 for false and 1 for true.
+
+Notice the number. The `1337` from the source is written in **hex** in the assembly. Disassemblers show constants in hex by default, so you will convert numbers like this constantly. When the number is a password or a magic value, the conversion *is* the solution.
+
+What is `0x539` in decimal? (You met it before: try to remember, or calculate it.)
+'''
+widget = "number_converter"
+instructions = [
+    "Convert `0x539` to decimal: by hand (5 x 256 + 3 x 16 + 9) or with the number converter above.",
+    "Type the decimal number and press **Check**.",
+]
+check = { kind = "answer", answers = ["1337"] }
+hints = ["5 x 256 = 1280. 3 x 16 = 48."]
+success = '''
+1337: the number from the source code. A comparison with a constant is often the most important line of a crackme.
+'''
+
+[[steps]]
+title = "Debug and release builds"
+goal = "Know what optimization does to code."
+text = '''
+Cargo has two main ways to build:
+
+- `cargo build` makes a **debug build**. The compiler translates your code quite literally, adds checks such as the overflow check you saw in lesson 4, and keeps extra information for debugging. Fast to compile, slow to run.
+- `cargo build --release` makes a **release build**. The compiler **optimizes**: it rewrites your code into something faster that gives the same results.
+
+Optimizations change the code a lot. Some common ones:
+
+- **Constant folding**: calculations with known values are done at compile time. `let x = 2 + 3;` becomes the number 5.
+- **Inlining**: the body of a small function is copied into its caller, so the function call disappears, and often the function itself too.
+- **Removing dead code**: code whose result is never used is deleted.
+
+```rust
+fn square(x: u32) -> u32 { x * x }
+fn main() {
+    println!("{}", square(4));
+    // release: square is inlined and folded; the program just prints 16
+}
+```
+
+Programs you reverse are almost always release builds, so the code rarely looks exactly like the source. The Academy's crackmes are built with a light optimization level, so the code stays close to the source while you learn.
+
+In a release build, what does the machine code contain for `let x = 2 + 3;` (when `x` is used later)?
+'''
+check = { kind = "choice", options = [
+    "An instruction that adds 2 and 3 every time it runs",
+    "The constant 5",
+    "The text \"2 + 3\"",
+    "Nothing at all, even though x is used",
+], correct = 1, explain = [
+    "That is what a debug build might do. The optimizer calculates it once, at compile time.",
+    "Correct: constant folding replaced the calculation by its result.",
+    "Source code text is never stored in the machine code.",
+    "Since x is used, its value must be somewhere. Only unused code is removed.",
+] }
+hints = ["Look at the bullet about constant folding."]
+
+[[steps]]
+title = "What gets lost"
+goal = "Know which information the compiler throws away."
+text = '''
+Compare the Rust source with the assembly from the earlier steps, and you see how much is gone:
+
+- **Names**: variable names are gone completely. Function names are usually gone too (see the next step).
+- **Types**: the machine only knows sizes: 1, 2, 4 or 8 bytes. A `bool`, a `u8` and a `char` that fits in a byte all look alike; your structs and enums are only bytes at offsets.
+- **Comments**: gone, always.
+- **Structure**: `if`, `match`, `for` and `while` become comparisons and jumps. `?` and iterators become plain loops and checks.
+- **Abstractions**: generic functions are copied once per type they are used with; traits and closures become ordinary functions.
+
+What survives?
+
+- Every **string literal** is still in the file, as you saw in lesson 5.
+- **Constants** (like the 1337) are still in the instructions.
+- **Names of functions from other libraries** that the program calls, such as the operating system's functions. The loader needs them (lesson 8).
+- The **logic** itself: what the program does is all still there, only in a lower-level form.
+
+Reverse engineering is rebuilding the lost information from what survives. The good news: compilers produce the same patterns again and again, and you will learn to recognize them.
+
+Which of these is still in the compiled program?
+'''
+check = { kind = "choice", options = [
+    "The comments in your code",
+    "The names of your local variables",
+    "The text of your string literals",
+    "The names of your struct fields",
+], correct = 2, explain = [
+    "Comments are removed before any code is generated.",
+    "Local variable names only exist in the source and, in debug builds, in separate debug information.",
+    "Correct: the program needs the text when it runs, so it is stored in the file.",
+    "The machine code only uses offsets, like address + 8. Field names are not needed.",
+] }
+hints = ["What does the program need while it runs?"]
+
+[[steps]]
+title = "Symbols and stripping"
+goal = "Know what symbols are and what stripping removes."
+text = '''
+A **symbol** is a name attached to an address, for example "the function `check_password` starts at address `0x140001080`". The linker can write a table of symbols into the program. Debug builds can also carry **debug information**: a map from every instruction back to its source file and line, plus the names and types of variables. On Windows that information is stored in a separate `.pdb` file; on Linux it is in the program itself, in a format called DWARF.
+
+Debuggers love symbols. Software makers who do not want their program to be easy to read, and malware authors, remove them. That is called **stripping**. In Rust you can do it in `Cargo.toml`:
+
+```toml
+[profile.release]
+strip = true
+```
+
+A stripped program has no names for its own functions. Tools then make up names from the address. ORRESS calls an unknown function `sub_` followed by its address in hex: the function at `0x140001010` is shown as `sub_140001010`. The `sub` stands for *subroutine*, an old word for function. As you understand what a function does, you **rename** it in ORRESS, and from then on the new name is shown everywhere.
+
+All crackmes in this Academy are stripped, like real challenges. ORRESS still finds `main` for you, because it recognizes the start-up code that calls it.
+
+ORRESS finds a nameless function at address `0x140001550`. Which name does it show for it?
+'''
+instructions = [
+    "Take the prefix ORRESS uses for unknown functions.",
+    "Add the address in hex, without the `0x` and in lower case, as in the example `sub_140001010`. Type it and press **Check**.",
+]
+check = { kind = "answer", answers = ["sub_140001550"] }
+hints = [
+    "The prefix is sub_.",
+    "The example: 0x140001010 becomes sub_140001010.",
+]
+deep_dive = '''
+When Rust does keep symbols, they look strange: `_ZN6myapp14check_password17h3c7a8e9f0b1d2e4fE`. This is **name mangling**: the compiler encodes the crate, module and function name, plus a hash, into one unique name, because many functions in different modules can have the same name. Tools turn it back into `myapp::check_password`: that is called **demangling**. ORRESS demangles Rust and C++ names automatically.
+'''
+
+[[steps]]
+title = "Linking: why small programs are big"
+goal = "Understand static and dynamic linking."
+text = '''
+The Academy's second crackme is about 40 lines of Rust with two functions, `main` and `check_password`. Yet ORRESS finds about **420 functions** in it, and the file is about 134 KB. Where does all that come from?
+
+From the **linker**. Your code uses the Rust **standard library**: `println!`, `String`, `read_line`, panics, memory allocation. The linker copies all standard library code your program needs *into* the executable. This is called **static linking**: the library becomes part of the program. The start-up code that runs before `main` is in there too.
+
+Some code is not copied: the operating system's own functions. They stay in the OS's DLLs, such as `kernel32.dll`, and the program only records *which* functions it needs from *which* DLL. When the program starts, the operating system loads those DLLs and connects them. That is **dynamic linking**.
+
+For you as a reverser, this means:
+
+- Most functions in a Rust program are library code you do not need to read. Find the program's own code first: `main` is the usual starting point.
+- The dynamically linked functions keep their names, and they tell you what a program does with the outside world: files, network, processes.
+
+The second crackme has two functions in its source, but ORRESS finds about 420. Why?
+'''
+check = { kind = "choice", options = [
+    "The compiler splits every line into its own function",
+    "The linker copied the standard library code the program uses into the file",
+    "ORRESS counts every instruction as a function",
+    "The program is malware that hides extra functions",
+], correct = 1, explain = [
+    "Functions stay functions; small ones are even merged into their callers (inlining).",
+    "Correct: static linking puts the needed parts of std into the executable.",
+    "A function is a group of many instructions with one entry. ORRESS finds functions by following calls.",
+    "It is a harmless practice program. Every Rust program looks like this.",
+] }
+hints = ["Where do println! and read_line come from?"]
+
+[[steps]]
+title = "main is not the beginning"
+goal = "Know that start-up code runs before main."
+text = '''
+When the operating system starts a program, it does not jump to `main`. It jumps to the **entry point**: an address stored in the program file. At the entry point sits **start-up code** from the C runtime and the Rust standard library. It prepares everything:
+
+1. it sets up things the language needs, such as the heap and the standard output;
+2. it collects the command-line arguments (`std::env::args()` reads them later);
+3. it calls your `main`;
+4. when `main` returns, it ends the process with the exit code.
+
+So the chain in a Rust program on Windows looks roughly like this:
+
+```text
+entry point -> C runtime start-up -> Rust's lang_start -> your fn main
+```
+
+In a stripped program, none of these have names. Reading from the entry point is a slow way to find the interesting code. That is why ORRESS recognizes the pattern of the start-up code and finds `main` for you: **Go > Go to main** in the menu bar, or **Ctrl+Shift+M**. You will use it in the tour at the end of this level.
+
+Where does the operating system start running a program?
+'''
+check = { kind = "choice", options = [
+    "At the first line of fn main",
+    "At the entry point, which runs start-up code before main",
+    "At the first byte of the file",
+    "At a random function",
+], correct = 1, explain = [
+    "main is called later, by the start-up code.",
+    "Correct: the file says where the entry point is, and the start-up code calls main.",
+    "The first bytes of the file are a header with information, not code.",
+    "The start address is fixed in the program file.",
+] }
+hints = ["Look at the chain in the code block above: what comes first?"]
+
+[[steps]]
+title = "The reverser's view"
+goal = "Summarize what compiling means for reversing."
+text = '''
+Let us put the lesson together. When a Rust program is built:
+
+- `rustc` and LLVM turn your code into **machine code** for one architecture, and in release builds **optimize** it: constants are folded, small functions inlined, code reordered.
+- The **linker** adds the standard library (**static linking**), records which operating system functions are needed (**dynamic linking**), and writes the executable.
+- **Names, types, comments and structure** are lost. **Stripping** removes even the function names.
+- **String literals, constants, names of imported OS functions and the logic** survive.
+
+Your job as a reverser is to rebuild the lost parts: give functions names again, recognize types from sizes and offsets, and turn comparisons and jumps back into `if` and `loop`. ORRESS helps with every step: the **Disassembly** view shows the instructions, the **Graph** view shows the jumps as a picture, and later you will meet the **decompiler**, which turns machine code back into Rust-like code automatically.
+
+One piece is missing before the tour: what is in the executable file besides machine code? The linker wrote headers, sections and import tables. That is the next lesson.
+
+Press **Finish lesson** to complete this lesson.
+'''

@@ -1,0 +1,209 @@
+id = "l3-dynamic-analysis"
+level = 3
+order = 1
+title = "Watching a program run"
+summary = "What dynamic analysis is, when it is safe, and why a running program has different addresses than the file."
+goals = [
+    "explain the difference between static and dynamic analysis",
+    "name what you can only see while a program runs",
+    "decide when it is safe to run a program",
+    "turn a file address into the address the running program uses (ASLR)",
+    "choose between the debugger and the emulator on your computer",
+]
+
+[[steps]]
+title = "Reading versus running"
+goal = "Know what dynamic analysis adds to what you did in Level 2."
+text = '''
+In Levels 1 and 2 you never ran a program. You opened the file and *read* it: the strings, the imports, the instructions, the decompiled code. That is **static analysis**. It is safe, because nothing runs, and it shows you everything in the file at once.
+
+In this level you **run** the program and watch it while it works. That is **dynamic analysis**. A tool called a **debugger** starts the program for you and keeps control over it. It can stop the program at any instruction you choose, and then show you the real values in the registers and in memory at that moment.
+
+Think of a Rust program you wrote yourself. To understand a bug, you can read the code carefully (static), or you can add `println!("{x}")` and run it (dynamic). Both are useful. Often the `println!` is faster, because you see the actual value instead of working it out in your head.
+
+A debugger is a `println!` that you can put anywhere, in a program you do not have the source code of, without changing the program.
+
+Reverse engineers use both kinds of analysis together:
+
+- **static** first, to get the big picture: where is `main`, where is the password check, what does it compare?
+- **dynamic** next, to answer one exact question: *what is in this register right here?*
+
+The rest of this level teaches you three tools for dynamic analysis: the **debugger**, **patching** (changing the program's bytes) and the **emulator** (running one function on a CPU that ORRESS simulates). At the end you beat programs that try to notice the debugger.
+'''
+
+[[steps]]
+title = "What exists only at runtime"
+goal = "See why some answers are not in the file at all."
+text = '''
+Some things you look for are simply **not in the file**. They only exist while the program runs. Look at this Rust program:
+
+```rust
+fn main() {
+    let input = read_line();          // what the user types
+    let secret = decode_secret();     // built from scrambled bytes
+    if input == secret {
+        println!("Correct!");
+    }
+}
+```
+
+What does the file contain? The machine code of `decode_secret`, and the scrambled bytes it starts from. It does **not** contain the decoded password: that is computed in memory, every time the program runs, and thrown away when it ends. The Strings view cannot find it, because it is not there.
+
+When the program runs, many things exist that a file does not have:
+
+- **register values**: which number is in `rax` right now;
+- **the stack** with its local variables and return addresses;
+- **data the program builds**: decoded strings, computed keys, the input you typed;
+- **the path it takes**: which side of each `if` it actually runs.
+
+In Level 2 you decoded an XOR-encoded password by hand. That works, but it takes time, and with a more complicated encoding it can take hours. With a debugger you let the program do the decoding, stop it just after, and *read* the result from memory. You will do exactly that in lesson 4 of this level.
+
+Which of these can static analysis **not** show you?
+'''
+check = { kind = "choice", options = [
+    "The text of the error message `Wrong password. Try again!`",
+    "A password that the program decodes in memory just before it compares it",
+    "The name of the Windows function the program calls to read your input",
+], correct = 1, explain = [
+    "That string is stored in the file as it is. The Strings view shows it.",
+    "Right. The decoded password exists only in the running program's memory. In the file there are only the scrambled bytes and the code that decodes them.",
+    "Imported functions are listed in the file's import table, so the Imports view shows them without running anything.",
+] }
+hints = [
+    "Ask yourself for each one: is it stored in the file, byte for byte?",
+    "A string literal and an import name are stored in the file.",
+]
+
+[[steps]]
+title = "Only run what you trust"
+goal = "Know the one safety rule of dynamic analysis."
+text = '''
+Static analysis cannot hurt your computer: ORRESS only reads the file. Dynamic analysis is different. When you start a program in the debugger, **it really runs**, on your real computer, with your user rights. A debugger watches the program; it does not lock it in a box.
+
+So a program under a debugger can do everything it could do when you double-click it: read and delete your files, connect to the internet, install itself. If it is malware, the debugger does not stop it.
+
+That gives one simple rule: **only run programs you trust**.
+
+- The **Academy crackmes** are safe. They were written for these lessons, in Rust, and their source code is part of ORRESS (you see it at the end of a lesson). They only print text, read one line of input, and end. They do not use the network and do not change any files.
+- **CTF challenges** from a well-known event are usually safe, but they are still programs from strangers. Many players run them in a **virtual machine**, a separate computer simulated inside yours, that they can reset.
+- **Unknown programs and malware** are only ever run inside an isolated lab. Level 6 teaches you how to build one.
+
+If you are ever unsure, there is a safe middle way: the **emulator**. It runs one function on a simulated CPU, inside ORRESS, so nothing the code does can reach your computer. You will learn it in lesson 7.
+
+You found a program called `free_game_hack.exe` on a forum. Is it a good idea to try it in the debugger, on your normal computer?
+'''
+check = { kind = "choice", options = [
+    "Yes: the debugger stops it from doing anything harmful",
+    "No: it really runs, so it can do anything a program can do",
+    "Yes, as long as you set a breakpoint at main first",
+], correct = 1, explain = [
+    "A debugger only watches and controls the program; it is not a security barrier. The program runs with your rights.",
+    "Right. A debugged program runs for real. Programs from unknown sources belong in an isolated lab (Level 6), or you study them statically.",
+    "A breakpoint at main stops the program after a lot of code has already run: the start-up code, and code that can run even before it. And after main you would still let it run.",
+] }
+hints = ["Does the program run for real when you debug it?"]
+
+[[steps]]
+title = "From file to process"
+goal = "Remember what happens when a program starts."
+text = '''
+In Level 0 you learned what happens when you start a program. A short reminder, because the debugger shows you exactly these things:
+
+1. The operating system's loader reads the `.exe` file.
+2. It creates a **process**: the running program, with its own memory.
+3. It copies the sections of the file (`.text`, `.rdata`, `.data`, ...) into that memory, loads the DLLs from the import table, and writes the addresses of the imported functions into the IAT.
+4. It sets up a stack and starts the CPU at the entry point. The start-up code runs, and it calls `main`.
+
+From then on, the CPU executes one instruction after another. The register `rip` always holds the address of the **next** instruction. The stack grows and shrinks with every `call` and `ret`.
+
+A debugger asks Windows to start the program in a special way: Windows then tells the debugger about everything important that happens in the process, and stops the process whenever the debugger asks. The program being debugged is often called the **debuggee**.
+
+So when the debugger shows you `rip`, `rsp` or the bytes at some address, you see the real CPU state and the real memory of that process, at that moment.
+
+One thing is different from what ORRESS shows when it reads the file: the **addresses**. The next step explains why.
+'''
+
+[[steps]]
+title = "ASLR moves the program"
+goal = "Turn a file address into a runtime address."
+text = '''
+ORRESS shows every address as if the program were loaded at its **image base**, the address in the PE header. For the crackmes that is `0x140000000`, so `main` of crackme #2 is at `0x1400012F0`. Let us call these **file addresses**.
+
+But in Level 2 you met **ASLR**: Windows loads the program at a *random* base address each time it starts, to make attacks harder. In a debugger you see the **runtime addresses**, the ones the CPU really uses, for example `0x7FF6A1B412F0` instead of `0x1400012F0`.
+
+The program is moved as one block, so every address moves by the same amount. That gives a simple rule:
+
+```text
+runtime address = file address - image base + runtime base
+```
+
+- `0x1400012F0 - 0x140000000 = 0x12F0` (that is the RVA from Level 2),
+- `0x12F0 + 0x7FF6A1B40000 = 0x7FF6A1B412F0`.
+
+Windows always picks a runtime base that ends in at least four zeros (`...0000`). So the **last four hex digits** of a runtime address are always the same as those of the file address. That is the fastest check: `...12F0` is `main`, in any run.
+
+ORRESS does the translation for you: breakpoints, the Disassembly view and the Breakpoints list use file addresses, so you work with the addresses you know from static analysis. Only the registers and the status line show runtime addresses.
+
+In one run, crackme #2 is loaded at runtime base `0x7FF6A1B40000`. The call to the password check is at file address `0x140001413`. Where is it in this run?
+'''
+instructions = [
+    "Subtract the image base `0x140000000` from `0x140001413`.",
+    "Add the result to the runtime base `0x7FF6A1B40000`.",
+    "Type the result with `0x` in front and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x7FF6A1B41413"], number = true }
+hints = [
+    "0x140001413 - 0x140000000 = 0x1413.",
+    "0x7FF6A1B40000 + 0x1413: only the last four digits change.",
+    "The answer is 0x7FF6A1B41413.",
+]
+success = '''
+`0x7FF6A1B41413`. Notice that it ends in `1413`, like the file address. When you see a runtime address in the debugger, look at its last four digits to find the line in the Disassembly view.
+'''
+
+[[steps]]
+title = "Which tool on your computer?"
+goal = "Know which parts of this level work on your operating system."
+text = '''
+The Academy crackmes are Windows programs. That decides which tools you can use:
+
+- **The debugger** in ORRESS runs the real program, so it needs **Windows**. On Linux and macOS its panel says that native debugging is available on Windows. (A Windows program does not run on Linux by itself.)
+- **Patching** works everywhere: ORRESS changes bytes in its copy of the file. To *run* the patched program you need Windows again.
+- **The emulator** works on **every** operating system. It does not ask Windows to run anything: ORRESS reads the machine code and carries out each instruction itself, on a simulated CPU, like the CPU simulator from Level 1 but for real x86-64 code.
+
+If you are on Windows, do every lesson as written. If you are on Linux or macOS, read the debugger lessons (they explain ideas you need), and use the **Emulator** whenever a lesson offers it. Lessons 4, 7, 8 and 9 show you an Emulator path to the same answer.
+
+You are on Linux and want to know what a crackme's check function returns for an input. Which tool do you use?
+'''
+check = { kind = "choice", options = [
+    "The debugger",
+    "The emulator",
+    "Neither: on Linux you can only read the file",
+], correct = 1, explain = [
+    "ORRESS's debugger runs real Windows programs, so it needs Windows.",
+    "Right. The emulator runs the function's machine code on a simulated CPU inside ORRESS, on any operating system.",
+    "The emulator works on Linux too, because it never asks the operating system to run the program.",
+] }
+hints = ["One of the two tools never runs the program on the real operating system."]
+
+[[steps]]
+title = "The plan for this level"
+goal = "Know what is coming."
+text = '''
+Here is the route through Level 3. Every lesson uses a small Academy crackme.
+
+1. **Watching a program run** (this lesson).
+2. **The debugger**: start crackme #2 under ORRESS's control, and read the registers and the status line.
+3. **Breakpoints and stepping**: stop exactly where you want and run one instruction at a time.
+4. **Reading memory at runtime**: crackme #11 builds its password only in memory. You read it there.
+5. **Changing a running program**: change one register so the program takes the other branch.
+6. **Patching**: change the bytes of crackme #2 for good, and save a patched copy.
+7. **Emulation**: run crackme #2's password check alone, with inputs you choose.
+8. **Beating anti-debugging**: crackme #4 notices the debugger. Find the check and get past it.
+9. **Practice: three guards**: crackme #12 has three different debugger checks and a decoy password.
+
+A good habit for the whole level: **know what you are looking for before you run**. Use static analysis to find the interesting address (the check, the decision, the decoded buffer). Then use the debugger to stop there and look. Running a program without a question is like pressing play on a long video without knowing what you want to see.
+
+Press **Finish lesson** when you are ready.
+'''

@@ -1,0 +1,361 @@
+id = "l2-decompiler"
+level = 2
+order = 6
+title = "The decompiler"
+summary = "Read machine code as Rust: what the decompiler gets right, where it guesses wrong, and how you use it to solve crackme #10."
+goals = [
+    "open the decompiler (F5) and move between it and the disassembly",
+    "read decompiled Rust: parameters, local variables, slices, character literals",
+    "spot the typical mistakes of a decompiler and check them in the disassembly",
+    "know what the Rust port mode is for",
+    "solve crackme #10 by reading its decompiled checks",
+]
+badge = "Decompiled"
+reveal_source = "crackme10"
+
+[[steps]]
+title = "Assembly, but readable"
+goal = "Understand what a decompiler does and what it cannot do."
+text = '''
+In Level 1 you read assembly one instruction at a time. That works, but it is slow: one
+line of Rust easily becomes ten instructions, and you have to keep all registers in your
+head.
+
+A **decompiler** does the opposite of a compiler. It reads the machine code of one
+function, follows the data through the registers and the stack, and rebuilds code with
+`if`, `while`, variables and function calls. ORRESS writes that code **in Rust syntax**,
+so it looks like code you write yourself. This kind of rebuilt code is called
+**pseudocode**: it shows what the function does, but it is not the original source.
+
+Why not the original? Because compiling throws information away for good:
+
+- **names**: of functions, variables and fields (in a stripped program);
+- **types**: in machine code, a `&str`, a `&[u8]` and a `Vec<u8>`'s data are all "a
+  pointer and a length";
+- **structure**: the compiler copies small functions into their callers (inlining),
+  reorders code, and merges or removes variables;
+- **comments**: never stored at all.
+
+So the decompiler has to *guess* names and types. Its guesses are usually good, and
+sometimes wrong. This lesson shows you how to use it to read fast, and how to catch its
+mistakes.
+'''
+
+[[steps]]
+title = "Open crackme #10"
+goal = "Have the practice program open."
+text = '''
+You will decompile the three functions of crackme #10 that you already know from the
+disassembly and the graph. Knowing the answer in advance is the best way to judge a tool:
+you will see exactly what it gets right.
+'''
+instructions = ["Press the **Open crackme10** button below."]
+check = { kind = "open_crackme", name = "crackme10" }
+
+[[steps]]
+title = "Press F5"
+goal = "Open the decompiler on is_valid."
+text = '''
+The decompiler always shows the function the cursor is in, and it follows the cursor: move
+through the disassembly, and the decompiler switches function and highlights the line that
+belongs to the cursor's instruction.
+
+Open it with **F5** (as in most reverse-engineering tools), or with **View > Open View >
+Open Decompiler**. It opens as a tab called **Decompiler** in the dock on the right, next
+to this **Lesson** tab. Switch between the two by clicking the tabs. (If you want to see
+both at once, use **View > Toggle Left Dock** to make room, or zoom out with **Ctrl+-**.)
+
+At the top of the Decompiler you see **Decompiled: name (0x...)**, two modes
+(**Pseudocode** and **Rust port**), and the buttons **Copy** and **Open in editor**.
+'''
+instructions = [
+    "Click inside the disassembly (press **Ctrl+D** first if it is not open).",
+    "Press **Ctrl+G**, type `is_valid` (or `1400012f0`) and press **Enter**.",
+    "Press **F5**. The **Decompiler** tab opens on the right.",
+    "Read it, then click the **Lesson** tab to come back here.",
+]
+spotlight = "view.Decompiler"
+check = { kind = "action", id = "view::Decompiler" }
+hints = ["F5, or the menu **View > Open View > Open Decompiler**."]
+
+[[steps]]
+title = "Read is_valid"
+goal = "Read decompiled code and connect it to what you already know."
+text = '''
+The Decompiler shows (with your names from lesson 4):
+
+```rust
+fn is_valid(a1: &[u8]) -> bool {
+    if a1.len() != 6 {
+        return false;
+    }
+    if a1[0] != b'K' {
+        return false;
+    }
+    return checksum(a1, 6) == 0x1f4;
+}
+```
+
+Compare it with what you found by hand:
+
+- **`a1: &[u8]`**: the first parameter. The decompiler saw a pointer in `rcx` and a length
+  in `rdx` used together, and wrote them as one slice. Parameters are named `a1`, `a2`, ...
+  in order.
+- **`a1.len() != 6`**: the `cmp rdx,6` / `jne` block.
+- **`a1[0] != b'K'`**: the `cmp byte ptr [rcx],0x4b` block. The decompiler noticed the
+  number is a printable character and wrote it as a byte literal `b'K'`.
+- **`checksum(...) == 0x1f4`**: the call, `cmp eax,0x1f4` and `sete al`. Numbers it does
+  not recognise as characters stay in hex.
+- **`-> bool`**: the function returns 0 or 1 in `al`.
+
+Click any line in the Decompiler and the disassembly jumps to the instructions it came
+from. Click a function name (like `checksum`) to go into that function. Your renames show
+up here too: rename a function in the disassembly and the decompiled code changes with it.
+
+That is the whole check, in three lines. But one detail is wrong. Look at the call to
+`checksum` closely before you go on.
+'''
+
+[[steps]]
+title = "Spot the mistake"
+goal = "Catch a decompiler guess by checking the disassembly."
+text = '''
+The decompiled code says `checksum(a1, 6)`: two arguments. But `checksum` takes one
+slice, and `is_valid` passes the same slice it got. What happened?
+
+Look at the instructions before the call in the disassembly:
+
+```text
+mov   [rsp+0x28],rcx          ; store the pointer
+mov   qword ptr [rsp+0x30],6  ; store the length: 6
+lea   rax,[rsp+0x28]          ; (black_box: the slice goes through memory)
+mov   rcx,[rsp+0x28]          ; rcx = pointer
+mov   rdx,[rsp+0x30]          ; rdx = 6
+call  checksum
+```
+
+The length is 6 at this point (the first check made sure of that), and the compiler wrote
+the constant 6 instead of reusing `rdx`. The decompiler sees "a pointer in `rcx`, the
+number 6 in `rdx`" and shows them as two separate arguments, because nothing ties this
+particular 6 to the pointer. The machine code is right; the decompiler's *presentation* is
+misleading.
+
+This is typical. The decompiler is a fast reader, not a perfect one. When a line looks
+odd, click it and read the instructions it came from: **the disassembly is the truth**.
+
+Why does the decompiled call show two arguments?
+'''
+check = { kind = "choice", options = [
+    "The slice is passed as a pointer in rcx and a length in rdx; here the length is the constant 6, so the decompiler shows the two parts separately",
+    "checksum really has two parameters in the source code",
+    "The decompiler crashed halfway through the function",
+], correct = 0, explain = [
+    "Right. Machine code has no slices, only registers. The decompiler could not prove that this 6 belongs to the pointer.",
+    "The source of checksum takes one &[u8]. A slice is two registers at the machine level, which is where the confusion comes from.",
+    "It decompiled the whole function correctly; only the way it shows these two registers is misleading.",
+] }
+hints = [
+    "How many registers does a slice need in the Windows calling convention?",
+    "rcx holds the pointer, rdx the length.",
+]
+
+[[steps]]
+title = "Decompile the loop"
+goal = "See how a loop and its variables look in decompiled code."
+text = '''
+Click the name `checksum` in the decompiled `is_valid`. The Decompiler (and the
+disassembly) go into the function:
+
+```rust
+fn checksum(a1: &[u8]) -> u32 {
+    let mut rax: u32;
+    let mut r9: usize;
+
+    rax = 0;
+    if a1.len() != 0 {
+        r9 = 0;
+        loop {
+            rax += a1[r9] as u32;
+            r9 += 1;
+            if a1.len() == r9 {
+                break;
+            }
+        }
+    }
+    return rax;
+}
+```
+
+This is the graph from the last lesson, written as code: the check for an empty slice,
+the counter set to 0, the body (`rax += a1[r9] as u32`) and the test at the bottom that
+leaves the loop. Compare it with the original `while i < code.len()` loop: the same logic,
+"turned around" the way the compiler built it.
+
+Notice the variable names. The decompiler names variables after the **register** they
+live in (`rax`, `r9`) or their **place on the stack** (`local_28`, a variable at stack
+offset 0x28). These names are as generated as `sub_` names. In your head, read `rax` as
+`sum` and `r9` as `i`.
+
+Which register holds the loop counter (the index into the slice)?
+'''
+instructions = [
+    "In the Decompiler, click the name `checksum` in the last line of `is_valid`.",
+    "Find the variable that is set to 0 before the loop and increased by 1 inside it.",
+    "Type its name in the answer box.",
+]
+check = { kind = "answer", answers = ["r9", "r9d"] }
+hints = [
+    "It is used as the index in `a1[...]`.",
+    "Type `r9`.",
+]
+success = '''
+`r9`: the index `i`. The return value lives in `rax` (`eax` for a `u32`), as the calling
+convention says, so the decompiler's `rax` is the `sum`.
+'''
+
+[[steps]]
+title = "Big functions get messy"
+goal = "Know which parts of decompiled code to trust less."
+text = '''
+Small functions decompile beautifully. Big functions full of inlined library code do not.
+Press **Ctrl+Shift+M** and look at the decompiled `main`. Parts of it look like this:
+
+```rust
+sub_1400058e0("Licence code: ", 29);
+local_48 = sub_1400059d0();
+rax_5 = sub_140009c40(&mut local_48);
+...
+rdx_9 = unknown("changed by the call above");
+...
+if read::<u64>(read::<u64>(&data_1400210c0)) << 1 != 0 {
+```
+
+What you are seeing:
+
+- **`sub_...` calls**: standard-library functions (printing, `stdin()`, `read_line`). They
+  have no names because the program is stripped.
+- **`29` next to the prompt**: Rust's printing code packs the text length with a flag:
+  29 = 2 * 14 + 1, and the prompt has 14 characters. The decompiler cannot know that, so
+  it shows the raw number.
+- **`unknown("changed by the call above")`**: the decompiler is honest that it does not
+  know a value. Here a call changed a register it cannot follow.
+- **`read::<u64>(address)`**: a memory read it could not give a type.
+- **`asm!("...")`** (not in this `main`, but common elsewhere): an instruction it could
+  not translate, kept as it is.
+
+Do not try to understand every line of such a function. Find the lines that matter (the
+call to `is_valid`, the two messages, the `if` between them) and ignore the rest.
+'''
+check = { kind = "choice", options = [
+    "Lines with unknown(...), read::<T>(...), asm!(...) and register-named variables: check them in the disassembly",
+    "The string literals: the decompiler invents them",
+    "Nothing: decompiled code is always exactly the original source",
+], correct = 0, explain = [
+    "Right. These are places where the decompiler tells you, or shows, that it is guessing.",
+    "Strings are read directly from the file: they are the most reliable part of decompiled code.",
+    "Names, types and structure are lost when compiling. Decompiled code is a reconstruction.",
+] }
+hints = ["Which parts did the decompiler mark itself as uncertain?"]
+
+[[steps]]
+title = "The Rust port mode"
+goal = "Know what the second decompiler mode is for."
+text = '''
+Next to **Pseudocode** there is a second mode: **Rust port**. It answers a different
+question. Pseudocode is for *reading*. The Rust port is for *re-writing*: it turns the
+function into Rust that is meant to **compile**, as a starting point when you want to port
+a function to Rust, test it, or reuse an algorithm (for example in a keygen).
+
+To make the code compile, the port:
+
+- adds a small **prelude** module with helper functions for things Rust has no operator
+  for (rotations, sign extension, vector instructions);
+- keeps every instruction it cannot translate as **inline assembly** (`asm!`), so nothing
+  is silently lost;
+- uses fixed-size integer types everywhere, so the behaviour matches the machine code.
+
+The header says *Best-effort compilable Rust - review before porting.* Read it as a
+first draft. **Copy** puts the code on the clipboard; **Open in editor** opens it in a new
+code editor tab, where you can save it with **File > Save As**. (Builds of ORRESS with the
+`compile-check` feature also show a **Check compiles** button that runs `rustc` on it.)
+'''
+instructions = [
+    "In the Decompiler, go to `checksum` (click the name in `is_valid`, or use Ctrl+G in the disassembly).",
+    "Click **Rust port** at the top of the Decompiler and read the result.",
+    "Click **Pseudocode** to switch back.",
+]
+
+[[steps]]
+title = "Solve crackme #10"
+goal = "Use the decompiled checks to pick a valid licence code."
+text = '''
+You have all the rules now, from three short functions:
+
+1. the code has exactly **6** characters (`a1.len() != 6` fails);
+2. the first character is **`K`** (`a1[0] != b'K'` fails);
+3. the character codes add up to **0x1F4 = 500** (`checksum(...) == 0x1f4`).
+
+Rule 3 has many solutions, so there is no single "password". `K` is 75, so the other five
+characters must add up to 500 - 75 = 425. Use the ASCII table below to check candidates.
+
+**Worked example**: is `KAAAAA` valid? It has 6 characters and starts with `K`. `A` is
+65, so the sum is 75 + 5 * 65 = 400. Not 500: invalid.
+
+Which of these codes does crackme #10 accept?
+'''
+widget = "ascii_table"
+check = { kind = "choice", options = [
+    "KUUUUU",
+    "KUUUU",
+    "kUUUUU",
+    "KAAAAZ",
+], correct = 0, explain = [
+    "Right: 6 characters, starts with K, and 75 + 5 * 85 = 500.",
+    "Only 5 characters: the length check fails before the checksum is computed.",
+    "A lower-case k is 0x6B, not 0x4B: the second check fails.",
+    "75 + 4 * 65 + 90 = 425. Close, but the sum must be exactly 500.",
+] }
+hints = [
+    "Check the three rules for each option, in order. Stop at the first rule that fails.",
+    "`U` is 85. 5 * 85 = 425.",
+]
+success = '''
+`KUUUUU` is accepted, and so is any other 6-character code that starts with `K` and adds
+up to 500 (`KZZZZA`? 75 + 4 * 90 + 65 = 500: yes). You can try it: run `crackme10.exe` from
+a terminal in ORRESS's `academy/crackmes` folder and type a code. You solved the
+crackme without running it once.
+'''
+
+[[steps]]
+title = "Working with the decompiler"
+goal = "Know the routine for using the decompiler well."
+text = '''
+A good way to work:
+
+1. **Read fast in the Decompiler** to get the idea of a function: its checks, its loops,
+   what it returns.
+2. **Name things as you go** (N in the disassembly). The decompiled code uses your
+   function names, and gets more readable with every rename.
+3. **Check odd lines in the disassembly.** Click the line: the disassembly shows the
+   instructions it came from. Wrong argument counts, `unknown(...)`, strange numbers:
+   the instructions tell the truth.
+4. **Do not read everything.** In big functions, find the lines around the strings and
+   calls that matter.
+
+What you learned about the decompiler's guesses:
+
+| It shows | It means |
+|---|---|
+| `a1`, `a2` | parameters, in calling-convention order |
+| `rax`, `r9`, `local_28` | variables named after a register or a stack offset |
+| `&[u8]` | a pointer plus a length used together (could be a `&str`, a `Vec`'s data, ...) |
+| `b'K'` | a number that is a printable character |
+| `unknown(...)`, `read::<T>(...)`, `asm!(...)` | places where it is unsure: check the disassembly |
+
+This was the last lesson with crackme #10. Next, you meet a password that is **hidden**:
+not in the strings, not as plain characters in `cmp` instructions, but encoded with XOR.
+'''
+success = '''
+Lesson complete. Read fast with the decompiler, check the details in the disassembly,
+and name everything you understand.
+'''

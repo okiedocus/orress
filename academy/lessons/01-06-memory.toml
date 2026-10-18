@@ -1,0 +1,365 @@
+id = "l1-memory"
+level = 1
+order = 6
+title = "Memory: loading, storing and lea"
+summary = "Square brackets, sizes like qword ptr, lea, pointers and arrays."
+goals = [
+    "read memory operands such as `[rsp+8]` and `[rbx]`",
+    "load values from memory and store them back",
+    "tell `lea` (compute an address) and `mov` (read memory) apart",
+    "recognise array indexing and the element size",
+    "read the addresses of strings and constants in ORRESS",
+]
+
+[[steps]]
+title = "Square brackets mean memory"
+goal = "Read a memory operand as \"the value at this address\"."
+text = '''
+Sixteen registers are not much. Everything else a program works with (strings, arrays, structs, most local variables) lives in **memory**. In Level 0 you learned that memory is a long row of bytes, each with a number: its **address**.
+
+In assembly, an operand in **square brackets** is a **memory operand**. It means "the value stored in memory at this address", not the address itself:
+
+| Assembly | Meaning | Rust (with `p` as a raw pointer) |
+|---|---|---|
+| `mov rax, rbx` | copy the register `rbx` | `rax = rbx;` |
+| `mov rax, [rbx]` | read memory at the address in `rbx` | `rax = *p;` |
+| `mov rax, [rbx+8]` | read memory at address `rbx + 8` | `rax = *p.byte_add(8);` |
+| `mov [rbx], rax` | write `rax` into memory at `rbx` | `*p = rax;` |
+
+Inside the brackets the CPU calculates an address: a register, plus or minus a fixed number called the **displacement** (`[rbx+8]`, `[rbp-0x10]`, `[rsp+0x20]`). Real CPUs allow more: `[rcx+rdx*8]` (a second register times 1, 2, 4 or 8) and plain numbers like `[0x1400210c0]`.
+
+Two rules:
+
+- Only one operand may be in memory. `mov [rax], [rbx]` does not exist; you load into a register first, then store.
+- The brackets work the same for every instruction: `add rax, [rbx]` adds the value *at* `rbx`; `cmp [rsp+8], 0` compares the value *at* `rsp+8` with 0.
+
+So whenever you see brackets, say "the value at".
+'''
+
+[[steps]]
+title = "How big? qword, dword, byte"
+goal = "Know the size words in memory operands."
+text = '''
+An address points at a single byte, but a value can be 1, 2, 4 or 8 bytes long. How many bytes does `[rbx]` mean? Usually the register on the other side tells you: `mov rax, [rbx]` reads 8 bytes because `rax` is 8 bytes; `mov eax, [rbx]` reads 4.
+
+When there is no register to tell, ORRESS writes the size in front of the brackets:
+
+| Written as | Size | Rust types |
+|---|---|---|
+| `byte ptr [...]` | 1 byte | `u8`, `i8`, `bool` |
+| `word ptr [...]` | 2 bytes | `u16`, `i16` |
+| `dword ptr [...]` | 4 bytes ("double word") | `u32`, `i32`, `char` |
+| `qword ptr [...]` | 8 bytes ("quad word") | `u64`, `i64`, `usize`, pointers |
+
+Examples from the crackmes:
+
+```text
+mov  qword ptr [rsp+0x28], 0xf    ; write the 8-byte number 15 at rsp+0x28
+cmp  byte ptr [rax+1], 0x33       ; compare ONE byte at rax+1 with 0x33
+```
+
+The size tells you the type of the variable, just like `eax` and `al` do for registers.
+
+Reading a small value into a big register needs a decision: what goes in the upper bits? `movzx eax, byte ptr [rcx]` ("move with zero extend") loads one byte and fills the rest with zeros: Rust's `byte as u32`. You will see `movzx` whenever a program reads characters of a string.
+
+The simulator works only with 8-byte values; it accepts `qword ptr` and leaves the other sizes to real disassembly.
+
+In crackme #2 you will find `cmp byte ptr [rax+2], 0x76`. If `rax` holds the address of your input text, what does it compare?
+'''
+check = { kind = "choice", options = [
+    "The first 8 bytes of your input with the number 0x76",
+    "The third character of your input with 0x76",
+    "The address rax+2 with 0x76",
+    "The second character of your input with 0x76",
+], correct = 1, explain = [
+    "`byte ptr` means exactly one byte, not eight.",
+    "One byte at address rax+2. The text starts at rax, so rax+0 is the first character, rax+1 the second and rax+2 the third. 0x76 is the character 'v'.",
+    "Brackets mean the value AT the address, not the address itself.",
+    "rax+1 would be the second character. Counting starts at rax+0, like Rust indexes start at 0.",
+] }
+hints = [
+    "rax+0 is the first character, like input[0] in Rust.",
+    "So rax+2 is input[2]. Which character is that, counting from 1?",
+]
+
+[[steps]]
+title = "Exercise: load and add"
+goal = "Read two values from memory and add them."
+text = '''
+In the simulator, memory is a small area called the **stack** (Lesson 7 explains it). The register `rsp` always holds an address in that area, so `[rsp]`, `[rsp+8]` and so on are memory you can use.
+
+The simulator loaded this program:
+
+```text
+sub rsp, 16                  ; make room for two 8-byte numbers
+mov qword ptr [rsp], 7       ; store 7 at address rsp
+mov qword ptr [rsp+8], 35    ; store 35 at address rsp+8
+```
+
+1. `sub rsp, 16` moves `rsp` 16 bytes down, which reserves 16 bytes of memory for us. Lesson 7 explains it; accept it for now.
+2. The two stores write the numbers 7 and 35 into memory, 8 bytes apart.
+
+Press **Step** three times and look at the **Stack** pane on the right: the two numbers appear, each on its own line with its address. The line marked `rsp >` is the address in `rsp`.
+
+**Your task:** add instructions so that `rax` ends as the sum of the two numbers in memory (**42**). Do not type 7 or 35 yourself: read them from memory. You need one load (`mov`) and one `add` with a memory operand.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab, press **Reset**, and press **Step** three times. Find 7 and 35 in the **Stack** pane.",
+    "Press **Reset** so you can edit. Below the existing lines, add `mov rax, [rsp]`.",
+    "Add a line that adds the value at `rsp+8` to `rax`.",
+    "Press **Run**. `rax` must be 42.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+sub rsp, 16                  ; make room for two numbers
+mov qword ptr [rsp], 7
+mov qword ptr [rsp+8], 35
+; rax = (value at rsp) + (value at rsp+8)
+'''
+check = { kind = "sim", expect = [["rax", 42]], requires = ["add"] }
+hints = [
+    "First load the value at rsp into rax: `mov rax, [rsp]`.",
+    "`add` can take a memory operand as its source.",
+    "The second line is `add rax, [rsp+8]`.",
+]
+solution = '''
+sub rsp, 16
+mov qword ptr [rsp], 7
+mov qword ptr [rsp+8], 35
+mov rax, [rsp]
+add rax, [rsp+8]
+'''
+
+[[steps]]
+title = "Pointers in registers"
+goal = "Use a register as a pointer."
+text = '''
+Any 64-bit register can hold an address. A register that holds an address is used as a **pointer**, exactly like a pointer or reference in Rust:
+
+```rust
+let numbers: [u64; 2] = [7, 35];
+let p: &u64 = &numbers[0];   // p holds an address
+let value = *p;              // read through the pointer: 7
+```
+
+In assembly:
+
+```text
+lea rbx, [rsp]     ; rbx = address of the first number   (the next page explains lea)
+mov rax, [rbx]     ; rax = *rbx                          -> 7
+add rbx, 8         ; move the pointer 8 bytes further: to the next u64
+mov rcx, [rbx]     ; rcx = *rbx                          -> 35
+```
+
+`add rbx, 8` changes the *pointer*, not the value it points to. That is how a program walks through an array: element 0 is at the start, element 1 is 8 bytes further (for 8-byte elements), and so on. A `&[u8]` (bytes) advances by 1, a `&[u32]` by 4.
+
+When you read disassembly, keep track of which registers hold **numbers** and which hold **addresses**. A register used inside square brackets holds an address. ORRESS's comments help you: when an address points at a known string, the Disassembly view shows the text as a comment, like `; "Wrong password. Try again!"`.
+
+Rust references (`&T`, `&mut T`), `Box<T>` and raw pointers all look the same once compiled: an address in a register or in memory.
+'''
+
+[[steps]]
+title = "lea: compute an address"
+goal = "Tell `lea` and `mov` with a memory operand apart."
+text = '''
+`lea` (load effective address) looks like a memory read, but it is not: it **calculates the address** in the brackets and puts that address in the destination. It never reads memory.
+
+```text
+mov rbx, [rsp+8]   ; rbx = the VALUE stored at rsp+8      (like  let v = x;)
+lea rbx, [rsp+8]   ; rbx = the ADDRESS rsp+8 itself        (like  let p = &x;)
+```
+
+So `lea` is Rust's `&`: it makes a pointer. You see it before almost every function call that passes something by reference. From crackme #1's `main`:
+
+```text
+lea rcx, [rsp+0x20]    ; rcx = &some_local_variable
+call sub_140009b60     ; call a function with that pointer
+```
+
+Because `lea` can add and multiply inside its brackets without touching memory or the flags, compilers also use it as a fast calculator. On a real CPU `lea eax, [rcx+rcx*2]` computes `rcx * 3`, and `lea eax, [rcx+5]` computes `rcx + 5`. If the result of a `lea` is never used as an address, read it as arithmetic.
+
+The simulator loaded this program:
+
+```text
+sub rsp, 16
+mov qword ptr [rsp+8], 5
+lea rax, [rsp+8]
+mov rbx, [rsp+8]
+```
+
+Run it. Which register holds the number 5 at the end?
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Run**.",
+    "Compare `rax` and `rbx` in the **Registers** pane, and compare `rax` with the address shown next to 5 in the **Stack** pane.",
+    "Pick the answer below.",
+]
+sim_code = '''
+sub rsp, 16
+mov qword ptr [rsp+8], 5
+lea rax, [rsp+8]
+mov rbx, [rsp+8]
+'''
+check = { kind = "choice", options = [
+    "rax",
+    "rbx",
+    "Both",
+    "Neither",
+], correct = 1, explain = [
+    "rax holds 0x7ffffff0: the address where the 5 is stored, not the 5 itself. lea computes an address.",
+    "`mov rbx, [rsp+8]` reads the value at that address: 5. `lea rax, [rsp+8]` only computed the address (0x7ffffff0).",
+    "Look again: rax holds a big number, the address 0x7ffffff0.",
+    "rbx holds 5: mov with brackets reads memory.",
+] }
+hints = [
+    "One of them is a big number close to 0x7ffffff0. That is an address.",
+]
+
+[[steps]]
+title = "Arrays and indexing"
+goal = "Recognise `array[i]` and find the element size."
+text = '''
+An array (or `Vec`, or slice) stores its elements one after another in memory. Element `i` is at:
+
+**address of element 0 + i * (size of one element)**
+
+```rust
+let x = numbers[i];      // numbers: &[u64], elements of 8 bytes
+```
+
+On a real CPU this becomes one instruction, because memory operands can multiply a register by 1, 2, 4 or 8:
+
+```text
+mov rax, [rcx+rdx*8]     ; rcx = address of numbers[0], rdx = i, 8 = size of a u64
+```
+
+The number after the `*` is called the **scale**, and it tells you the element size, and so the type:
+
+| Instruction | Element size | Probably |
+|---|---|---|
+| `movzx eax, byte ptr [rcx+rdx]` | 1 | `[u8]`, a string's bytes |
+| `movzx eax, word ptr [rcx+rdx*2]` | 2 | `[u16]` |
+| `mov eax, dword ptr [rcx+rdx*4]` | 4 | `[u32]`, `[i32]`, `[char]` |
+| `mov rax, qword ptr [rcx+rdx*8]` | 8 | `[u64]`, `[usize]`, an array of pointers |
+
+For a fixed index the compiler calculates the offset itself: `numbers[3]` of a `[u64]` becomes `[rcx+0x18]` (3 * 8 = 24 = 0x18). And for a struct, each field is at a fixed offset from the start of the struct: `[rcx+0x10]` is "the field 16 bytes into the struct".
+
+(The simulator does not support the `*8` form. On the next page you use a moving pointer instead, which compilers also do in loops.)
+
+In `mov eax, dword ptr [rcx+rdx*4]`, how many bytes is each element?
+'''
+instructions = [
+    "Find the scale (the number after `*`) in the instruction.",
+    "Type the element size in bytes in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["4"], number = true }
+hints = [
+    "The scale is the number that multiplies the index register rdx.",
+    "dword also means 4 bytes.",
+]
+success = '''
+4 bytes: an array of `u32`, `i32` or `char`. The scale and the size word (`dword`) agree, as they always do.
+'''
+
+[[steps]]
+title = "Exercise: sum an array"
+goal = "Walk through an array in memory with a pointer and a loop."
+text = '''
+Time to combine memory with a loop. The simulator loaded an array of three `u64` values on the stack: 10, 20 and 12. They are at `rsp`, `rsp+8` and `rsp+16`.
+
+Write a loop that adds them into `rax` (**42**), the way a compiler often compiles `numbers.iter().sum()`:
+
+```rust
+let mut sum = 0;
+let mut p: *const u64 = numbers.as_ptr(); // address of the first element
+let mut left = 3;                         // elements still to add
+while left != 0 {
+    sum += unsafe { *p };                 // add the value p points at
+    p = unsafe { p.add(1) };              // next element: 8 bytes further
+    left -= 1;
+}
+```
+
+Use:
+
+- `rbx` as the pointer `p`. Set it with `lea rbx, [rsp]`.
+- `rcx` as the counter `left`.
+- `add rax, [rbx]` to add the value `rbx` points at.
+- `add rbx, 8` to move to the next element.
+- `dec rcx` and `jnz` for the loop (Lesson 5).
+
+Step through it once it runs, and watch `rbx` go up by 8 in every round while `rax` collects the sum.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first four lines create the array.",
+    "Below them, set up: `lea rbx, [rsp]`, `mov rcx, 3` and `xor rax, rax`.",
+    "Add a label, then `add rax, [rbx]`, `add rbx, 8`, `dec rcx` and `jnz` back to the label.",
+    "Press **Run**. `rax` must be 42.",
+]
+spotlight = "sim.code"
+sim_code = '''
+sub rsp, 24                   ; room for three u64 values
+mov qword ptr [rsp], 10
+mov qword ptr [rsp+8], 20
+mov qword ptr [rsp+16], 12
+; rbx = address of the first element (use lea), rcx = 3, rax = 0
+; loop: rax += value at rbx; move rbx to the next element; rcx -= 1
+'''
+check = { kind = "sim", expect = [["rax", 42]], requires = ["lea", "jnz"] }
+hints = [
+    "Setup: `lea rbx, [rsp]`, `mov rcx, 3`, `xor rax, rax`.",
+    "Loop body: `add rax, [rbx]`, then `add rbx, 8`.",
+    "End of the loop: `dec rcx`, then `jnz` with your label (for example `again`).",
+]
+solution = '''
+sub rsp, 24
+mov qword ptr [rsp], 10
+mov qword ptr [rsp+8], 20
+mov qword ptr [rsp+16], 12
+lea rbx, [rsp]
+mov rcx, 3
+xor rax, rax
+again:
+add rax, [rbx]
+add rbx, 8
+dec rcx
+jnz again
+'''
+
+[[steps]]
+title = "Addresses of strings and constants"
+goal = "Read `lea rcx, [0x...]` as \"the address of some data in the program\"."
+text = '''
+Data that is part of the program, such as string literals and constant tables, lives in the program's data sections (Level 0: `.rdata`). Code reaches it with a fixed address in the brackets. The first lines of crackme #1's `main`, as ORRESS shows them:
+
+```text
+140001105  lea  rcx, [0x1400183d0]   ; "=== ORRESS Academy - Crackme #1 ==="
+14000110c  mov  edx, 0x49
+140001111  call sub_1400059b0        ; print it
+```
+
+The first column is the address of each instruction. `lea rcx, [0x1400183d0]` puts the **address** `0x1400183d0` into `rcx`. At that address the text begins; ORRESS looked it up and shows it as a comment. The text itself is not copied anywhere: the print function gets a pointer to it.
+
+In the actual machine code (`48 8D 0D C4 72 01 00`) the address is not stored directly. It is stored as a distance from the next instruction: `[rip+0x172c4]`, and `0x14000110c + 0x172c4 = 0x1400183d0`. This is called **rip-relative addressing**, and it lets the program work wherever Windows loads it in memory. ORRESS does the addition for you and shows the result, so you will almost never see `rip` in brackets.
+
+Data the code reads (not only its address) looks like `mov rax, [0x1400210c0]`: "the 8-byte value stored at that address".
+
+After `lea rcx, [0x1400183d0]`, what is in `rcx`?
+'''
+check = { kind = "choice", options = [
+    "The text \"=== ORRESS Academy - Crackme #1 ===\"",
+    "The first 8 bytes of the text",
+    "The number 0x1400183d0: the address where the text starts",
+    "The length of the text",
+], correct = 2, explain = [
+    "A register holds one number of 64 bits. A text of 36 characters does not fit; programs pass texts by their address.",
+    "That would be `mov rcx, [0x1400183d0]`. `lea` never reads memory.",
+    "lea computes the address and stops there. rcx is now a pointer to the text, ready to be passed to the print function.",
+    "The length is not in rcx. In Rust a &str is an address AND a length; you will see how both are passed in Lesson 10.",
+] }
+hints = [
+    "lea = load effective ADDRESS.",
+]
+success = '''
+`rcx` holds the address, a pointer to the text. You now know the three kinds of operands: registers, immediate values and memory. Next lesson: the stack, the memory area every function uses.
+'''

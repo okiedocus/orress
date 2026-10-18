@@ -1,0 +1,314 @@
+id = "l0-executables"
+level = 0
+order = 8
+title = "Inside an executable file"
+summary = "File formats, headers, sections, imports and the entry point; PE on Windows, ELF on Linux."
+goals = [
+    "recognize PE, ELF and Mach-O files by their first bytes",
+    "explain what the header, the sections and the import table are for",
+    "name the usual sections and what they contain",
+    "convert a file offset to a memory address",
+]
+
+[[steps]]
+title = "An executable is a structured file"
+goal = "Recognize a file format by its magic bytes."
+text = '''
+An executable is not just a long row of machine code. Like a ZIP archive or a PNG picture, it has a **file format**: a fixed structure that says what is stored where. The operating system needs that structure to load the program.
+
+Almost every file format starts with a few fixed bytes that identify it, called the **magic bytes** (or magic number). Tools like ORRESS look at them first to decide how to read a file.
+
+| system | format | first bytes | as text |
+|---|---|---|---|
+| Windows | **PE** (Portable Executable) | `4D 5A` | `MZ` |
+| Linux, Android | **ELF** (Executable and Linkable Format) | `7F 45 4C 46` | `.ELF` |
+| macOS, iOS | **Mach-O** | `CF FA ED FE` | (not text) |
+
+So `.exe` and `.dll` files on Windows are PE files, and programs on Linux are ELF files. The structure differs per format, but the ideas in this lesson are the same for all three.
+
+You can check magic bytes in Rust:
+
+```rust
+let bytes = std::fs::read("myapp.exe")?;
+if bytes.starts_with(b"MZ") {
+    println!("a Windows program");
+}
+```
+
+The ELF magic is `7F 45 4C 46`. The first byte is not printable. Which three letters do the other three bytes, `45 4C 46`, spell?
+'''
+widget = "ascii_table"
+instructions = [
+    "Look up `45`, `4C` and `46` in the ASCII table below.",
+    "Type the three letters in order (upper or lower case matters) and press **Check**.",
+]
+check = { kind = "answer", answers = ["ELF"], case_sensitive = true }
+hints = [
+    "0x45 is E.",
+    "0x4C is L, and 0x46 is F.",
+]
+success = '''
+**ELF**. File formats often hide their name in their magic bytes, so they are easy to spot in a hex dump.
+'''
+
+[[steps]]
+title = "Which format is it?"
+goal = "Identify a file from its first bytes."
+text = '''
+A colleague sends you a file without an extension, called `sample`. You open it in a hex view and the first bytes are:
+
+```text
+4D 5A 90 00 03 00 00 00 04 00 00 00 FF FF 00 00
+```
+
+The letters `MZ` are the initials of Mark Zbikowski, who designed the format for MS-DOS in the early 1980s. Windows still starts every PE file with them, followed later by the letters `PE` and two zero bytes.
+
+Remember the table from the previous step. What kind of file is `sample`?
+'''
+check = { kind = "choice", options = [
+    "A Linux program (ELF)",
+    "A Windows program or library (PE)",
+    "A macOS program (Mach-O)",
+    "A text file",
+], correct = 1, explain = [
+    "An ELF file starts with 7F 45 4C 46.",
+    "Correct: 4D 5A is MZ, the start of every PE file.",
+    "A 64-bit Mach-O file starts with CF FA ED FE.",
+    "Text files have no magic bytes, and 00 and FF are not normal text.",
+] }
+hints = ["4D 5A is the text MZ."]
+
+[[steps]]
+title = "The headers"
+goal = "Know what the headers of an executable describe."
+text = '''
+After the magic bytes comes the **header**: a group of fields with fixed positions that describe the program. A PE file has several headers one after another, but together they answer the same questions every format answers:
+
+- **Which CPU** is this for? For example x86-64 or ARM64.
+- **32-bit or 64-bit**?
+- **What kind of file**: a program you run, or a library (DLL) other programs load?
+- Where is the **entry point**, the first instruction to run?
+- At which address does the program prefer to be loaded (the **image base**)?
+- Which **sections** does the file have, and where are they?
+- Where is the **import table**: the list of library functions the program needs?
+- And more: when was it built, which operating system version does it need, is it a console or a window program.
+
+A header is like a Rust struct written to the file as bytes:
+
+```rust
+#[repr(C)]
+struct SimpleHeader {
+    magic: [u8; 2],     // b"MZ"
+    machine: u16,       // which CPU
+    entry_point: u32,   // where to start
+    section_count: u16, // how many sections follow
+}
+```
+
+The real PE headers have dozens of fields. You do not have to know them by heart: the **Info** view of ORRESS reads them and shows the important ones in plain language, with an explanation when you hover. Level 2 looks at the headers in more detail.
+'''
+
+[[steps]]
+title = "Sections"
+goal = "Know the usual sections and what they hold."
+text = '''
+The rest of the file is divided into **sections**: named blocks for different kinds of content. Remember the areas of a process's memory from lesson 6? Sections are where they come from. When the program starts, every section is copied into memory as one area.
+
+The usual sections in a Windows program:
+
+| section | contains | permissions |
+|---|---|---|
+| `.text` | the machine code of all functions | read, execute |
+| `.rdata` | read-only data: string literals, constants, the import table | read |
+| `.data` | global variables that can change | read, write |
+| `.pdata` | information needed to clean up when a panic happens | read |
+| `.reloc` | fix-up information for when the program is loaded at another address | read |
+
+Linux programs use almost the same names: `.text`, `.rodata` (instead of `.rdata`), `.data`, and `.bss` for global variables that start as zero.
+
+In Rust terms:
+
+```rust
+static GREETING: &str = "Hello";      // the bytes of "Hello": .rdata
+static mut COUNTER: u32 = 7;          // .data
+fn main() { /* ... */ }               // the machine code: .text
+```
+
+Section names are only a convention: the compiler and linker choose them, and malware sometimes uses strange names to confuse tools. The permissions are what really count.
+
+Where is the machine code of `fn main` stored?
+'''
+check = { kind = "choice", options = [".text", ".rdata", ".data", ".reloc"], correct = 0, explain = [
+    "Correct: .text holds the code of all functions.",
+    ".rdata holds read-only data such as string literals, not code.",
+    ".data holds global variables that can change.",
+    ".reloc holds fix-up information for the loader.",
+] }
+hints = ["Look at the first row of the table."]
+
+[[steps]]
+title = "Permissions"
+goal = "Read section permissions and spot a suspicious one."
+text = '''
+Every section has **permissions**, written as three letters: **R** (readable), **W** (writable) and **X** (executable: the CPU may run its bytes as code). A dash means "not allowed".
+
+These are the sections of the Academy's second practice program, as ORRESS shows them:
+
+```text
+section   permissions
+.text     R-X
+.rdata    R--
+.data     RW-
+.pdata    R--
+.reloc    R--
+```
+
+The rule is: **code is never writable, and data is never executable.** This protection is called **DEP** (data execution prevention), or **NX** (no-execute). If an attacker smuggles bytes into a data area, the CPU refuses to run them.
+
+A section that is both writable and executable (**RWX**) breaks that rule. Normal compilers never produce one. If you see it, the program probably writes or unpacks code while it runs, which is a typical trick of malware and copy protection. ORRESS shows RWX sections in a warning color.
+
+Which permissions does the `.rdata` section of this program have?
+'''
+check = { kind = "choice", options = [
+    "Read, write and execute (RWX)",
+    "Read and execute (R-X)",
+    "Read only (R--)",
+    "Read and write (RW-)",
+], correct = 2, explain = [
+    "No section of this program is RWX; that would be suspicious.",
+    "That is .text, the code.",
+    "Correct: read-only data can only be read.",
+    "That is .data, which holds variables that can change.",
+] }
+hints = ["Find the line that starts with .rdata in the table."]
+
+[[steps]]
+title = "File offset and address"
+goal = "Convert a position in the file to a memory address."
+text = '''
+Every byte of a section has two positions:
+
+- its **file offset**: where it is in the file, counted from the first byte (offset 0);
+- its **address**: where it is in memory after the program has been loaded.
+
+They are different numbers, because the loader places every section in memory on its own, starting at the image base. The headers list, for every section, where it starts in the file and where it starts in memory. For the `.rdata` section of the second crackme:
+
+```text
+.rdata starts at file offset 0x17600
+.rdata starts at address     0x140019000
+```
+
+To convert, take the distance from the start of the section, and add it to the other start:
+
+```text
+address = section address + (file offset - section file offset)
+```
+
+**Worked example.** The text `=== ORRESS Academy - Crackme #2 ===` is at file offset `0x17A90`. The distance from the start of `.rdata` is `0x17A90 - 0x17600 = 0x490`. So its address is `0x140019000 + 0x490 = 0x140019490`. That is the number you would see in the machine code that prints this text.
+
+ORRESS converts for you: the status bar at the bottom shows both the offset and the address of the cursor, and the **Strings** view has an **Offset** and an **Address** column.
+
+A byte of the same program is at file offset `0x17610`. What is its address?
+'''
+instructions = [
+    "Subtract the start of `.rdata` in the file (`0x17600`) from `0x17610`.",
+    "Add the result to the start of `.rdata` in memory (`0x140019000`).",
+    "Type the address in hex with `0x` and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140019010"], number = true }
+hints = [
+    "0x17610 - 0x17600 = 0x10.",
+    "0x140019000 + 0x10 = ?",
+]
+success = '''
+`0x140019010`. You will mostly read addresses in ORRESS, since that is what the code uses. The file offset matters when you want to change bytes in the file itself, which Level 3 teaches.
+'''
+deep_dive = '''
+The distance of a section from the image base is called its **RVA** (relative virtual address). The `.rdata` section above has RVA `0x19000`, and the image base is `0x140000000`, so its address is `0x140000000 + 0x19000`. PE headers store almost all positions as RVAs, so they stay correct when ASLR loads the program somewhere else.
+'''
+
+[[steps]]
+title = "Imports: the names that survive"
+goal = "Know what the import table is and why it helps."
+text = '''
+In lesson 7 you learned that a program calls operating system functions in DLLs, and that the linker only records *which* functions it needs. That record is the **import table**: a list of DLL names, and for each DLL the names of the functions the program uses.
+
+The second crackme imports, among others, these functions from `KERNEL32.dll`:
+
+```text
+GetStdHandle     get access to the console input or output
+ReadConsoleW     read what the user types
+WriteConsoleW    write text to the console
+ExitProcess      end the process
+```
+
+When the program starts, the **operating system's loader** reads the import table, loads every DLL that is listed, looks up the address of each function, and writes those addresses into the program's memory. When the program calls `WriteConsoleW`, it jumps through that address.
+
+Because the loader looks functions up **by name**, the names must stay in the file, even when the program is stripped. This makes the import table one of the first places a reverser looks: it is a summary of what a program can do with the outside world. A program that imports functions to connect to the internet, to start other programs or to read passwords deserves a closer look.
+
+The opposite exists too. A library lists the functions it offers to others in its **export table**. `KERNEL32.dll` exports `WriteConsoleW`; the crackme imports it.
+
+Why do import names survive stripping?
+'''
+check = { kind = "choice", options = [
+    "Stripping only removes comments",
+    "The loader needs the names to find the functions in the DLLs",
+    "ORRESS guesses them",
+    "Import names are encrypted, so stripping cannot see them",
+], correct = 1, explain = [
+    "Comments never reach the program at all. Stripping removes symbols, such as your own function names.",
+    "Correct: without the names, the loader could not connect the program to its libraries.",
+    "ORRESS reads them from the import table; they are really in the file.",
+    "The names are plain text in the file.",
+] }
+hints = ["Who reads the import table when the program starts, and what does it look up?"]
+
+[[steps]]
+title = "Starting a program, step by step"
+goal = "Put the loading steps in order."
+text = '''
+Now you can follow what happens when you double-click `crackme02.exe`:
+
+1. The operating system reads the file and checks the magic bytes and **headers**: is this a PE file for this CPU?
+2. It creates a new **process** with its own virtual memory.
+3. The **loader** copies every **section** into memory, at the image base (or, with ASLR, a random base) plus the section's distance, and gives each area the section's **permissions**.
+4. It reads the **import table**, loads the listed DLLs, and fills in the addresses of the imported functions.
+5. It sets up a **stack** for the program.
+6. It jumps to the **entry point**. The start-up code runs, and calls `main`.
+
+Every step uses information from the headers. That is why a damaged header makes a program refuse to start, and why some malware deliberately puts unusual values in its headers to confuse analysis tools.
+
+What does the loader do directly **before** it jumps to the entry point?
+'''
+check = { kind = "choice", options = [
+    "It calls main",
+    "It loads the DLLs and fills in the imported function addresses, and sets up the stack",
+    "It deletes the headers",
+    "It compiles the program",
+], correct = 1, explain = [
+    "main is called later, by the start-up code at the entry point.",
+    "Correct: the imports and the stack must be ready before any code runs.",
+    "The headers stay; the program and tools can still read them.",
+    "The program was compiled long ago; the loader only loads machine code.",
+] }
+hints = ["Look at steps 4, 5 and 6 of the list."]
+
+[[steps]]
+title = "Where ORRESS shows all this"
+goal = "Know which ORRESS view shows which part of the file."
+text = '''
+Everything in this lesson has its own place in ORRESS. When you open a program, the **Project** panel on the left lists these views for it:
+
+- **Info**: what is this file? The format (for example *PE (Windows executable)*), the architecture, the entry point, the image base, protections such as DEP and ASLR, the detected compiler and language, and tips on where to start.
+- **Sections**: the section table, with offsets, addresses, sizes and permissions.
+- **Imports**: the import table and, for libraries, the exports.
+- **Strings**: all readable text in the file, with offset, address and section.
+- **Hex**: the raw bytes, exactly as they are in the file.
+- **Functions**, **Disassembly** and **Graph**: the machine code, which Level 1 teaches you to read.
+
+Level 2 goes deeper into PE and ELF files: more header fields, more sections, and tricks that packed or damaged files play.
+
+You now have every foundation you need. In the last lesson of Level 0 you open a real practice program in ORRESS and find each of these things yourself: the magic bytes, the entry point, the sections, a string and its address, and the `main` function.
+
+Press **Finish lesson** to complete this lesson.
+'''

@@ -1,0 +1,190 @@
+id = "l6-static-deep-dive"
+level = 6
+order = 41
+title = "Static deep dive"
+summary = "Beyond the triage summary: open the training sample, read its suspicious imports, and decode its hidden configuration -- all without running it."
+badge = "Config Cracker"
+reveal_source = "crackme15"
+goals = [
+    "open the harmless training sample and confirm what it is from the Info view",
+    "read imports as evidence of capability in the Imports view",
+    "find and read a malware family's decoded configuration in the Triage view",
+    "pull a concrete IOC (a C2 host) out of a decoded config",
+]
+
+[[steps]]
+title = "Meet the training sample"
+goal = "Open crackme15, a harmless sample built to look like malware."
+text = '''
+Triage gave you the summary. Now go deeper on a real target -- safely. ORRESS ships a **harmless
+training sample**, crackme15, built for this level. It is completely safe: when run it only
+prints a message and exits. It touches no network, no registry, no other process and no file.
+
+But it is deliberately *full of the indicators analysts hunt for*: suspicious imports, a fake C2
+URL on the reserved `.invalid` domain (which can never resolve), a registry Run-key path, a
+mutex name, and an XOR-encoded configuration blob. Nothing here is ever acted on -- it exists so
+you can practise triage, config decoding, YARA and reporting on something realistic without any
+risk.
+
+Open it with the button below. ORRESS extracts it to its config folder under `academy/crackmes`.
+'''
+instructions = [
+    "Click the **Open crackme15** button below to load the training sample.",
+]
+check = { kind = "open_crackme", name = "crackme15" }
+hints = ["The Open button is right here in the lesson panel.", "It loads crackme15 as the active file; everything after this analyses it."]
+success = "The sample is open and analysed. Remember: reading it like this runs nothing -- you are safe. Everything in this lesson is static."
+
+[[steps]]
+title = "What is it?"
+goal = "Read the Info view to classify the file before going deeper."
+text = '''
+Start where you always start: the **Info** view. It tells you the format, architecture,
+protections and detected language -- the "what is it?" from the analyst's four questions.
+
+For crackme15 you will see a 64-bit **PE** (Windows executable), written in **Rust**, with
+symbols **stripped** (no function names). Note the entropy: it is moderate, not the 7.2+ that
+would flag a packer -- so this sample is *not* packed, and you can read its code and strings
+directly.
+'''
+instructions = [
+    "Open the **Info** view: press **Ctrl+I**, or the **View** menu -> **This File** -> **What Is This File?**.",
+    "Read the format, architecture and detected language at the top.",
+]
+check = { kind = "action", id = "file::Info" }
+spotlight = "view.Info"
+hints = ["Ctrl+I opens the Info view.", "It is under View -> This File -> What Is This File?."]
+success = "A stripped 64-bit Rust PE, not packed. That tells you the strings and imports are readable -- so static analysis will get you a long way before you ever need to run it."
+
+[[steps]]
+title = "Imports are evidence"
+goal = "Read the Imports view and recognise the process-injection trio."
+text = '''
+A program's **imports** are the library functions it calls -- and they are evidence of what it
+*can* do. Open the **Imports** view. Among the ordinary runtime functions you will spot some
+that have no business in a benign console program:
+
+- `VirtualAllocEx`, `WriteProcessMemory`, `CreateRemoteThread`, `OpenProcess` -- the classic **process-injection** recipe: allocate memory *in another process*, write code there, and start a thread to run it.
+- `InternetOpenA`, `HttpSendRequestA` -- HTTP networking, i.e. possible C2.
+- `RegCreateKeyExA`, `RegSetValueExA` -- writing to the registry (persistence).
+- `LoadLibraryA` + `GetProcAddress` -- resolving functions at run time to hide which APIs it really uses.
+
+(In this training sample those functions are only *referenced*, never called -- but to the
+analyst reading imports, the capability is what matters: the sample is *built to look like* it
+injects, beacons and persists.)
+
+Which three imports, used together, are the textbook sign of **process injection**?
+'''
+instructions = [
+    "Open the **Imports** view from the **Project** panel on the left (or **View** menu -> **This File** -> **Imports and Exports**).",
+    "Scan the list for `VirtualAllocEx`, `WriteProcessMemory` and `CreateRemoteThread`.",
+    "Type the three function names (separated by spaces) and press Check.",
+]
+check = { kind = "answer", answers = [
+  "VirtualAllocEx WriteProcessMemory CreateRemoteThread",
+  "VirtualAllocEx CreateRemoteThread WriteProcessMemory",
+  "WriteProcessMemory VirtualAllocEx CreateRemoteThread",
+  "WriteProcessMemory CreateRemoteThread VirtualAllocEx",
+  "CreateRemoteThread VirtualAllocEx WriteProcessMemory",
+  "CreateRemoteThread WriteProcessMemory VirtualAllocEx",
+], number = false, case_sensitive = false }
+spotlight = "tree.Imports"
+hints = [
+  "All three are about one process reaching into ANOTHER process's memory.",
+  "Allocate memory in the target, write bytes into it, start a thread on it.",
+  "VirtualAllocEx, WriteProcessMemory and CreateRemoteThread -- type all three.",
+]
+success = "That trio -- allocate in a remote process, write to it, run a thread in it -- is process injection (ATT&CK T1055). Imports let you infer capability before reading a single instruction."
+
+[[steps]]
+title = "The hidden configuration"
+goal = "Understand that a sample's secrets are often stored encoded, not in plain text."
+text = '''
+The most valuable thing a sample can give up is its **configuration** -- the C2 address,
+encryption keys, a campaign id, a mutex name. Authors know analysts read strings, so they rarely
+leave the config in plain text. They **encode** it: a common, cheap trick is to XOR every byte
+with a fixed key.
+
+crackme15 does exactly this. Buried in its data is a blob that starts with the marker `ORCFG`,
+then a two-byte length, then the configuration text with every byte XOR-ed by `0x5A`. In the
+Strings view you would only see the marker `ORCFG` and then gibberish -- the real config is
+hidden one XOR away.
+
+You could decode it by hand (find the blob, slice out the bytes, XOR each with `0x5A`). But
+ORRESS recognises this family's format and does it for you, in the Triage view. Let us use that.
+'''
+deep_dive = '''
+This is the shape of almost every real config extractor: find a signature, read a length,
+decrypt, parse. ORRESS's demo extractor is called `ExampleRAT` and only matches samples built in
+this format (such as this training sample and the test fixtures). Real-world extractors for
+families like AgentTesla or Remcos do the same thing with that family's real signature and
+cipher. An empty "Extracted configuration" section therefore means only that no shipped
+extractor recognised the sample -- not that there is no config.
+'''
+
+[[steps]]
+title = "Decode the config"
+goal = "Read the decoded configuration in the Triage view and extract the C2 host."
+text = '''
+Open the **Triage** view and find the **Extracted configuration** section near the top. ORRESS
+has located the `ORCFG` blob, XOR-decoded it, and parsed the `key=value` fields. You will see
+the family (`ExampleRAT (demo)`) and its fields: a `c2` URL, a `port`, a `campaign` id, a
+`mutex` and an `rc4key`.
+
+This is the payoff of the static deep dive: without running the sample, you now have its C2
+server, its campaign label and its key -- concrete, actionable intelligence.
+
+Read the `c2` field. Its URL is `http://<host>/gate.php`. **What is the host** -- the part
+between `http://` and `/gate.php`?
+'''
+instructions = [
+    "Open the **Triage** view: press **Ctrl+Shift+T**, or the **View** menu -> **Open View** -> **Open Triage Report**.",
+    "Find the **Extracted configuration** section and read the `c2` field.",
+    "Type the host from the `c2` URL (between `http://` and `/gate.php`) and press Check.",
+]
+check = { kind = "answer", answers = ["update.example.invalid"], number = false, case_sensitive = false }
+spotlight = "view.Triage"
+hints = [
+  "The Extracted configuration section is near the top of the Triage report.",
+  "The c2 value is `http://update.example.invalid/gate.php`.",
+  "The host is the part between `http://` and `/gate.php`.",
+]
+success = "update.example.invalid -- a decoded C2 host, pulled straight from the sample's own config. (The `.invalid` TLD is reserved and can never resolve, which is why this sample is safe to study.) That host is a prime IOC for your report."
+
+[[steps]]
+title = "One more field"
+goal = "Confirm you can read any field of the decoded config."
+text = '''
+The decoded config holds more than the C2. Defenders want the **campaign id** too: it labels
+which operation a sample belongs to, so related infections can be grouped.
+
+Read the `campaign` field in the **Extracted configuration** section and type its value.
+'''
+instructions = [
+    "In the **Triage** view's **Extracted configuration** section, read the `campaign` field.",
+    "Type its value exactly and press Check.",
+]
+check = { kind = "answer", answers = ["TRAINING-2026"], number = false, case_sensitive = false }
+hints = [
+  "It is one of the key=value lines under Extracted configuration.",
+  "It starts with TRAINING-.",
+  "The value is TRAINING-2026.",
+]
+success = "TRAINING-2026. You can now read any field a config extractor recovers. Together the C2 host, the campaign id, the mutex and the key are the heart of what you will put in the report."
+
+[[steps]]
+title = "What the static deep dive gave you"
+goal = "Consolidate the static findings before moving to dynamic analysis."
+text = '''
+Without running the sample once, you have established a great deal:
+
+- **What it is** -- a stripped 64-bit Rust PE, not packed, readable.
+- **What it can do** -- process injection, HTTP C2, registry persistence, dynamic API resolution (from the imports and the triage capabilities).
+- **Its secrets** -- a C2 host (`update.example.invalid`), a campaign id, a mutex and a key, from the decoded config.
+
+That is often enough to classify a sample and write most of a report. The one thing static
+analysis cannot prove is what the sample *actually does* when it runs -- the order of events, the
+files it drops, the real network calls. For packed or heavily obfuscated samples, static
+analysis may not even see the real code. That is where behaviour analysis comes in -- and for
+that, you need the safe lab. On to running it, carefully.
+'''

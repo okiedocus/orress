@@ -1,0 +1,325 @@
+id = "l4-side-channels"
+level = 4
+order = 28
+title = "Side channels"
+summary = "A check can leak its secret through how much work it does. Recover crackme03's password one character at a time by counting instructions."
+goals = [
+    "explain what a side channel is",
+    "explain why an early-exit comparison leaks how much of the input is right",
+    "recover a password byte by byte with the Emulator's Side-channel solve",
+    "read the per-position counts and spot where the signal is missing",
+    "know the defence: constant-time code",
+]
+badge = "Leak Hunter"
+
+[[steps]]
+title = "Secrets leak sideways"
+goal = "Understand the idea of a side channel."
+text = '''
+A check function gives you one bit of information: right or wrong. "Wrong key. Try again!" is the same for every wrong key. Or is it?
+
+The *output* is the same, but the *work* is not. A program that decides something about a secret often does a different amount of work depending on that secret: it runs longer or shorter, it uses the processor's memory cache differently, it even draws a slightly different amount of electrical power. Anything you can measure from the outside that depends on the secret is a **side channel**: information that leaks *beside* the official output.
+
+Real-world examples:
+
+- **Timing attacks**: a server that checks a password takes a few nanoseconds longer when the first character is right. Measured over many tries, that tiny difference reveals the password.
+- **Power analysis**: the power drawn by a smart card while it encrypts reveals the bits of its key.
+- **Cache attacks**: which memory a program touched is visible to another program on the same processor.
+
+In this lesson you use the cleanest side channel of all: **instruction counting**. You run the check in ORRESS's emulator and count how many instructions it executes. No noise, no statistics, just one exact number per try.
+'''
+success = "Next: why a perfectly ordinary comparison loop leaks."
+
+[[steps]]
+title = "The early exit"
+goal = "See exactly where crackme03's check leaks."
+text = '''
+Here is crackme03's check function, from its source. You solved this crackme in Level 2 by undoing the XOR:
+
+```rust
+fn check_password(s: &[u8]) -> bool {
+    if s.len() != CIPHER.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < CIPHER.len() {
+        if s[i] ^ KEY[i % 4] != CIPHER[i] {
+            return false;   // stop at the FIRST wrong character
+        }
+        i += 1;
+    }
+    true
+}
+```
+
+Look at the `return false` inside the loop. It is an **early exit**: the loop stops at the first character that does not match. That is natural and efficient, and it is exactly the leak:
+
+- If the first character is wrong, the loop runs once and stops.
+- If the first character is right but the second is wrong, the loop runs twice.
+- If the first three are right, it runs four times.
+
+So the **amount of work tells you how many characters at the start are right**. The function was supposed to answer only "yes or no", but by the way it works it answers "how many correct characters at the start", which is much more.
+
+A check that leaks like this is called an **oracle**: something you can ask questions that answers more than it should.
+'''
+success = "Early exit = leak. Now: how do you use it?"
+
+[[steps]]
+title = "One character at a time"
+goal = "Turn the leak into a strategy."
+text = '''
+You can measure how far the loop gets, but you still do not know any character of the password. How do you turn "how far did it get" into the full password?
+'''
+check = { kind = "choice", options = [
+    "Try every possible first character; the one that makes the check run longest is right. Keep it, then do the same for the second character, and so on",
+    "Try every possible full password and keep the one that runs longest",
+    "Run the check once with an empty input and read the password from the count",
+    "Measure the time of the 'Correct!' message",
+], correct = 0, explain = [
+    "Right. At position 0, only the correct character lets the loop continue to position 1, so it runs longest. Lock it in and move right. Each position is solved on its own.",
+    "That is brute force again: 95^8 tries. The point of the side channel is that you never need to try full passwords.",
+    "One measurement gives one number. The leak only says how many leading characters are right, so you need many tries, one position at a time.",
+    "You only see 'Correct!' after you already have the password.",
+] }
+hints = [
+    "The leak tells you whether the characters *at the start* are right.",
+    "Fix the characters you already know and vary only the next one.",
+]
+success = "Position by position. That changes the amount of work dramatically, as the next question shows."
+
+[[steps]]
+title = "Counting the work"
+goal = "Compare the side channel with brute force."
+text = '''
+Brute force on an 8-character password over 95 printable characters needs up to 95^8, about 6.6 x 10^15 tries.
+
+With the side channel you solve one position at a time. For each position you try all 95 characters once and keep the best. Then the next position, with the same 95 tries.
+
+How many tries does the side channel need for all 8 positions, at most?
+'''
+instructions = [
+    "Multiply the number of positions by the number of candidates per position.",
+    "Type the result and press **Check**.",
+]
+check = { kind = "answer", answers = ["760"], number = true }
+hints = [
+    "8 positions x 95 candidates.",
+    "8 x 95 = ?",
+]
+success = "760 tries instead of 6.6 x 10^15. The work grows by *adding* 95 per character instead of *multiplying* by 95. That is why an early exit is a real security bug, not a curiosity."
+
+[[steps]]
+title = "Measuring without noise"
+goal = "Understand why ORRESS counts instructions instead of time."
+text = '''
+On a real computer you would measure **time**. But time is noisy: other programs run, the processor changes its speed, the operating system interrupts. A difference of a few nanoseconds disappears in that noise, so a real timing attack repeats every measurement thousands of times and averages.
+
+In an **emulator** (Level 3) you do not need any of that. The emulator executes the function one instruction at a time and can simply count them. One more loop iteration means a few more instructions, every time, exactly. That count is a perfect, noise-free stand-in for time.
+
+ORRESS's **Side-channel solve**, in the Emulator tab, does the whole attack for you:
+
+1. It writes a candidate input into memory (unknown positions are filled with zero bytes at first).
+2. For position 0, it tries every character of the chosen **Charset** (printable, alphanumeric, or digits), calls the function, and counts the executed instructions.
+3. It keeps the character with the highest count, and moves to position 1.
+4. At the end it shows the **Recovered input** and a table, **per-position instruction counts**: for every position the chosen byte, its count, and the **runner-up** (the second-highest count).
+
+The runner-up column is your quality check. A clear signal looks like `count 24, runner-up 18`: one character stood out. Equal numbers mean no character made a difference at that position.
+'''
+success = "Now do it on crackme03."
+
+[[steps]]
+title = "Open crackme03"
+goal = "Load the practice program."
+text = '''
+Open **Crackme #3** again. You know it from Level 2, where you decoded its password by undoing the XOR. This time you recover the password without reading the key or the ciphertext at all: only by counting.
+'''
+instructions = [
+    "Click **Open crackme03** below.",
+    "Wait until the Project panel lists the views of `crackme03.exe`.",
+]
+check = { kind = "open_crackme", name = "crackme03" }
+hints = ["The button is directly under this text."]
+success = "First you need the address of the check function and the way it receives its input."
+
+[[steps]]
+title = "The check function and its arguments"
+goal = "Find the function and learn how it gets the input."
+text = '''
+In crackme03's `main`, the check function is the call right before the result test:
+
+```text
+call     sub_140001100
+test     al,al
+je       loc_...        ; "Wrong key. Try again!"
+```
+
+Open that function in the decompiler and look at its first line:
+
+```rust
+fn sub_140001100(a1: &[u8]) -> bool {
+    if a1.len() != 8 {
+        return false;
+    }
+```
+
+The argument is a **slice**, `&[u8]`. You know slices from Rust: a slice is two things, a pointer to the first byte and a length. In machine code it is passed as **two** arguments. On Windows the first argument is in `rcx` (the pointer) and the second in `rdx` (the length). The function returns `false` straight away unless the length is 8.
+
+That matters for the solver. The Emulator passes a pointer to the input as the first argument. For the length, the Side-channel solve has a tick box: **pass length as arg1** (arg1 is the second argument, because counting starts at arg0). Without it, the length argument is 0, every try fails the length check immediately, and every count is the same.
+
+What is the address of the check function?
+'''
+instructions = [
+    "Press `Ctrl+Shift+M` to jump to `main` in the Disassembly.",
+    "Scroll down to `test al,al`, followed by a jump to the \"Wrong key\" code. The line above it is the call.",
+    "Type the called function's address with `0x` in front and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001100"], number = true }
+hints = [
+    "The call is named sub_ followed by the address.",
+    "Type 0x140001100.",
+]
+success = "`0x140001100`, taking a pointer and a length. Now let the solver count."
+
+[[steps]]
+title = "Count your way in"
+goal = "Run the side-channel solver on crackme03."
+text = '''
+Fill in the **Side-channel solve** section of the Emulator. The function takes a pointer and a length, the length must be 8, and the password is probably printable text.
+
+The solve tries 95 characters for each of the 8 positions, 760 emulated calls. It takes a moment; a spinner and a **Cancel** button appear at the top while it runs.
+'''
+instructions = [
+    "Press `F7` to open the **Emulator**.",
+    "Scroll to the **Side-channel solve** heading.",
+    "In **Function address** type `0x140001100`. In **Input length** type `8`.",
+    "Next to **Charset**, click **printable**.",
+    "Tick **pass length as arg1**.",
+    "Click **Solve**. Read the line under **Recovered input:**.",
+    "Type the first **seven** characters it recovered and press **Check**.",
+]
+spotlight = "view.Emulator"
+check = { kind = "answer", answers = ["ORRESS4"], case_sensitive = true }
+hints = [
+    "If every character comes out as a space, the tick box pass length as arg1 is probably not ticked.",
+    "The recovered input is shown in quotes, then as hex bytes.",
+    "It starts with ORRESS.",
+]
+success = "Seven characters, without looking at the key or the ciphertext once. But the eighth character came out as a space. Is the password really `ORRESS4 `?"
+
+[[steps]]
+title = "Read the table"
+goal = "Find where the signal disappears, and why."
+text = '''
+Open the folded section **per-position instruction counts** under the result. You see something like:
+
+| pos | byte | count | runner-up |
+|---|---|---|---|
+| 0 | `'O'` | 18 | 12 |
+| 1 | `'R'` | 24 | 18 |
+| ... | ... | ... | ... |
+| 6 | `'4'` | 53 | 48 |
+| 7 | `' '` | 53 | 53 |
+
+For positions 0 to 6 the chosen character beat the runner-up clearly: a correct character makes the loop do one more round, about 6 more instructions. At position 7 the count and the runner-up are **equal**. No character made a difference, so the solver kept the first candidate of the charset, the space.
+
+Why? Look at the end of the check function in the disassembly:
+
+```text
+cmp      byte ptr [rsp+7],1
+sete     al                 ; al = 1 if equal, else 0
+pop      rcx
+ret
+```
+
+For the last character the compiler did not write a branch. `sete` ("set if equal") puts the result of the comparison directly into `al`, the return value. Right or wrong, exactly the same instructions run.
+'''
+check = { kind = "choice", options = [
+    "The last comparison has no early exit: the result goes straight into the return value with sete, so the same instructions run for every character",
+    "The emulator stops counting after 50 instructions",
+    "The password really ends with a space",
+    "Position 7 is outside the input buffer",
+], correct = 0, explain = [
+    "Right. A side channel needs a difference in work. Without a branch there is no difference, so the last character does not leak.",
+    "The emulator has no such limit; the counts are 53 simply because that is all the work the function does.",
+    "Try it: ORRESS4 followed by a space is rejected. The space is only the first candidate of the printable charset, kept because nothing scored higher.",
+    "The input length is 8, so position 7 is the last byte inside the buffer.",
+] }
+hints = [
+    "Compare count and runner-up in the last row.",
+    "Is there a jump after the last comparison?",
+]
+success = "Side channels show you where the code branches on the secret, and nothing else. The last character needs another method, and you have one."
+
+[[steps]]
+title = "Finish by hand"
+goal = "Combine the side channel with static analysis."
+text = '''
+You have seven characters from the side channel. For the last one, read the check. The decompiler shows the last line of `sub_140001100` as:
+
+```rust
+return a1[7] ^ 51 == 1;
+```
+
+(51 is decimal; it is `0x33`.) That is one constraint with one unknown, exactly like the one you solved in the symbolic execution lesson:
+
+```text
+a1[7] ^ 51 == 1   so   a1[7] == 1 ^ 51
+```
+
+Compute `1 ^ 51`, turn it into a character, and type the full 8-character password.
+'''
+instructions = [
+    "Press `F5` with the cursor in `sub_140001100` and find its last line (or use the line shown above).",
+    "Compute `1 ^ 51`: 51 is `0011 0011` in binary, 1 is `0000 0001`.",
+    "Look up the result in an ASCII table (decimal 48 to 57 are the digits 0 to 9).",
+    "Type the seven recovered characters plus the new one and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "secret", sha256 = "b1cdf3807031964dd3d9f5702f4912a34cc28faf18d67a6f98af96d96142af88" }
+hints = [
+    "0011 0011 XOR 0000 0001 = 0011 0010.",
+    "0011 0010 is 50, the digit 2.",
+    "ORRESS4 plus 2.",
+]
+success = "`ORRESS42`, the same password you decoded in Level 2. Different methods, same answer: a good sign you understood the program. Real reverse engineering mixes methods like this all the time."
+
+[[steps]]
+title = "When the side channel stays silent"
+goal = "Know which checks do not leak."
+text = '''
+The side channel worked on crackme03 because each character was checked on its own, in order, with an early exit. Try to imagine it on crackme14 from the last lesson, which checks characters in **pairs**:
+
+```rust
+if x ^ y != MIX[j] { return 0; }     // x comes from character 2j, y from 2j+1
+if x.rotate_left(1).wrapping_add(y) != ROT[j] { return 0; }
+```
+
+When the solver varies character 0, character 1 is still a zero byte. Some character 0 may happen to pass the first comparison together with that zero byte, and the solver keeps it. But it is the wrong character, and nothing that follows can fix it. If you run the Side-channel solve on crackme14 (length 12, without the length tick box), it recovers one wrong character and then gives up: all other counts equal their runner-up.
+
+So side channels need a check that tests the secret **piece by piece, in order, and stops early**. Checks that mix pieces need the symbolic solver.
+
+The defence follows directly: **constant-time code**. Compare every byte, even after a mismatch, and combine the results without branching:
+
+```rust
+fn equal_constant_time(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = 0u8;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];   // no early exit
+    }
+    diff == 0
+}
+```
+
+This runs exactly the same instructions for every input of the right length, so there is nothing to measure. Cryptography libraries are written this way on purpose.
+'''
+deep_dive = '''
+Real-world side channels go far beyond counting:
+
+- **Remote timing**: password and token checks on web servers have been broken over the network by measuring response times thousands of times.
+- **Cache attacks** (Flush+Reload, Prime+Probe): another program on the same processor learns which memory lines a victim used, which leaks table lookups such as an AES S-box.
+- **Speculative execution** (Spectre, Meltdown): the processor runs instructions ahead of time, and their traces in the cache leak data across security boundaries.
+- **Power and electromagnetic analysis**: on smart cards and microcontrollers, differential power analysis (DPA) recovers keys from the power drawn during encryption.
+
+In CTFs you mostly meet the first kind: a check with an early exit, and sometimes a challenge that literally prints how long the check took.
+'''
+success = "Side channels: the secret leaks through behaviour, not output. You now have three ways to beat a check: invert it, solve it, or listen to it. Next: programs that are not machine code at all."

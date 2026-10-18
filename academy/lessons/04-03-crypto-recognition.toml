@@ -1,0 +1,387 @@
+id = "l4-crypto-recognition"
+level = 4
+order = 25
+title = "Recognising crypto"
+summary = "Ciphers, hashes and their fingerprints: recognise a standard algorithm from its magic constants instead of reversing the maths."
+goals = [
+    "explain plaintext, ciphertext, key, block cipher and stream cipher",
+    "tell hash functions apart by the size of their output",
+    "recognise AES, TEA, RC4, MD5, SHA-256 and CRC32 by their magic constants",
+    "find a constant in a program with the Hex view's byte search",
+]
+badge = "Cipher Spotter"
+
+[[steps]]
+title = "The words of cryptography"
+goal = "Learn the five words every crypto challenge uses."
+text = '''
+**Cryptography** is the science of hiding information so that only the right people can read it. You do not need its mathematics to reverse engineer it. You need its vocabulary and the ability to recognise its algorithms.
+
+A **cipher** is an algorithm that encrypts and decrypts. In Rust terms, every cipher looks like this:
+
+```rust
+fn encrypt(plaintext: &[u8], key: &[u8]) -> Vec<u8>;   // gives the ciphertext
+fn decrypt(ciphertext: &[u8], key: &[u8]) -> Vec<u8>;  // gives the plaintext back
+```
+
+- The **plaintext** is the readable data, for example the flag.
+- The **ciphertext** is the scrambled result. Without the key it looks like random bytes.
+- The **secret key** is the input that controls the scrambling. Same plaintext, different key: completely different ciphertext.
+
+Modern ciphers are public. Everybody knows exactly how AES works; its security comes only from the key. For you as a reverse engineer that is great news:
+
+1. If you can **name** the algorithm, you do not have to understand its code. A tested implementation already exists, for example in the Workbench.
+2. A program that decrypts something must have the **key** somewhere: in its data, computed by its code, or typed by the user.
+
+So the job is: recognise the algorithm, find the key, find the ciphertext, decrypt. This lesson teaches the recognising. The next lesson does the rest on a real program.
+'''
+success = "Recognise, then decrypt. Never re-derive a cipher by hand."
+
+[[steps]]
+title = "Block ciphers and stream ciphers"
+goal = "Know the two big families of ciphers and how they look in code."
+text = '''
+Ciphers come in two families.
+
+A **block cipher** encrypts a fixed-size chunk, a *block*, at a time. AES uses 16-byte blocks, TEA uses 8-byte blocks. Longer data is cut into blocks. In code you recognise a block cipher by:
+
+- a loop over the data in steps of 8 or 16 bytes,
+- an inner loop of **rounds**: the same mixing steps repeated many times (TEA: 32 cycles, AES: 10 to 14 rounds),
+- lots of shifts, XORs, additions, and sometimes a table lookup.
+
+A **stream cipher** produces a long sequence of pseudo-random bytes from the key, the **keystream**, and XORs it with the data, byte by byte:
+
+```rust
+for i in 0..data.len() {
+    out[i] = data[i] ^ keystream[i];   // the same as the XOR from the last lesson
+}
+```
+
+Encryption and decryption are the same operation. RC4 and ChaCha20 are stream ciphers. You recognise them by a byte-by-byte XOR at the end, fed by a generator that keeps internal state between bytes.
+
+Note how this connects to the last lesson: XOR with a repeating key is a stream cipher with a terrible keystream (it repeats every few bytes). A real stream cipher never repeats, so the known-plaintext trick only reveals the keystream for the bytes you know, not the key.
+'''
+check = { kind = "choice", options = [
+    "A loop that generates one byte of pseudo-random state per step and XORs it with the next data byte",
+    "A loop that takes 16 bytes at a time and runs 10 rounds of mixing on each chunk",
+    "A function that turns any input into exactly 32 bytes",
+], correct = 0, explain = [
+    "Right. One keystream byte per data byte, combined with XOR: that is a stream cipher such as RC4.",
+    "Fixed 16-byte chunks with rounds of mixing: that is a block cipher, and 16 bytes with 10 rounds is exactly AES-128.",
+    "A fixed-size output for any input is a hash function, the topic of the next step.",
+] }
+hints = [
+    "Which option XORs a generated sequence with the data, one byte at a time?",
+]
+success = "Stream ciphers XOR a keystream into the data; block ciphers mix fixed-size blocks in rounds."
+
+[[steps]]
+title = "Hash functions and checksums"
+goal = "Recognise hashes by the size of their output."
+text = '''
+A **hash function** turns input of any length into a short, fixed-size **digest**. The same input always gives the same digest, a tiny change of the input changes the digest completely, and you cannot compute the input back from the digest (it is a **one-way function**).
+
+The common ones, with the size of their digest:
+
+| Hash | Digest size | As hex text |
+|---|---|---|
+| **CRC32** | 4 bytes | 8 hex digits |
+| **MD5** | 16 bytes | 32 hex digits |
+| **SHA-1** | 20 bytes | 40 hex digits |
+| **SHA-256** | 32 bytes | 64 hex digits |
+
+**CRC32** is a *checksum*, not a security hash: it detects accidental damage (zip files and PNG images use it) but is easy to fool on purpose. **MD5** and **SHA-1** are old and broken for some purposes but still everywhere. **SHA-256** is the current standard.
+
+You have seen digests already: the **Info** view shows the MD5, SHA-1 and SHA-256 of every file you open. The Workbench can compute them too (category *Hashes*).
+
+The size of a digest tells you which hash it probably is. That works for a string of hex digits in the Strings view and for a byte array in the decompiler.
+
+A program contains this hex text in its strings and compares it with something computed from your input:
+
+```text
+5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8
+```
+
+Which hash is it most likely?
+'''
+instructions = [
+    "Count the hex digits in the string (or count pairs: each pair is one byte).",
+    "Look up that length in the table.",
+    "Type the name of the hash (for example `MD5`) and press **Check**.",
+]
+check = { kind = "answer", answers = ["SHA-1", "SHA1", "SHA 1"] }
+hints = [
+    "The string has 40 hex digits.",
+    "40 hex digits = 20 bytes.",
+    "20 bytes is the digest size of SHA-1.",
+]
+success = "40 hex digits, 20 bytes: SHA-1. (This one is the SHA-1 of the word `password`. Common passwords are exactly what a dictionary attack tries first.)"
+
+[[steps]]
+title = "Magic constants: the fingerprints"
+goal = "Know why fixed numbers give an algorithm away."
+text = '''
+The best way to recognise an algorithm is by its **magic constants**: fixed numbers and tables that are part of its definition. Every implementation of the algorithm in every language contains them, and almost nothing else does. Finding one is close to proof.
+
+Here is the TEA block cipher in Rust. Look at the first line inside the function:
+
+```rust
+fn tea_encrypt(v: &mut [u32; 2], k: &[u32; 4]) {
+    const DELTA: u32 = 0x9E37_79B9;           // the fingerprint
+    let (mut v0, mut v1) = (v[0], v[1]);
+    let mut sum = 0u32;
+    for _ in 0..32 {
+        sum = sum.wrapping_add(DELTA);
+        v0 = v0.wrapping_add((v1 << 4).wrapping_add(k[0]) ^ v1.wrapping_add(sum) ^ (v1 >> 5).wrapping_add(k[1]));
+        v1 = v1.wrapping_add((v0 << 4).wrapping_add(k[2]) ^ v0.wrapping_add(sum) ^ (v0 >> 5).wrapping_add(k[3]));
+    }
+    v[0] = v0;
+    v[1] = v1;
+}
+```
+
+`0x9E3779B9` comes from the golden ratio. Any program that contains it almost certainly uses TEA, XTEA or a relative. The constants to remember:
+
+| Algorithm | Magic constant | Where you see it |
+|---|---|---|
+| **TEA / XTEA** | `0x9E3779B9` (delta) | an immediate in the code |
+| **MD5** | `0x67452301`, `0xEFCDAB89`, `0x98BADCFE`, `0x10325476` | start values in the code |
+| **SHA-1** | the same four as MD5, plus `0xC3D2E1F0`; round constant `0x5A827999` | code |
+| **SHA-256** | start values `0x6A09E667`, `0xBB67AE85`; round table starting `0x428A2F98` | code or a 256-byte table |
+| **CRC32** | `0xEDB88320`, or a 1 KB table starting `00 00 00 00 96 30 07 77` | code or data |
+| **AES** | the **S-box**, a 256-byte table starting `63 7C 77 7B F2 6B 6F C5` | data |
+| **ChaCha20 / Salsa20** | the text `expand 32-byte k` | the Strings view |
+| **RC4** | no constant, but a loop that fills a 256-byte array with 0, 1, 2, ... 255 | code |
+
+An **S-box** ("substitution box") is a lookup table that replaces each byte with another byte: `out = SBOX[input as usize]`. Block ciphers use S-boxes to mix data in a way that is hard to undo without the key.
+'''
+deep_dive = '''
+RC4's setup, the **key-scheduling algorithm (KSA)**, is short enough to learn by heart. In Rust:
+
+```rust
+let mut s: [u8; 256] = core::array::from_fn(|i| i as u8);   // 0, 1, 2, ... 255
+let mut j = 0u8;
+for i in 0..256 {
+    j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+    s.swap(i, j as usize);
+}
+```
+
+In the disassembly this shows up as a loop that writes 0 to 255 into a buffer, followed by a loop that swaps two of its bytes 256 times. When you see those two loops, it is RC4. The Workbench's **RC4** operation decrypts it once you have the key.
+
+Why do these constants exist? Designers pick numbers that nobody can suspect of a hidden weakness, such as digits of pi, square roots of primes, or the golden ratio. That makes them trustworthy, and it also makes them perfectly recognisable.
+'''
+success = "A table of magic numbers to come back to. You do not need to memorise all of them: you need to know that they exist and where to look them up."
+
+[[steps]]
+title = "Name that algorithm"
+goal = "Use the constants table."
+text = '''
+You are reading a function in the decompiler. Near its start it sets eight 32-bit variables, and the first two lines are:
+
+```rust
+h0 = 0x6a09e667;
+h1 = 0xbb67ae85;
+```
+
+Further down there is a loop of 64 rounds with lots of rotations, and a table of 64 numbers that starts with `0x428a2f98`.
+'''
+check = { kind = "choice", options = ["SHA-256", "MD5", "AES", "TEA"], correct = 0, explain = [
+    "Right. 0x6A09E667 and 0xBB67AE85 are the first two start values of SHA-256, and 0x428A2F98 is its first round constant. Eight state words and 64 rounds fit too.",
+    "MD5 starts with 0x67452301. The numbers look a little alike, but they are different. MD5 has four state words, not eight.",
+    "AES is recognised by its 256-byte S-box starting 63 7C 77 7B, not by 32-bit start values.",
+    "TEA's fingerprint is the single constant 0x9E3779B9.",
+] }
+hints = [
+    "Look up 0x6A09E667 in the table of the previous step.",
+]
+success = "SHA-256. Two numbers were enough to name an algorithm of hundreds of instructions."
+
+[[steps]]
+title = "How a constant looks in the file"
+goal = "Turn a constant into the bytes you can search for."
+text = '''
+To search a program for a constant, you need to know how its bytes are stored. You learned in Level 0 that x86-64 is **little-endian**: a multi-byte number is stored with its **lowest** byte first.
+
+Worked example with CRC32's constant `0xEDB88320`:
+
+1. Split it into bytes: `ED B8 83 20`.
+2. Reverse the order: `20 83 B8 ED`.
+
+So in the file you search for the bytes `20 83 b8 ed`.
+
+In Rust you can check this with `0xEDB88320u32.to_le_bytes()`, which gives `[0x20, 0x83, 0xb8, 0xed]`.
+
+Now do the same for TEA's delta, `0x9E3779B9`. Which four bytes do you search for?
+'''
+instructions = [
+    "Split `0x9E3779B9` into its four bytes.",
+    "Write them in reverse order.",
+    "Type them as hex pairs separated by spaces, for example `11 22 33 44`, and press **Check**.",
+]
+check = { kind = "answer", answers = ["b9 79 37 9e", "b979379e", "0xb9 0x79 0x37 0x9e", "b9,79,37,9e", "b9, 79, 37, 9e"] }
+hints = [
+    "The bytes are 9E 37 79 B9.",
+    "Reversed, the last byte (B9) comes first.",
+    "b9 79 37 9e",
+]
+success = "`b9 79 37 9e`. In the next steps you search a real program for exactly these bytes."
+
+[[steps]]
+title = "Open the practice program"
+goal = "Load crackme13."
+text = '''
+**Crackme #13** asks for a flag. It contains a real cipher. Your job in this lesson is only to find out *which* cipher. In the next lesson you decrypt the flag.
+
+Open it with the button below. ORRESS analyses it and shows its views in the **Project** panel on the left.
+'''
+instructions = [
+    "Click **Open crackme13** below.",
+    "Wait until the Project panel on the left lists the views of `crackme13.exe` (Disassembly, Graph, Functions, ...).",
+]
+check = { kind = "open_crackme", name = "crackme13" }
+hints = ["The button is directly under this text."]
+success = "crackme13.exe is open. First stop: its raw bytes."
+
+[[steps]]
+title = "Search the bytes"
+goal = "Find TEA's constant with the Hex view."
+text = '''
+The **Hex** view shows the raw bytes of the file and can search them. Its **Find…** bar has three modes:
+
+- **Text**: ASCII text, as most strings are stored,
+- **Wide text (UTF-16)**: Windows-style text with two bytes per character,
+- **Hex bytes**: a byte sequence such as `4D 5A ?? 00`, where `??` matches any byte.
+
+After a search the bar says where the first match is and how many matches the whole file has: `found at 0x... · N matches in the file`. **Next** (or `F3`) jumps to the next match, **Previous** (`Shift+F3`) to the one before.
+
+Search crackme13 for TEA's delta.
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Hex**.",
+    "In the bar at the top of the Hex view, click **Find…** (or press `Ctrl+F`).",
+    "Open the mode list on the left of the find bar and choose **Hex bytes**.",
+    "Type `b9 79 37 9e` in the search box and press `Enter` (or click **Next**).",
+    "Read the message to the right of the buttons. Type the number of matches into the answer box and press **Check**.",
+]
+spotlight = "tree.Hex"
+check = { kind = "answer", answers = ["2"], number = true }
+hints = [
+    "Make sure the mode says Hex bytes, not Text. In Text mode ORRESS would search for the characters b, 9, space, ...",
+    "The message looks like: found at 0x... · N matches in the file. N is the answer.",
+    "There are 2 matches.",
+]
+success = "Two matches. The bytes of TEA's delta appear twice in crackme13. (In a program without TEA, such as crackme03, the same search says `not found`.) Now find out where in the code they are."
+
+[[steps]]
+title = "Which function holds it?"
+goal = "Connect a byte offset to the code around it."
+text = '''
+The Hex view selected the first match. Now look at the **status bar** at the very bottom of the ORRESS window. For the byte under the cursor it shows:
+
+- `offset 0x...`: the position in the file,
+- `address 0x...`: where that byte lands in memory when the program runs,
+- the **section** (here `.text`, the code),
+- the function the address belongs to, as `name+0x...` (the name, plus how far into the function the byte is).
+
+The match is inside the code section, so the constant is part of an instruction: an **immediate**, a number written directly into an instruction, like the `5` in `mov eax, 5`.
+
+Which function contains the first match?
+'''
+instructions = [
+    "Keep the Hex view open with the first match selected (press **Next** in the find bar once more if you lost it, then **Previous**).",
+    "Read the status bar at the bottom of the window. Find the part that looks like `sub_1400.....+0x19`.",
+    "Type the function's address with `0x` in front, for example `0x140001234`, and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001500"], number = true }
+hints = [
+    "The function name in the status bar is sub_ followed by its address.",
+    "sub_140001500 means the function starts at 0x140001500.",
+    "Type 0x140001500.",
+]
+success = "`sub_140001500`. The status bar said `+0x19`: the constant starts 0x19 bytes into that function. Time to look at the code."
+
+[[steps]]
+title = "Read the cipher's code"
+goal = "Confirm the algorithm in the disassembly and the decompiler."
+text = '''
+Jump to the function and read it. In the **Disassembly** you will find two instructions that use the constant:
+
+```text
+mov      r11d,0x9e3779b9      ; sum = DELTA
+...
+add      r11d,0x9e3779b9      ; sum += DELTA, once per cycle
+```
+
+Compare with the Rust code of TEA from step 4: `sum` starts at `DELTA` (the compiler did the first `wrapping_add` for you) and grows by `DELTA` in every cycle. Between them you see the `shl ...,4` and `shr ...,5` of `(v1 << 4)` and `(v1 >> 5)`, and the XORs.
+
+Above the loop, another register is set to the number of cycles and counts down with `dec` until it reaches zero.
+
+How many cycles does the loop run?
+'''
+instructions = [
+    "Press `Ctrl+D` to open the **Disassembly** view.",
+    "Press `Ctrl+G`, type `140001500` and press `Enter` to jump to the function.",
+    "Find `mov r11d,0x9e3779b9`. The line right below it, `mov esi,...`, sets the cycle counter. Look at its number.",
+    "Type that number (hex with `0x`, or decimal) and press **Check**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["32", "0x20"], number = true }
+hints = [
+    "The counter is the register that `dec esi` decrements before `jne` jumps back.",
+    "mov esi,0x20 sets it.",
+    "0x20 is 32.",
+]
+success = "32 cycles, exactly as TEA prescribes. Constant, loop count, shifts by 4 and 5: this is TEA."
+
+[[steps]]
+title = "The same number, written differently"
+goal = "Recognise a constant when the decompiler writes it as a subtraction."
+text = '''
+Now press `F5` with the cursor in this function to open the **Decompiler**. You will see a line like:
+
+```rust
+r11 = 0x9e3779b9;
+...
+r11 -= 0x61c88647;
+```
+
+The disassembly said `add r11d,0x9e3779b9`, but the decompiler says `-= 0x61c88647`. Both are true, because 32-bit numbers wrap around at 2^32:
+
+```text
+0x9e3779b9 + 0x61c88647 = 0x1_0000_0000  (which is 0 in 32 bits)
+```
+
+So adding `0x9e3779b9` and subtracting `0x61c88647` give the same 32-bit result. In Rust: `x.wrapping_add(0x9e3779b9) == x.wrapping_sub(0x61c88647)` for every `u32` x. This is the **two's complement** idea from Level 0: `0x61c88647` is the negative of `0x9e3779b9`.
+
+Compilers and decompilers pick whichever form they like. So remember both forms of a constant, or convert it yourself.
+
+Which algorithm does crackme13 use?
+'''
+check = { kind = "choice", options = ["TEA", "AES", "RC4", "SHA-256"], correct = 0, explain = [
+    "Right. The delta 0x9E3779B9 (or 0x61C88647 subtracted), 32 cycles, shifts by 4 and 5 on two 32-bit halves of an 8-byte block: TEA.",
+    "AES would show a 256-byte S-box starting 63 7C 77 7B in the data, and 16-byte blocks.",
+    "RC4 has no such constant; it starts with a loop that fills 256 bytes with 0 to 255.",
+    "SHA-256 would show 0x6A09E667 and a table of 64 round constants. It also cannot be decrypted, and this program encrypts.",
+] }
+hints = [
+    "Look up 0x9E3779B9 in the table of magic constants.",
+]
+success = "TEA. You identified a cipher without reading its maths, from one number and a loop count."
+
+[[steps]]
+title = "From recognition to attack"
+goal = "Know what to do once the algorithm has a name."
+text = '''
+Naming the algorithm decides the attack:
+
+1. **A cipher with the key inside the program** (TEA, AES, RC4, XOR): find the key and the ciphertext, then decrypt them in the Workbench (**TEA decrypt**, **XTEA decrypt**, **AES decrypt**, **RC4**, **XOR**). That is the next lesson.
+2. **A hash of your input compared with a stored digest** (MD5, SHA-1, SHA-256): you cannot decrypt. Guess inputs instead: common passwords, short brute force, or whatever the challenge text hints at. Or patch the comparison if the challenge only needs the program to say "Correct".
+3. **A custom transformation** (XOR, additions, rotations you cannot name): undo it by hand, or let the symbolic solver compute the input (two lessons ahead).
+
+Two more places that help you recognise crypto:
+
+- The **Imports** view. Programs that use Windows' built-in crypto import functions such as `CryptEncrypt`, `CryptDecrypt`, `BCryptEncrypt` or `BCryptDecrypt`. The **Triage** report then lists them under its capabilities and calls the file a crypto challenge. A program with its own hand-written cipher, like crackme13, imports none of these, so for it you hunt the constants yourself, as you just did.
+- The **Strings** view, for text constants like `expand 32-byte k` (ChaCha20), and for keys that are stored as readable text, as you will see next.
+'''
+success = "Next lesson: you finish crackme13 by finding its key and decrypting the flag."

@@ -1,0 +1,173 @@
+id = "l5-obfuscation-intro"
+level = 5
+order = 30
+title = "What obfuscation is and why"
+summary = "The families of obfuscation, why people use it, and how ORRESS helps you fight back."
+badge = "Code Archaeologist"
+goals = [
+    "explain what obfuscation does and why software and malware use it",
+    "name the main families of obfuscation you will meet in this level",
+    "find ORRESS's Triage report and the decompiler's deobfuscation note",
+    "state the one strategy that beats most obfuscation",
+]
+
+[[steps]]
+title = "Code that fights back"
+goal = "Understand what obfuscation is and why it exists."
+text = '''
+Everything you have reversed so far tried, more or less, to be readable. This level is
+about code that **actively resists** you.
+
+**Obfuscation** rewrites a program into an equivalent one that is far harder to
+understand. The behaviour does not change — same inputs, same outputs — only the *shape*
+is scrambled. Think of it as the same Rust function put through a machine that makes it
+unreadable while keeping what it computes.
+
+People obfuscate for three reasons:
+
+- **Protection.** Commercial software hides licence checks and secret algorithms so
+  competitors and crackers cannot copy or bypass them.
+- **Malware.** Attackers hide what their code does, so scanners miss it and analysts (you)
+  waste time.
+- **CTFs.** Challenge authors obfuscate on purpose, because peeling it apart is the puzzle.
+
+The good news: obfuscation cannot change what the program *does*, only how it looks. The
+behaviour is still in there, and at run time the CPU has to un-hide it to execute it. That
+single fact is the crack you will use again and again in this level.
+'''
+
+[[steps]]
+title = "The families you will meet"
+goal = "Recognise the main kinds of obfuscation by name."
+text = '''
+Obfuscation comes in a handful of families. You will meet all of these in this level:
+
+- **Opaque predicates** — fake branches guarded by a condition that is always true or
+  always false, to bury the real path among dead ones.
+- **Junk code** — instructions added only to pad and distract; they compute nothing that
+  is used.
+- **Control-flow flattening** — a function's `if`s and loops are chopped into one big
+  dispatch loop driven by a **state variable**, so you cannot read it top to bottom.
+- **VM-based obfuscation** — the real code is replaced by **bytecode for a made-up CPU**,
+  plus an **interpreter** that runs it. The logic becomes data.
+- **Packing** — the whole program is compressed or encrypted into a blob, with a small
+  **unpacking stub** that restores it at run time.
+- **Self-modifying code** — the program writes new instructions into its own code while
+  running, then jumps into them.
+
+They are often stacked: a packed binary whose unpacked code is virtualized and guarded by
+opaque predicates. You peel them one layer at a time.
+'''
+deep_dive = '''
+These are not just CTF toys. Commercial protectors like **VMProtect** and **Themida**
+combine virtualization, flattening and anti-analysis; packers like **UPX** are everywhere;
+and real malware layers packing over self-modifying loaders. The techniques scale; the tiny
+examples in this level teach the exact method you would use on the large ones.
+'''
+
+[[steps]]
+title = "What obfuscation can and cannot do"
+goal = "Pin down the one thing obfuscation can never hide."
+text = '''
+Keep one idea front of mind before you pick a tool. Which statement is true?
+'''
+check = { kind = "choice", options = [
+  "Obfuscation changes how code looks but not what it computes, and the CPU must un-hide it to run it",
+  "Obfuscation changes what the program computes, so the original behaviour is lost",
+  "Obfuscated code can never be run, only read",
+  "Obfuscation only renames variables and nothing else",
+], correct = 0, explain = [
+  "Correct — the behaviour is preserved and revealed at run time; that is the weakness you exploit.",
+  "Wrong — if it changed the behaviour the program would break. Obfuscation preserves behaviour by definition.",
+  "Wrong — it runs perfectly; the CPU has to execute the real logic, which is exactly how you catch it.",
+  "Wrong — renaming is the weakest trick. This level is about far stronger ones: flattening, VMs, packing, self-modifying code.",
+] }
+success = "The behaviour survives obfuscation and the machine reveals it at run time. When reading is too hard, you make the program show you."
+
+[[steps]]
+title = "How ORRESS helps"
+goal = "Know which ORRESS features fight obfuscation."
+text = '''
+You are not doing this bare-handed. ORRESS fights obfuscation on two fronts:
+
+- **Triage** recognises obfuscation by its shape. It flags **VM-based obfuscation** (a
+  high-fan-in dispatcher loop that looks like an interpreter), reports **packing** (a
+  high-entropy executable section or a known packer signature), and lists other risk
+  flags. For a flagged VM it even recovers the opcode table, the bytecode and, when it
+  can, the hidden key.
+- The **decompiler** quietly deobfuscates as it works. It folds away opaque predicates it
+  can prove constant and undoes control-flow flattening, relinking the dispatcher arms
+  into their real order. When it reshapes a function it prints a header note:
+  `// deobfuscated by ORRESS: ... undone`, so you know the clean code you are reading
+  differs from the raw bytes.
+
+Across the next lessons you will use both: Triage to *spot* the obfuscation, the
+decompiler and the emulator to *undo* it.
+'''
+
+[[steps]]
+title = "Meet the running example"
+goal = "Open the crackme this level keeps coming back to."
+text = '''
+Time to make this concrete. **Crackme #8** has an obfuscated key check — its control flow
+is flattened. You will use it in the next lesson, and it is a good first thing to point
+ORRESS at.
+
+Open it now from the practice programs below. ORRESS loads it and analyses it in the
+background, the same as any binary you open with Ctrl+O.
+'''
+instructions = [
+  "Click the **Open crackme08** button shown with this step.",
+  "Wait a moment for the status bar to stop showing analysis is running.",
+]
+check = { kind = "open_crackme", name = "crackme08" }
+hints = [
+  "The Open button for the crackme is part of this step; you do not need to find a file on disk.",
+  "Once it opens, ORRESS analyses it automatically — give it a second before the next lesson.",
+]
+success = "Crackme #8 is open and analysed. Next you will look at how ORRESS sees its obfuscation."
+
+[[steps]]
+title = "Point Triage at it"
+goal = "Open the Triage report and see obfuscation called out."
+text = '''
+**Triage** is ORRESS's one-screen summary of a file: what it is, what it can do, and
+anything suspicious — including obfuscation. Open it for the crackme you just loaded.
+
+In Triage's **VM-based obfuscation** section you will see Crackme #8 flagged: its check
+function is shaped like an interpreter/dispatcher, so ORRESS reports the dispatcher
+address, how many handlers branch back to it, and a confidence score. (Crackme #8 is
+control-flow-flattened, which produces the same high-fan-in dispatcher shape — you will
+unflatten it properly in the next lesson.)
+'''
+instructions = [
+  "Open the **Triage** view: press **Ctrl+Shift+T**, or use the **View** menu -> **Open View** -> **Open Triage Report**.",
+  "Read the top of the report, including the **VM-based obfuscation** section.",
+]
+spotlight = "view.Triage"
+check = { kind = "action", id = "view::Triage" }
+hints = [
+  "The keyboard shortcut is Ctrl+Shift+T.",
+  "You can also open the command palette with Ctrl+Shift+P and type \"Triage\".",
+]
+success = "Triage flagged the obfuscation for you. You did not read a single obfuscated instruction to find it — you recognised the shape, exactly as ORRESS did."
+
+[[steps]]
+title = "The strategy that beats all of them"
+goal = "Lock in the general method for the rest of the level."
+text = '''
+Every lesson in this level comes back to one idea. When the static view is a lie —
+flattened, virtualized, packed, or self-modifying — what do you do?
+'''
+check = { kind = "choice", options = [
+  "Make the program reveal the real behaviour (run or emulate it, or let ORRESS deobfuscate), then analyse that",
+  "Give up; obfuscated code cannot be reversed",
+  "Only ever read the raw bytes harder until it makes sense",
+  "Delete the obfuscated function and hope the program still works",
+], correct = 0, explain = [
+  "Exactly — the behaviour must appear at run time, so you force it into the open and analyse the result.",
+  "Wrong — obfuscation slows you down, it does not stop you. The behaviour is always recoverable.",
+  "Wrong — for flattening, VMs, packing and self-modifying code, the raw bytes are meant to mislead. Reading harder is not the move.",
+  "Wrong — and you usually only have the file to read, not to edit into working again.",
+] }
+success = "That is the whole level in one sentence: when reading fails, make the code show you — then read what it showed. Now on to the first technique, control-flow flattening."

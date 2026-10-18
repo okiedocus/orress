@@ -1,0 +1,340 @@
+id = "l0-sizes-signed"
+level = 0
+order = 4
+title = "Sizes and negative numbers"
+summary = "u8 to u64, overflow and wrapping, two's complement, and why 0xFFFFFFFF can be -1."
+goals = [
+    "know how many bytes the Rust integer types take and how big they get",
+    "predict what happens when a number overflows",
+    "read and write negative numbers in two's complement",
+    "explain how the same bytes can mean a positive or a negative number",
+]
+
+[[steps]]
+title = "Numbers have a fixed size"
+goal = "Know the sizes of Rust's integer types."
+text = '''
+In mathematics, numbers can be as big as you like. In a computer, every number gets a **fixed number of bytes**. Rust shows the size in the type name: the number is the number of *bits*.
+
+| Rust type | bits | bytes | name in assembly |
+|---|---|---|---|
+| `u8` | 8 | 1 | byte |
+| `u16` | 16 | 2 | word |
+| `u32` | 32 | 4 | dword ("double word") |
+| `u64` | 64 | 8 | qword ("quad word") |
+
+`usize` is the size of an address on the computer: 8 bytes on a 64-bit computer. Rust uses it for lengths and indexes, for example `Vec::len()` returns a `usize`.
+
+You can ask Rust for the size of any type:
+
+```rust
+use std::mem::size_of;
+assert_eq!(size_of::<u8>(), 1);
+assert_eq!(size_of::<u16>(), 2);
+assert_eq!(size_of::<u64>(), 8);
+assert_eq!(size_of::<usize>(), 8);  // on a 64-bit computer
+```
+
+The names in the last column of the table are old names from the x86 world. You will see them in the disassembly all the time, for example `mov qword ptr [...], 0` means "store the 8-byte number 0 in memory". When you see **dword**, think `u32`; when you see **qword**, think `u64`.
+
+The machine code does not know the type of a value, only its size. A `u32`, an `i32` and a `char` are all "4 bytes" for the CPU. Reconstructing the real types is part of the reverser's job.
+
+How many bytes does a `u32` take?
+'''
+instructions = [
+    "Look up `u32` in the table above.",
+    "Type the number of **bytes** (not bits) and press **Check**.",
+]
+check = { kind = "answer", answers = ["4"], number = true }
+hints = [
+    "u32 has 32 bits. How many groups of 8 bits is that?",
+    "32 / 8 = 4.",
+]
+
+[[steps]]
+title = "How big can they get?"
+goal = "Know the largest value of each unsigned type."
+text = '''
+Types starting with `u` are **unsigned**: they hold only zero and positive numbers. Their largest value is the one with all bits set to 1, as you saw in the previous lesson.
+
+| type | largest value (hex) | largest value (decimal) |
+|---|---|---|
+| `u8` | `0xFF` | 255 |
+| `u16` | `0xFFFF` | 65 535 |
+| `u32` | `0xFFFF_FFFF` | 4 294 967 295 |
+| `u64` | `0xFFFF_FFFF_FFFF_FFFF` | about 18 billion billion |
+
+In hex the pattern is easy to see: all bits 1 means all hex digits F, and every byte adds two Fs. So when you see `0xFFFFFFFF` in a program, you know it is a 4-byte value with all bits set.
+
+```rust
+assert_eq!(u16::MAX, 0xFFFF);
+assert_eq!(u32::MAX, 0xFFFF_FFFF);
+```
+
+What is the largest value of a `u16`? You may type it in hex or in decimal.
+'''
+instructions = [
+    "A `u16` is 2 bytes. Write all its bits as 1, which is two bytes of `FF`.",
+    "Type the value (for example as `0x...`) and press **Check**.",
+]
+check = { kind = "answer", answers = ["0xFFFF"], number = true }
+hints = [
+    "Each byte is FF when all its bits are 1.",
+    "Two bytes: 0xFFFF.",
+]
+success = '''
+`0xFFFF`, which is 65535. In hex you never have to remember these big decimal numbers: count the bytes and write FF for each.
+'''
+
+[[steps]]
+title = "Overflow and wrapping"
+goal = "Predict what happens when a number gets too big."
+text = '''
+What happens when you add 1 to a `u8` that holds 255? The result, 256, needs 9 bits, but a `u8` only has 8. This is called **overflow**.
+
+The CPU drops the bit that does not fit. 255 is `0b1111_1111`; add 1 and you get `0b1_0000_0000`; drop the ninth bit and `0b0000_0000` remains. The number **wraps around** to 0, like the odometer of a car going from 999999 to 000000.
+
+Rust is careful here:
+
+```rust
+let x: u8 = 255;
+// let y = x + 1;           // debug build: the program panics ("attempt to add with overflow")
+let y = x.wrapping_add(1);  // asks explicitly for wrapping: 0
+assert_eq!(y, 0);
+assert_eq!(250u8.wrapping_add(10), 4);
+```
+
+In a *debug* build, Rust checks every addition and stops the program on overflow. In a *release* build those checks are removed for speed, and numbers silently wrap, exactly like the CPU does. `wrapping_add` always wraps, in both builds. A quick way to calculate it: the result of wrapping is the real result minus 256 (for a `u8`), or minus 65536 (for a `u16`).
+
+You will see wrapping in real programs: hash functions and simple encryption in crackmes rely on it, and many security bugs come from an unexpected overflow.
+
+What is `250u8.wrapping_add(10)`? (The code above shows it, but do the calculation yourself.)
+'''
+instructions = [
+    "Calculate 250 + 10 normally.",
+    "The result does not fit in a `u8` (more than 255), so subtract 256.",
+    "Type the result and press **Check**.",
+]
+check = { kind = "answer", answers = ["4"], number = true }
+hints = [
+    "250 + 10 = 260.",
+    "260 - 256 = ?",
+]
+success = '''
+4. 260 does not fit, so the extra 256 falls off. Wrapping arithmetic is the CPU's normal behavior: it does not "know" that a result is wrong.
+'''
+
+[[steps]]
+title = "Where do negative numbers come from?"
+goal = "Understand the idea behind two's complement."
+text = '''
+A byte is only 8 bits. There is no room for a minus sign. So how does an `i8` store -1?
+
+The trick uses wrapping. If 255 + 1 wraps around to 0, then 255 behaves exactly like -1: adding 1 to it gives 0. In the same way, 254 behaves like -2 (add 2 and you get 0), 253 like -3, and so on.
+
+So computers agree: for **signed** types (`i8`, `i16`, `i32`, `i64`), the upper half of the values count as negative. For one byte:
+
+| bits | as `u8` | as `i8` |
+|---|---|---|
+| `0000_0000` (0x00) | 0 | 0 |
+| `0000_0001` (0x01) | 1 | 1 |
+| `0111_1111` (0x7F) | 127 | 127 |
+| `1000_0000` (0x80) | 128 | -128 |
+| `1111_1110` (0xFE) | 254 | -2 |
+| `1111_1111` (0xFF) | 255 | -1 |
+
+This system is called **two's complement**. Two things to remember:
+
+- If the **top bit** is 1, the signed number is negative. That is why the top bit is also called the **sign bit**.
+- An `i8` goes from -128 to 127: the same 256 values as a `u8`, only shifted.
+
+```rust
+assert_eq!(0xFFu8 as i8, -1);
+assert_eq!(0x80u8 as i8, -128);
+assert_eq!(i8::MIN, -128);
+assert_eq!(i8::MAX, 127);
+```
+
+The great advantage: the CPU can use the same addition for signed and unsigned numbers. Wrapping gives the right answer for both.
+
+Try it in the converter: type `-1`, `-2` and `-128`, and look at the **hexadecimal** row and the **signed (8-bit)** row. Then type `0xFF` and see that the signed row says -1.
+'''
+widget = "number_converter"
+
+[[steps]]
+title = "Writing a negative number"
+goal = "Convert a negative number to its byte value."
+text = '''
+To find the byte of a negative number, there are two methods. Both give the same result.
+
+**Method 1: add 256.** For an 8-bit number, -n is stored as 256 - n.
+
+-5 is stored as 256 - 5 = 251 = `0xFB`.
+
+**Method 2: flip the bits and add 1.** This is where the name *two's complement* comes from.
+
+- 5 in binary is `0000_0101`.
+- Flip every bit (0 becomes 1, 1 becomes 0): `1111_1010`.
+- Add 1: `1111_1011` = `0xFB`.
+
+Check: `0xFB` has the top bit set, so it is negative, and `0xFB` + 5 = 256, which wraps to 0. So `0xFB` really behaves like -5.
+
+```rust
+assert_eq!(-5i8 as u8, 0xFB);
+```
+
+Now you: which byte stores **-3** as an `i8`? Answer in hex with the `0x` prefix.
+'''
+instructions = [
+    "Calculate 256 - 3 (method 1), or flip the bits of 3 and add 1 (method 2).",
+    "Convert the result to hex if needed, and type it with the `0x` prefix (for example `0xAB`). Press **Check**.",
+]
+check = { kind = "answer", answers = ["0xFD", "FD"] }
+hints = [
+    "256 - 3 = 253.",
+    "253 = 15 x 16 + 13. 15 is F, 13 is D.",
+]
+success = '''
+`0xFD`. A useful shortcut: small negative numbers are a little *below* `0xFF`. -1 is `0xFF`, -2 is `0xFE`, -3 is `0xFD`.
+'''
+
+[[steps]]
+title = "Reading a negative number"
+goal = "Convert a byte back to its signed value."
+text = '''
+Now the other way. You see the byte `0xF0` in a program and you know it is an `i8`. What number is it?
+
+1. Is the top bit 1? For a byte, that is the case for every value from `0x80` to `0xFF`. `0xF0` is in that range, so the number is negative.
+2. Subtract 256 from the unsigned value.
+
+**Worked example: `0xC8`.** `0xC8` = 200. The top bit is set (200 is 128 or more). 200 - 256 = **-56**.
+
+**Another one: `0x7F`** = 127. The top bit is 0 (127 is less than 128), so it is 127.
+
+Now you: what is the byte `0xF0` as an `i8`? Do it yourself first; afterwards you can check it in the converter's **signed (8-bit)** row.
+'''
+widget = "number_converter"
+instructions = [
+    "Convert `0xF0` to decimal (F is 15, so 15 x 16 + 0).",
+    "The top bit is set, so subtract 256.",
+    "Type the negative result (with the minus sign) and press **Check**.",
+]
+check = { kind = "answer", answers = ["-16"] }
+hints = [
+    "0xF0 = 240.",
+    "240 - 256 = ?",
+]
+success = '''
+-16. In crackmes you will often see comparisons with values like `0xF0` or `0xFFFFFFF0`. Now you can tell whether they are big positive numbers or small negative ones.
+'''
+
+[[steps]]
+title = "Bigger sizes"
+goal = "Recognize -1 and other small negative numbers in 32 and 64 bits."
+text = '''
+Two's complement works the same for every size; only the number of bytes changes.
+
+| value | `i8` | `i16` | `i32` | `i64` |
+|---|---|---|---|---|
+| -1 | `0xFF` | `0xFFFF` | `0xFFFF_FFFF` | `0xFFFF_FFFF_FFFF_FFFF` |
+| -2 | `0xFE` | `0xFFFE` | `0xFFFF_FFFE` | `0xFFFF_FFFF_FFFF_FFFE` |
+| -128 | `0x80` | `0xFF80` | `0xFFFF_FF80` | ... |
+
+A small negative number is a long row of Fs that ends "a little below F". This is why you so often see `0xFFFFFFFF` in disassembly: it is usually **-1**, a value many functions return to mean "error" or "not found".
+
+```rust
+assert_eq!(-1i32 as u32, 0xFFFF_FFFF);
+assert_eq!(0xFFFF_FFFEu32 as i32, -2);
+```
+
+For 32 bits the "subtract" rule becomes: subtract `0x1_0000_0000` (4 294 967 296). You rarely need it: count how far below `0xFFFFFFFF` the number is.
+
+What is `0xFFFFFFFE` as an `i32`?
+'''
+instructions = [
+    "`0xFFFFFFFF` is -1 as an `i32`. Work out how far below that `0xFFFFFFFE` is.",
+    "Type the signed value (with the minus sign) and press **Check**.",
+]
+check = { kind = "answer", answers = ["-2"] }
+hints = [
+    "0xFFFFFFFE is one less than 0xFFFFFFFF.",
+    "One less than -1 is ...",
+]
+
+[[steps]]
+title = "Same bits, two meanings"
+goal = "Understand that the bytes do not say whether they are signed."
+text = '''
+Here is a key idea for reversing: **the bytes themselves do not say whether a number is signed or not.** The byte `0x80` is only the bits `1000_0000`. Whether that means 128 or -128 depends on how the program *uses* it.
+
+```rust
+let byte: u8 = 0x80;
+assert_eq!(byte, 128);          // read as unsigned
+assert_eq!(byte as i8, -128);   // the same bits, read as signed
+```
+
+The `as` cast here does not change a single bit. It only tells Rust to read the bits differently.
+
+The CPU works the same way. Addition does not care about signedness. But some instructions do: for example, there are separate instructions for "is a smaller than b?" for signed and for unsigned numbers. When you read a program, *those* instructions tell you which type the programmer used. Level 1 shows you how to spot them.
+
+The number converter shows both readings at once: the **decimal** row is the unsigned reading, the **signed** row the two's complement one. The **Inspector** in ORRESS does the same for the bytes under the cursor.
+
+What is the byte `0x80`?
+'''
+check = { kind = "choice", options = [
+    "Always 128",
+    "Always -128",
+    "128 when read as a u8, -128 when read as an i8",
+    "Not a valid byte",
+], correct = 2, explain = [
+    "That is only true when the program treats it as unsigned.",
+    "That is only true when the program treats it as signed.",
+    "Correct: the bits are the same; the type decides the meaning.",
+    "Every value from 0x00 to 0xFF is a valid byte.",
+] }
+hints = ["Look at the Rust example: the same variable, two answers."]
+
+[[steps]]
+title = "Changing sizes"
+goal = "Know what happens to the bits when a number changes size."
+text = '''
+Programs often convert between sizes, for example a `u8` to a `u32`. With `as` in Rust, three things can happen.
+
+**Making an unsigned number bigger: zero extension.** New bytes are filled with zeros.
+
+```rust
+assert_eq!(0xFFu8 as u32, 0x0000_00FF);   // 255 stays 255
+```
+
+**Making a signed number bigger: sign extension.** New bytes are filled with copies of the sign bit, so the value stays the same.
+
+```rust
+assert_eq!(-1i8 as i32, -1);              // 0xFF becomes 0xFFFF_FFFF
+assert_eq!(-1i8 as i32 as u32, 0xFFFF_FFFF);
+```
+
+**Making a number smaller: truncation.** The upper bytes are cut off; only the lowest bytes remain.
+
+```rust
+assert_eq!(0x1234u16 as u8, 0x34);
+assert_eq!(300u32 as u8, 44);             // 300 = 0x12C, keep 0x2C = 44
+```
+
+The CPU has separate instructions for zero extension and sign extension. Seeing one or the other is another clue whether a value was signed. You will meet them in Level 1.
+
+What is `0x1234_5678u32 as u8`? You may answer in hex or decimal.
+'''
+instructions = [
+    "A `u8` keeps only the lowest byte. In hex, the lowest byte is the last two digits.",
+    "Type that byte (for example as `0x..`) and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x78"], number = true }
+hints = [
+    "The bytes of 0x12345678 are 12, 34, 56 and 78. Which is the lowest?",
+    "The lowest byte is the rightmost pair of hex digits.",
+]
+success = '''
+`0x78`. The upper three bytes were cut off. Truncation is one more reason hex is handy: you see the bytes directly.
+
+You can now read numbers of every size, positive and negative, and you know that the meaning depends on the type. Next: how text is stored, and in which order the bytes of a number are put in memory.
+'''

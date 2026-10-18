@@ -1,0 +1,419 @@
+id = "l0-bytes-and-text"
+level = 0
+order = 5
+title = "Bytes, text and byte order"
+summary = "ASCII, UTF-8, how Rust and C store strings, little-endian numbers, and Windows wide strings."
+goals = [
+    "turn bytes into text and text into bytes with the ASCII table",
+    "explain how Rust stores a String or &str, and how a C string differs",
+    "read multi-byte numbers in little-endian byte order",
+    "recognize UTF-8 and UTF-16 text in a hex dump",
+]
+
+[[steps]]
+title = "Characters are numbers"
+goal = "Look up a character in the ASCII table."
+text = '''
+Memory only holds numbers, so text is stored as numbers too: every character gets a code. The most basic code table is **ASCII**. It gives every English letter, digit, punctuation mark and space a number below 128. Some codes you will see all the time:
+
+| character | code (hex) | code (decimal) |
+|---|---|---|
+| space | `0x20` | 32 |
+| `'0'` | `0x30` | 48 |
+| `'A'` | `0x41` | 65 |
+| `'a'` | `0x61` | 97 |
+
+Rust lets you see these codes directly. A *byte literal* like `b'A'` is the code of the character as a `u8`:
+
+```rust
+assert_eq!(b'A', 0x41);
+assert_eq!('a' as u32, 0x61);
+assert_eq!(0x41 as char, 'A');
+```
+
+Below is an ASCII table with all printable characters. Each cell shows the code in hex, then the character. Hover over a cell to see the code in decimal.
+
+Which character has the code `0x48`?
+'''
+widget = "ascii_table"
+instructions = [
+    "In the ASCII table below, find the cell that starts with `48`.",
+    "Type the character shown in that cell (one character, upper or lower case matters) and press **Check**.",
+]
+check = { kind = "answer", answers = ["H"], case_sensitive = true }
+hints = [
+    "The row starting at 40 holds the upper-case letters.",
+    "0x41 is A, 0x42 is B ... count on to 0x48.",
+]
+success = '''
+`H`. The table is laid out in rows of 16, so the first hex digit tells the row and the second one the column.
+'''
+
+[[steps]]
+title = "Patterns in ASCII"
+goal = "Use the structure of the table to find codes quickly."
+text = '''
+ASCII is not random. A few patterns make it easy to work with:
+
+- **Upper-case letters** go from `0x41` (A) to `0x5A` (Z), in alphabet order.
+- **Lower-case letters** go from `0x61` (a) to `0x7A` (z). Each lower-case letter is exactly `0x20` (32) more than its upper-case letter: `'A'` is `0x41`, `'a'` is `0x61`.
+- **Digits** go from `0x30` ('0') to `0x39` ('9'). So the value of a digit character is its code minus `0x30`.
+
+Programs use these patterns, and you will recognize them in code:
+
+```rust
+let c = b'7';
+let value = c - b'0';            // 0x37 - 0x30 = 7
+assert_eq!(value, 7);
+let upper = b'q' - 0x20;         // lower case to upper case
+assert_eq!(upper, b'Q');
+```
+
+When you see a program subtract `0x30` from a byte, it is probably turning a digit character into a number. When it adds or subtracts `0x20`, it is probably changing letter case.
+
+What is the code of the lower-case letter `'k'`? Answer in hex or decimal.
+'''
+widget = "ascii_table"
+instructions = [
+    "Find `'k'` in the ASCII table (lower-case letters start at `61`), or start from `'a'` = `0x61` and count on.",
+    "Type its code, in hex with `0x` (for example `0x6F`) or in decimal, and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x6B", "6B", "107"] }
+hints = [
+    "a is 0x61. b is 0x62, c is 0x63 ...",
+    "k is the 11th letter, so it is 10 more than a: 0x61 + 10.",
+    "0x61 + 0xA = 0x6B.",
+]
+
+[[steps]]
+title = "Decoding bytes"
+goal = "Read text from a row of bytes."
+text = '''
+In a hex dump, text appears as a row of byte values. To read it, look up each byte in the ASCII table.
+
+**Worked example.** The bytes
+
+```text
+48 69 21
+```
+
+are `0x48` = H, `0x69` = i, `0x21` = !, so the text is **Hi!**.
+
+In Rust, `String::from_utf8` or `str::from_utf8` does this decoding for you:
+
+```rust
+let bytes = [0x48, 0x69, 0x21];
+assert_eq!(std::str::from_utf8(&bytes).unwrap(), "Hi!");
+```
+
+A hex view, like the one in ORRESS, shows the bytes in hex on the left and the same bytes as characters on the right, so you do not have to decode text by hand. Bytes that are not printable are shown as a dot. Still, you will often meet a few loose bytes in code, for example a program that compares your input with the bytes `0x52`, `0x33`, ..., one at a time, and then this skill finds the password.
+
+Decode these four bytes: `46 4C 41 47`.
+'''
+widget = "ascii_table"
+instructions = [
+    "Look up each of the four bytes in the ASCII table: `46`, `4C`, `41`, `47`.",
+    "Type the four characters together, in the same order (upper or lower case matters), and press **Check**.",
+]
+check = { kind = "answer", answers = ["FLAG"], case_sensitive = true }
+hints = [
+    "0x46 is F.",
+    "0x4C is L and 0x41 is A.",
+]
+success = '''
+**FLAG**. When you see bytes between `0x41` and `0x7A` next to each other in a program, they are often text.
+'''
+
+[[steps]]
+title = "Invisible characters"
+goal = "Know the most important control characters."
+text = '''
+The codes below `0x20` are not printable: they are **control characters**. Most are old, but a few are everywhere:
+
+| code | name | Rust | meaning |
+|---|---|---|---|
+| `0x00` | NUL | `'\0'` | "nothing"; marks the end of C strings |
+| `0x09` | tab | `'\t'` | tab |
+| `0x0A` | line feed | `'\n'` | new line |
+| `0x0D` | carriage return | `'\r'` | back to the start of the line |
+
+On Linux and macOS a line ends with `\n`. On Windows a line ends with **two** characters: `\r\n`, the bytes `0D 0A`.
+
+This matters for crackmes. When you type a password and press Enter, the program receives your text *plus* the line ending. That is why the Academy's crackmes contain this code:
+
+```rust
+let mut input = String::new();
+std::io::stdin().read_line(&mut input).unwrap();
+// Remove the line ending: Enter adds "\n" (or "\r\n" on Windows).
+let line = input.strip_suffix('\n').unwrap_or(&input);
+let line = line.strip_suffix('\r').unwrap_or(line);
+```
+
+If a program forgot that, the "right" password would never match, because `"secret\r\n"` is not `"secret"`.
+
+You type `abc` in a Windows console and press Enter. Which bytes does the program receive?
+'''
+check = { kind = "choice", options = [
+    "61 62 63",
+    "61 62 63 0A",
+    "61 62 63 0D 0A",
+    "41 42 43 0D 0A",
+], correct = 2, explain = [
+    "The Enter key adds a line ending; it is not dropped.",
+    "That is the Linux line ending. Windows uses two characters.",
+    "Correct: a, b, c, then \\r and \\n.",
+    "0x41 to 0x43 are the upper-case letters A, B, C.",
+] }
+hints = ["Lower-case a is 0x61, and Windows ends a line with \\r\\n."]
+
+[[steps]]
+title = "Beyond English: Unicode and UTF-8"
+goal = "Know how characters outside ASCII are stored."
+text = '''
+ASCII has only 128 characters: no `é`, no `€`, no Chinese, no emoji. **Unicode** fixes that. It gives every character in every writing system a number, its *code point*: `é` is U+00E9, `€` is U+20AC.
+
+Code points can be large, so they need a way to be stored as bytes. The most common one is **UTF-8**:
+
+- ASCII characters stay **one byte**, with the same code as in ASCII. So plain English text is the same in ASCII and UTF-8.
+- Other characters take **2 to 4 bytes**, and all those bytes are `0x80` or higher.
+
+```rust
+assert_eq!("A".as_bytes(), [0x41]);
+assert_eq!("é".as_bytes(), [0xC3, 0xA9]);        // 2 bytes
+assert_eq!("€".as_bytes(), [0xE2, 0x82, 0xAC]);  // 3 bytes
+```
+
+Rust strings (`String` and `&str`) are **always UTF-8**. One surprise follows from that: `len()` counts **bytes**, not characters.
+
+```rust
+assert_eq!("hello".len(), 5);
+assert_eq!("€".len(), 3);              // one character, three bytes
+assert_eq!("€".chars().count(), 1);
+```
+
+How many bytes long is `"héllo"`, so what does `"héllo".len()` return?
+'''
+instructions = [
+    "Count the bytes of each character: the ASCII letters h, l, l, o take 1 byte each.",
+    "Add the bytes of `é` (see the example above).",
+    "Type the total and press **Check**.",
+]
+check = { kind = "answer", answers = ["6"] }
+hints = [
+    "h, l, l, o are 4 bytes together.",
+    "é takes 2 bytes in UTF-8.",
+]
+success = '''
+6: four ASCII letters of one byte each, and `é` with two. Lengths in a Rust program are byte lengths. That is what you will see in the machine code, too.
+'''
+
+[[steps]]
+title = "How Rust stores a string"
+goal = "Know that a Rust string is a pointer and a length."
+text = '''
+Where does a Rust string start and end in memory? A `&str` is two numbers:
+
+- a **pointer**: the address of the first byte of the text (lesson 6 explains pointers fully);
+- a **length**: how many bytes the text has.
+
+The bytes themselves are somewhere else in memory, one after another, in UTF-8. **There is no special byte at the end.** The length alone says where the text stops.
+
+```rust
+let s: &str = "hi";
+assert_eq!(s.as_bytes(), &[0x68, 0x69]);
+assert_eq!(s.len(), 2);
+```
+
+A `String` works the same way, with one extra number, the **capacity**: how much room is reserved for the text to grow. Lesson 6 shows this in memory.
+
+You will see this pair everywhere in Rust programs: whenever a function receives a `&str`, it actually receives two values, the address and the length.
+
+How does a Rust program know where a `&str` ends?
+'''
+check = { kind = "choice", options = [
+    "It looks for a zero byte after the text",
+    "It keeps the length next to the pointer",
+    "It searches for a newline",
+    "Strings always have 16 characters",
+], correct = 1, explain = [
+    "That is how C does it (next step). Rust strings have no end marker.",
+    "Correct: a &str is a pointer plus a length.",
+    "A newline is a normal character; strings can contain many of them.",
+    "Rust strings can have any length, including 0.",
+] }
+hints = ["A &str consists of two numbers. One is the address. The other is ..."]
+
+[[steps]]
+title = "C strings"
+goal = "Know how C strings end, and why you will meet them."
+text = '''
+The C language, which is much older than Rust, stores text differently. A **C string** has no length. Instead, the text ends with a zero byte, called **NUL** (`0x00`). Code that reads the string walks through the bytes until it finds that zero.
+
+```text
+"hi" in Rust:  68 69          (length 2 is stored separately)
+"hi" in C:     68 69 00       (the 00 marks the end)
+```
+
+Why should a Rust reverser care? Because the operating system and many libraries are written in C, so their functions expect C strings. When a Rust program calls such a function, it builds a C string first:
+
+```rust
+use std::ffi::CString;
+let c = CString::new("hi").unwrap();
+assert_eq!(c.as_bytes_with_nul(), &[0x68, 0x69, 0x00]);
+```
+
+Programs written in C and C++ use C strings for everything. In a hex dump of such a program, text is usually followed by `00`.
+
+How many bytes does the C string `"abc"` take, including its end marker?
+'''
+instructions = [
+    "Count the bytes of the three letters.",
+    "Add the NUL byte at the end, type the total and press **Check**.",
+]
+check = { kind = "answer", answers = ["4"], number = true }
+hints = ["Three letters plus one zero byte."]
+success = '''
+4: `61 62 63 00`. Always one more than the number of characters.
+'''
+
+[[steps]]
+title = "Strings back to back"
+goal = "Understand why the Strings view sometimes joins two texts."
+text = '''
+The difference between Rust and C strings has a practical effect when you reverse Rust programs.
+
+The texts in your source code, the **string literals**, are stored in the program file. Because Rust strings need no zero byte, the compiler puts them right after each other. Take this code from the Academy's second practice program:
+
+```rust
+print!("Password: ");
+// ...
+println!("Wrong password. Try again!");
+```
+
+In the file, the bytes of the two texts touch:
+
+```text
+Password: Wrong password. Try again!
+```
+
+A tool that searches a file for readable text, like the **Strings** view of ORRESS, cannot see where one Rust string ends and the next begins, so it shows **one** string: `"Password: Wrong password. Try again!"`. That is exactly what ORRESS shows for this program. The real lengths are in the machine code, which passes each string as a pointer and a length.
+
+ORRESS knows this trick: in the **Disassembly** view, when an instruction uses a string and the next instruction loads its length, it shows only that part of the text as a comment.
+
+Why does the Strings view show `"Password: Wrong password. Try again!"` as one string?
+'''
+check = { kind = "choice", options = [
+    "The programmer wrote it as one string",
+    "Rust strings have no end marker, so the two literals are stored back to back",
+    "The Strings view has a bug",
+    "The compiler encrypted the strings",
+], correct = 1, explain = [
+    "In the source code these are two separate strings, printed at different moments.",
+    "Correct: without a NUL between them, the bytes continue.",
+    "The view shows exactly what is in the file; the file has no separator.",
+    "The text is plainly readable, so it is not encrypted.",
+] }
+hints = ["What does a C string have at the end that a Rust string does not?"]
+
+[[steps]]
+title = "Byte order: little-endian"
+goal = "Read a number from its bytes in memory."
+text = '''
+A `u32` takes 4 bytes. In which order are they stored? You might expect the order you write them: `0x12345678` as `12 34 56 78`. But x86-64 and ARM computers store the **lowest byte first**:
+
+```text
+the number 0x12345678 in memory:   78 56 34 12
+```
+
+This is called **little-endian** ("the little end first"). The opposite, highest byte first, is **big-endian**; it is used in network protocols and some file formats. The general word for byte order is **endianness**.
+
+Rust can show both orders:
+
+```rust
+let n: u32 = 0x1234_5678;
+assert_eq!(n.to_le_bytes(), [0x78, 0x56, 0x34, 0x12]);  // little-endian
+assert_eq!(n.to_be_bytes(), [0x12, 0x34, 0x56, 0x78]);  // big-endian
+assert_eq!(u32::from_le_bytes([0x78, 0x56, 0x34, 0x12]), 0x1234_5678);
+```
+
+So in a hex dump, numbers look **backwards**. To read a little-endian number, **reverse the order of the bytes** (not the digits inside a byte!) and read them as one hex number.
+
+**Worked example.** The bytes `10 27 00 00` are a `u32`. Reversed: `00 00 27 10`, so the number is `0x2710` = 10000.
+
+In memory you see the bytes `EF BE AD DE`. Which `u32` is that? Answer in hex with `0x`.
+'''
+instructions = [
+    "Reverse the order of the four bytes (keep each pair of digits as it is).",
+    "Write the reversed bytes as one hex number with the `0x` prefix and press **Check**.",
+]
+check = { kind = "answer", answers = ["0xDEADBEEF"], number = true }
+hints = [
+    "The last byte, DE, becomes the first.",
+    "Reversed: DE AD BE EF.",
+]
+success = '''
+`0xDEADBEEF`, a famous "magic" value programmers use as a marker. Little-endian is the normal order on PCs, so you will reverse bytes like this often. The **Inspector** in ORRESS does it for you: it shows the bytes under the cursor as numbers in both byte orders.
+'''
+
+[[steps]]
+title = "Practice: a number in memory"
+goal = "Read a little-endian number and convert it to decimal."
+text = '''
+One more, since this comes up all the time. Remember the method:
+
+1. reverse the order of the bytes;
+2. drop the leading zeros, they do not change the value;
+3. convert the hex number to decimal if you need to.
+
+You use the number converter for step 3. It also has rows called **bytes, little-endian** and **bytes, big-endian** that show how a number is stored. Type `1000` into the converter and look: little-endian shows `E8 03`, because 1000 is `0x03E8`.
+
+In memory you see the 4 bytes of a `u32`: `39 05 00 00`. What number is it? Answer in decimal.
+'''
+widget = "number_converter"
+instructions = [
+    "Reverse the four bytes `39 05 00 00` and write them as one hex number.",
+    "Type that hex number (with `0x`) into the number converter and read the **decimal** row.",
+    "Type the decimal number in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["1337"] }
+hints = [
+    "Reversed: 00 00 05 39.",
+    "So the number is 0x539.",
+]
+success = '''
+1337 (`0x539`). You will see this pattern in hex dumps constantly: a small number stored as a `u32` or `u64` starts with its low byte and ends in a row of `00`s.
+'''
+
+[[steps]]
+title = "Wide strings on Windows"
+goal = "Recognize UTF-16 text in a hex dump."
+text = '''
+Windows has a second way to store text. Its own functions mostly use **UTF-16**: every character takes (at least) **two bytes**, stored little-endian. Windows calls these **wide strings**.
+
+For English text, the second byte of every character is zero:
+
+```rust
+let wide: Vec<u16> = "Hi".encode_utf16().collect();
+assert_eq!(wide, [0x0048, 0x0069]);
+// in memory, little-endian: 48 00 69 00
+```
+
+In the text column of a hex view this looks like letters with dots in between: `H.i.`, because `00` is not printable. When you see that, you are looking at UTF-16 text.
+
+Rust programs use UTF-8 internally, but on Windows the standard library converts text to UTF-16 when it calls the operating system. For example, `println!` on Windows ends up calling a function that writes UTF-16 to the console. The **Strings** view of ORRESS finds both kinds of text, and its **Type** column says ASCII or UTF-16.
+
+How is the single character `'A'` stored in UTF-16 little-endian?
+'''
+check = { kind = "choice", options = ["41", "00 41", "41 00", "65"], correct = 2, explain = [
+    "That is ASCII or UTF-8, one byte. UTF-16 always uses at least two bytes.",
+    "That is big-endian order. Windows uses little-endian: the low byte first.",
+    "Correct: the code 0x0041, low byte first.",
+    "65 is the decimal code of A, not a byte sequence.",
+] }
+hints = [
+    "The code of A is 0x0041, which is two bytes: 00 and 41.",
+    "Little-endian: the low byte (41) comes first.",
+]
+success = '''
+`41 00`. You can now read text in every common form: ASCII, UTF-8, C strings and UTF-16. Next lesson: memory and addresses, where all these bytes live.
+'''

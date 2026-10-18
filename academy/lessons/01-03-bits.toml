@@ -1,0 +1,347 @@
+id = "l1-bits"
+level = 1
+order = 3
+title = "Working with bits"
+summary = "and, or, xor, not, shl and shr: masks, the xor-zero trick and XOR encryption."
+goals = [
+    "predict the result of `and`, `or`, `xor` and `not` bit by bit",
+    "use a mask to keep, set or clear bits",
+    "recognise `xor eax, eax` as \"set to zero\"",
+    "understand why XOR is the most common trick for hiding secrets",
+    "multiply and divide by powers of two with `shl` and `shr`",
+]
+
+[[steps]]
+title = "Operations on every bit at once"
+goal = "Connect Rust's bit operators to their instructions."
+text = '''
+In Level 0 you learned that a register is a row of bits. **Bitwise operations** work on each bit position separately: bit 0 of the result depends only on bit 0 of the inputs, bit 1 only on bit 1, and so on. Rust has an operator for each one, and x86-64 has an instruction for each:
+
+| Rust | Instruction | A result bit is 1 when ... |
+|---|---|---|
+| `a & b` | `and a, b` | both bits are 1 |
+| `a \| b` | `or a, b` | at least one bit is 1 |
+| `a ^ b` | `xor a, b` | exactly one of the two bits is 1 (they differ) |
+| `!a` | `not a` | the bit was 0 (every bit flips) |
+| `a << n` | `shl a, n` | (all bits move n places to the left) |
+| `a >> n` | `shr a, n` | (all bits move n places to the right) |
+
+As with `add`, the first operand is input and output: `and rax, rbx` is `rax &= rbx;`.
+
+A small example with 4-bit numbers, so you can follow every bit:
+
+```text
+      1100        1100        1100
+and   1010   or   1010   xor  1010
+    = 1000      = 1110      = 0110
+```
+
+Hexadecimal makes this easy, because each hex digit is exactly 4 bits. `0xF0 & 0x3C`: `F0` is `1111 0000`, `3C` is `0011 1100`, so the result is `0011 0000` = `0x30`.
+
+Why should a reverse engineer care? Because programs that hide something (a password, a licence key, a flag) almost always use these instructions. You will meet XOR in nearly every crackme from Level 2 on.
+'''
+
+[[steps]]
+title = "and: keep only some bits"
+goal = "Use `and` with a mask to keep the bits you want."
+text = '''
+`and` with a fixed number is used to **keep** some bits and clear all others. The fixed number is called a **mask**: where the mask has a 1, the bit survives; where it has a 0, the bit becomes 0.
+
+```rust
+let low_digit = x & 0x0F;   // keep only the lowest 4 bits (the last hex digit)
+let is_odd   = x & 1 != 0;  // keep only bit 0: 1 for odd numbers, 0 for even
+let low_byte = x & 0xFF;    // keep only the lowest byte, like `x as u8`
+```
+
+In assembly:
+
+```text
+and eax, 0xF     ; eax = eax & 0xF
+and eax, 1       ; eax = eax & 1      (often followed by a jump: "is it odd?")
+```
+
+You will also see `x % 8` (remainder) turn into `and eax, 7` for unsigned numbers, because keeping the lowest 3 bits *is* the remainder after dividing by 8. Rust's `x % 16` becomes `and eax, 0xF`. This trick works only for powers of two (2, 4, 8, 16, ...), so the compiler uses it only then.
+
+Work out this one: what is **`0xB7 & 0x0F`**? Write both numbers in binary, keep the bits where the mask has a 1. The number converter can show you the bits.
+'''
+instructions = [
+    "Optional: type `0xB7` in the number converter below to see its bits, then `0x0F`.",
+    "Work out the AND bit by bit (or: which hex digit survives a mask of `0x0F`?).",
+    "Type the result in the answer box and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x07"], number = true }
+hints = [
+    "0x0F is 0000 1111 in binary: it keeps the lower 4 bits and clears the upper 4.",
+    "Each hex digit is 4 bits. A mask of 0x0F keeps the last hex digit of 0xB7.",
+    "The last hex digit of 0xB7 is 7, so the answer is 0x07.",
+]
+success = '''
+`0x07`. A mask of `0x0F` keeps exactly the last hex digit. When you see `and` with a constant like `0xF`, `0xFF` or `0x7`, ask: which bits does this keep?
+'''
+
+[[steps]]
+title = "or: switch bits on"
+goal = "Use `or` to set a bit, and see a classic letter trick."
+text = '''
+`or` with a mask **sets** bits: where the mask has a 1, the result bit becomes 1, no matter what it was. Bits where the mask has a 0 stay as they are.
+
+```rust
+let flags = flags | 0x4;   // switch on bit 2, keep the rest
+```
+
+A classic trick lives in the ASCII table (Level 0). Upper-case and lower-case letters differ in exactly one bit, the one worth `0x20`:
+
+| Letter | Code | Binary |
+|---|---|---|
+| `'A'` | `0x41` | `0100 0001` |
+| `'a'` | `0x61` | `0110 0001` |
+
+So `x | 0x20` turns an upper-case letter into lower case, and `x & !0x20` (for one byte in assembly: `and al, 0xDF`) turns it into upper case. Programs that compare text "ignoring case" do this to every character. When you see `or` with `0x20` inside a loop over a string, you are looking at a lower-case conversion.
+
+**Exercise.** The simulator loads `'A'` (65) into `rax`. With one `or`, turn it into `'a'` (97).
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line is `mov rax, 'A'`.",
+    "Below it, write an `or` that sets the bit worth `0x20` in `rax`.",
+    "Press **Run**. `rax` must be 97, which is `0x61`, the code of `'a'`.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 'A'     ; 65 = 0x41
+; turn it into 'a' (0x61) with one or
+'''
+check = { kind = "sim", expect = [["rax", 97]], requires = ["or"] }
+hints = [
+    "The mask is the bit in which 'A' and 'a' differ: 0x20.",
+    "The instruction is `or rax, 0x20`.",
+]
+solution = '''
+mov rax, 'A'
+or rax, 0x20
+'''
+
+[[steps]]
+title = "xor: flip bits, and the zero trick"
+goal = "Use `xor` to flip bits and to set a register to zero."
+text = '''
+`xor` (exclusive or) gives 1 where the two bits **differ** and 0 where they are the same. Think of the mask as a list of switches: where the mask has a 1, the bit **flips**; where it has a 0, the bit stays.
+
+| a | b | a xor b |
+|---|---|---|
+| 0 | 0 | 0 |
+| 0 | 1 | 1 |
+| 1 | 0 | 1 |
+| 1 | 1 | 0 |
+
+Look at the last row and the first row: any bit XOR itself is 0. So **any value XOR itself is 0**:
+
+```text
+xor eax, eax     ; eax = eax ^ eax = 0   ->  the whole of rax becomes 0
+```
+
+This is the most common way to write `rax = 0;` in compiled code. It is shorter than `mov eax, 0` (2 bytes instead of 5). Remember from Lesson 1 that writing `eax` also clears the top half of `rax`, so `xor eax, eax` clears all 64 bits. When you see it, read "= 0", nothing more. In crackme #1 alone it appears several times; the code that returns `false` in crackme #2 starts with `xor eax, eax`, just before its `ret`.
+
+**Exercise.** The simulator sets `rax` and `rbx` to some values. Set both to 0, using only `xor`.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Below the two `mov` lines, add one `xor` for `rax` and one for `rbx`. Each register is XORed with itself.",
+    "Press **Run**. Both registers must be 0.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 0x1234
+mov rbx, -77
+; set rax and rbx to 0 using xor
+'''
+check = { kind = "sim", expect = [["rax", 0], ["rbx", 0]], requires = ["xor"] }
+hints = [
+    "A value XOR itself is 0.",
+    "`xor rax, rax` sets rax to 0. Do the same for rbx.",
+]
+solution = '''
+mov rax, 0x1234
+mov rbx, -77
+xor rax, rax
+xor rbx, rbx
+'''
+
+[[steps]]
+title = "XOR hides secrets"
+goal = "Understand why XOR with a key encrypts and decrypts."
+text = '''
+XOR has a property that makes it the favourite tool for hiding data: **doing it twice with the same value undoes it**.
+
+```rust
+let secret = b'K';          // 0x4B
+let key = 0x5A;
+let hidden = secret ^ key;  // 0x11: does not look like 'K' at all
+let back = hidden ^ key;    // 0x4B again: 'K'
+assert_eq!(back, secret);
+```
+
+Why? Each 1 in the key flips a bit. Flipping a bit twice puts it back. Bits where the key has a 0 never change.
+
+So a program can store a password as `hidden` bytes, which the Strings view will never find, and check your input like this:
+
+```rust
+if input[i] ^ KEY == HIDDEN[i] { /* this character is right */ }
+```
+
+The same operation **encrypts** and **decrypts**. If you find the key and the hidden bytes in the disassembly, you XOR them yourself and get the password. That is exactly what you will do in Level 2.
+
+This is called **XOR encryption**. It is weak (anyone who finds the key can undo it), but it is everywhere: in crackmes, in CTF challenges, and in malware that wants to hide its text from scanners.
+
+**Exercise.** The simulator loads `'K'` and "encrypts" it with the key `0x5A`. Add one instruction that decrypts it again, so that `rax` ends as `'K'` (75).
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Step** twice. `rax` is now `0x11`: the hidden value.",
+    "Press **Reset** so you can edit. Below the existing lines, add one more `xor` with the same key.",
+    "Press **Run**. `rax` must be 75 (`0x4b`), the code of `'K'`.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 'K'      ; 0x4b
+xor rax, 0x5a     ; encrypt with the key: rax is now 0x11
+; decrypt it again
+'''
+check = { kind = "sim", expect = [["rax", 75]], requires = ["xor"] }
+hints = [
+    "Decrypting is the same operation as encrypting.",
+    "XOR with the same key, 0x5a, a second time.",
+    "Add the line `xor rax, 0x5a`.",
+]
+solution = '''
+mov rax, 'K'
+xor rax, 0x5a
+xor rax, 0x5a
+'''
+success = '''
+XOR once hides, XOR twice reveals. Remember this pattern: `xor` with a constant inside a loop over bytes is almost always some kind of encoding.
+'''
+
+[[steps]]
+title = "not: flip everything"
+goal = "Know what `not` does to a number."
+text = '''
+`not` has one operand and flips **every** bit: each 0 becomes 1 and each 1 becomes 0. It is Rust's `!x` for integers (for `bool`, `!` is logical "not", which compilers usually write as `xor al, 1`).
+
+```text
+mov rax, 0
+not rax          ; rax = !0 = 0xffffffffffffffff
+```
+
+In two's complement, flipping all bits of `x` gives `-x - 1`. That is why `not` and `neg` are related: `neg` is "`not`, then add 1".
+
+You will see `not` mostly in two places: in masks (`and rax, rbx` after `not rbx` clears the bits that are set in `rbx`) and in obfuscated code (Level 5) that tries to make simple calculations look complicated.
+
+After these two instructions, what is in `rax` when you read it as a **signed** number?
+
+```text
+mov rax, 0
+not rax
+```
+'''
+check = { kind = "choice", options = ["0", "1", "-1", "-2"], correct = 2, explain = [
+    "`not` flips every bit, so 0 cannot stay 0.",
+    "1 has only bit 0 set. `not 0` sets all 64 bits.",
+    "All 64 bits set is 0xffffffffffffffff, which is -1 in two's complement. Also: -0 - 1 = -1.",
+    "-2 would be `0xfffffffffffffffe`: all bits except bit 0. That is `not 1`.",
+] }
+hints = [
+    "All 64 bits become 1. Which signed number has all bits set (Level 0)?",
+]
+
+[[steps]]
+title = "Shifts: shl and shr"
+goal = "Multiply and divide by powers of two with shifts."
+text = '''
+`shl` (shift left) moves every bit to the left. New 0 bits come in on the right; bits that fall off the left end are lost. `shr` (shift right) moves bits to the right; 0 bits come in on the left.
+
+```text
+mov rax, 5       ; 0101
+shl rax, 1       ; 1010  = 10
+shl rax, 2       ; 101000 = 40
+shr rax, 3       ; 101   = 5 again
+```
+
+Shifting left by 1 doubles a number, just like adding a 0 to a decimal number multiplies it by 10. So:
+
+| Shift | Same as | Rust |
+|---|---|---|
+| `shl rax, 1` | times 2 | `x << 1` or `x * 2` |
+| `shl rax, 3` | times 8 | `x * 8` |
+| `shr rax, 4` | divided by 16 (unsigned, rounded down) | `x >> 4` or `x / 16` |
+
+Compilers love this: `x * 8` almost always becomes `shl rax, 3`, and `x / 16` for an unsigned `x` becomes `shr rax, 4`. When you see a shift by a constant, ask "times or divided by which power of two?"
+
+(For signed numbers there is a separate `sar`, shift arithmetic right, which keeps the sign bit. The simulator does not have it.)
+
+**Exercise.** `rax` starts at 5. With one `shl`, make it **40**.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Work out how many times you must double 5 to reach 40.",
+    "Below the first line, write `shl rax, N` with that number as N.",
+    "Press **Run**. `rax` must be 40.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 5
+; make rax 40 with one shl
+'''
+check = { kind = "sim", expect = [["rax", 40]], requires = ["shl"] }
+hints = [
+    "40 = 5 * 8.",
+    "8 = 2 * 2 * 2, so you shift by 3.",
+    "The instruction is `shl rax, 3`.",
+]
+solution = '''
+mov rax, 5
+shl rax, 3
+'''
+
+[[steps]]
+title = "Exercise: take a number apart"
+goal = "Combine a shift and a mask to extract one hex digit."
+text = '''
+Shifts and masks together let you take any group of bits out of a number. To get the **second-lowest hex digit** of a number:
+
+```rust
+let digit = (x >> 4) & 0xF;
+```
+
+1. `x >> 4` moves the number 4 bits (one hex digit) to the right. The lowest digit falls off; the second digit is now at the bottom.
+2. `& 0xF` keeps only that bottom digit.
+
+For `x = 0x1234` this gives: `0x1234 >> 4` = `0x123`, and `0x123 & 0xF` = `0x3`.
+
+Programs do this to read packed data: colours (`0xRRGGBB`), dates, network headers, and the fields inside machine code itself.
+
+**Exercise.** `rax` starts at `0x1234`. Put the second-lowest hex digit (3) in `rax`, using `shr` and `and`.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Below the first line, shift `rax` right by 4 with `shr`.",
+    "Then keep only the lowest 4 bits with `and`.",
+    "Press **Run**. `rax` must be 3.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 0x1234
+; rax = (rax >> 4) & 0xF
+'''
+check = { kind = "sim", expect = [["rax", 3]], requires = ["shr", "and"] }
+hints = [
+    "First `shr rax, 4`. Step once and look: rax is 0x123.",
+    "Then `and rax, 0xf`.",
+]
+solution = '''
+mov rax, 0x1234
+shr rax, 4
+and rax, 0xf
+'''
+success = '''
+You can now read every bit instruction you will meet in the first crackmes. Summary: `and` keeps bits, `or` sets bits, `xor` flips bits (and hides secrets), `not` flips all bits, and shifts multiply or divide by powers of two. Next: how a program makes decisions.
+'''

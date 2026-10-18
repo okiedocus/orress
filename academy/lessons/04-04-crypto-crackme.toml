@@ -1,0 +1,249 @@
+id = "l4-crypto-crackme"
+level = 4
+order = 26
+title = "Practice: decrypt the flag"
+summary = "Finish crackme13: find the TEA key and the encrypted flag inside the program, then decrypt it in the Workbench."
+goals = [
+    "find a cipher's key and ciphertext inside a program",
+    "understand an encrypt-and-compare check",
+    "read a 16-byte key as four little-endian 32-bit words",
+    "decrypt with a Workbench recipe of two steps",
+]
+badge = "Key Finder"
+reveal_source = "crackme13"
+
+[[steps]]
+title = "The plan"
+goal = "Know the three things you need before you can decrypt."
+text = '''
+In the last lesson you found out that crackme13 uses **TEA**, a block cipher with 8-byte blocks and a 16-byte key. To decrypt anything with TEA you need exactly three things:
+
+1. the **algorithm**: TEA (done),
+2. the **secret key**: 16 bytes,
+3. the **ciphertext**: the encrypted bytes.
+
+A program that checks a flag with a cipher works in one of two ways:
+
+```rust
+// Way 1: decrypt the stored flag, compare it with the input.
+let flag = tea_decrypt(STORED_CIPHERTEXT, KEY);
+if input == flag { /* correct */ }
+
+// Way 2: encrypt the input, compare it with the stored ciphertext.
+let c = tea_encrypt(input, KEY);
+if c == STORED_CIPHERTEXT { /* correct */ }
+```
+
+Both ways need the key and the stored ciphertext inside the program. In Way 2 the program never decrypts anything, but that does not help it: TEA can be decrypted by anyone who has the key, so you run the decryption yourself.
+
+In this lesson you find the key, find the ciphertext, and decrypt. Everything happens in views you know: Strings, Disassembly, Decompiler and the Workbench.
+'''
+success = "Key, ciphertext, algorithm. Let's find the first two."
+
+[[steps]]
+title = "Open crackme13"
+goal = "Load the practice program (again, if you closed it)."
+text = '''
+Open **Crackme #13**. If it is still open from the last lesson, pressing the button is harmless: ORRESS shows the file that is already open.
+'''
+instructions = [
+    "Click **Open crackme13** below.",
+    "Wait until the Project panel lists the views of `crackme13.exe`.",
+]
+check = { kind = "open_crackme", name = "crackme13" }
+hints = ["The button is directly under this text."]
+success = "Start where every challenge starts: the strings."
+
+[[steps]]
+title = "A suspicious string"
+goal = "Spot the ciphertext in the Strings view."
+text = '''
+Open the **Strings** view and look at the program's own text. (Most of the long list is text from the Rust standard library. The program's own strings are close together, near the messages it prints.)
+
+You will find the messages `Flag:`, `Wrong flag. Try again!` and `Correct! You decrypted the flag.`, and two strange strings:
+
+- one of exactly 16 characters that looks like leetspeak,
+- one long string made only of the digits `0`-`9` and the letters `a`-`f`.
+
+From the last lesson you know what the second one is: **hex text**. Count its characters. Every two hex digits are one byte.
+
+How many bytes does the long hex string hold?
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Strings**.",
+    "In the filter box at the top of the Strings view, type `0c0b`. Only the long hex string remains.",
+    "Count its characters (or count pairs of digits), then divide by 2.",
+    "Type the number of bytes and press **Check**.",
+]
+spotlight = "tree.Strings"
+check = { kind = "answer", answers = ["24"], number = true }
+hints = [
+    "The string has 48 characters.",
+    "48 hex digits / 2 = 24 bytes.",
+]
+success = "24 bytes, which is exactly three TEA blocks of 8 bytes. Ciphertext is always a whole number of blocks for a block cipher, so this fits. The flag is probably 24 characters long."
+
+[[steps]]
+title = "Find the check function"
+goal = "See where the key and the hex string are used."
+text = '''
+A string in the program is only a suspect. To be sure, look at the code that uses it.
+
+The check function is the one `main` calls right before it decides between "Correct!" and "Wrong". In crackme13, `main` calls `sub_140001100` and then tests its result with `test al,al`, exactly like the crackmes of Level 1.
+
+Open that function in the decompiler. It is long (a lot of it is the Rust code that turns bytes into hex text), so look for these landmarks, from top to bottom:
+
+1. `if a2 != 24 { ... return ... }`: the input must be 24 bytes long. Your guess from the last step was right.
+2. A line that reads four `u32` values from a 16-character string: that string is the **key**.
+3. A call to `sub_140001500`: the TEA function you identified in the last lesson. It encrypts one 8-byte block per call.
+4. `local_... = "0c0b5df8..."` followed by `memcmp(...)`: the encrypted input, written as hex text, is compared with the stored hex string. `memcmp` is the C library's "compare two blocks of memory".
+
+What is the key? (Type it exactly, it is case-sensitive.)
+'''
+instructions = [
+    "Press `Ctrl+D` to open the **Disassembly** view.",
+    "Press `Ctrl+G`, type `140001100` and press `Enter`.",
+    "Press `F5` to open the **Decompiler** for this function.",
+    "Near the top, below `if a2 != 24`, find the 16-character string in quotes.",
+    "Type it into the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["t1ny_crypt0_k3y!"], case_sensitive = true }
+hints = [
+    "It is the other strange string from the Strings view, 16 characters long.",
+    "It starts with t1ny.",
+    "t1ny_crypt0_k3y!",
+]
+success = "`t1ny_crypt0_k3y!`: 16 characters, 16 bytes, exactly the size of a TEA key. Programs often keep keys as plain text because it is convenient for the author. Convenient for you too."
+
+[[steps]]
+title = "A key is four numbers"
+goal = "Understand how TEA reads its 16-byte key."
+text = '''
+The TEA code from the last lesson takes the key as `k: &[u32; 4]`: four 32-bit numbers, not 16 characters. The program converts the text into numbers like this (from the source, in Rust):
+
+```rust
+let mut k = [0u32; 4];
+for i in 0..4 {
+    k[i] = u32::from_le_bytes([key[4*i], key[4*i+1], key[4*i+2], key[4*i+3]]);
+}
+```
+
+So every 4 characters become one number, **little-endian**: the first character is the lowest byte.
+
+Worked example with the text `ABCD`: the bytes are `41 42 43 44`. Little-endian means the first byte is the lowest, so the number is `0x44434241`.
+
+This matters because some programs read the words **big-endian** instead (first byte highest). Both versions of TEA exist in the wild, and they give different results with the same key text. The Workbench's **TEA decrypt** has an `endian` setting for exactly this reason. When decryption gives garbage, try the other setting.
+
+What is `k[0]` for the key `t1ny_crypt0_k3y!`? Its first four characters are `t1ny`.
+'''
+instructions = [
+    "Look up the ASCII codes of `t`, `1`, `n` and `y` (the Number converter below can help: type a character in quotes, like `'t'`).",
+    "Write them in reverse order to get the little-endian number.",
+    "Type it with `0x` in front and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x796e3174"], number = true }
+hints = [
+    "t = 0x74, 1 = 0x31, n = 0x6e, y = 0x79.",
+    "Reverse the order: 79 6e 31 74.",
+    "0x796e3174",
+]
+success = "`0x796e3174`. In the decompiler you saw the program read these four words from the key text one by one (`read::<u32>(...)`). The default `endian = little` of the Workbench matches this program."
+
+[[steps]]
+title = "Encrypt-and-compare"
+goal = "Decide how to get the flag out."
+text = '''
+Put the pieces together. The check function:
+
+1. demands 24 bytes of input,
+2. reads the key `t1ny_crypt0_k3y!` as four little-endian words,
+3. encrypts your input with TEA, block by block (`sub_140001500`, called once for each 8-byte block),
+4. writes the encrypted bytes as hex text,
+5. compares that text with `0c0b5df889a72f0143b197b070de2a2c09c4c9db4af2ad80`.
+
+In Rust:
+
+```rust
+fn check_flag(input: &[u8]) -> bool {
+    input.len() == 24 && to_hex(&tea_encrypt_all(input, KEY)) == EXPECTED
+}
+```
+
+So `EXPECTED` is the flag, encrypted with TEA and the key, written as hex. To get the flag back you undo the steps in reverse order: first turn the hex text back into bytes, then decrypt.
+'''
+check = { kind = "choice", options = [
+    "Turn the stored hex string into bytes, then TEA-decrypt them with the key",
+    "TEA-encrypt the stored hex string again with the key",
+    "Patch the memcmp so it always returns 0",
+    "Brute-force all 24-character inputs",
+], correct = 0, explain = [
+    "Right. Undo in reverse order: hex text to bytes (From hex), then decrypt (TEA decrypt). Encryption turned flag into ciphertext; decryption turns it back.",
+    "Encrypting again scrambles it further. You need the inverse of encryption, which is decryption. (And the hex text must become bytes first.)",
+    "That would make the program print Correct for any input, but you would still not know the flag, and the flag is what you need to submit.",
+    "95^24 possible inputs: more than the number of atoms in the universe. Never brute-force what you can decrypt.",
+] }
+hints = [
+    "Undo the steps in reverse order: the last one the program did was turning bytes into hex.",
+]
+success = "From hex, then TEA decrypt. A recipe of two steps."
+
+[[steps]]
+title = "Decrypt the flag"
+goal = "Run the decryption in the Workbench."
+text = '''
+Build the recipe in the Workbench. Here is the ciphertext again, for copying:
+
+```text
+0c0b5df889a72f0143b197b070de2a2c09c4c9db4af2ad80
+```
+
+and the key:
+
+```text
+t1ny_crypt0_k3y!
+```
+
+The **TEA decrypt** step has two settings:
+
+- `key`: the 16-byte key. It accepts text (like the key above), `0x` hex or `hex:` bytes, just like the XOR step.
+- `endian`: `little` or `big`, the byte order of the 32-bit words. This program uses `little`, the default.
+
+If the output is not readable, check the key for typing errors first (a wrong key gives random-looking bytes, not an error).
+'''
+instructions = [
+    "Open the Workbench (**Tools** menu, **Workbench**, or `Ctrl+Shift+W`) and click **Clear** in the middle column.",
+    "In the left column, search `hex` and click **From hex**. Then search `tea` and click **TEA decrypt**.",
+    "In the **TEA decrypt** step, click into the `key` field, delete `0x00` and type (or paste) `t1ny_crypt0_k3y!`. Leave `endian` on `little`.",
+    "Copy the ciphertext above (copy icon) and paste it into the **Input** box with **text** selected (`Ctrl+A`, `Ctrl+V`).",
+    "Type the flag from the **Output** box into the answer box and press **Check**.",
+]
+check = { kind = "secret", sha256 = "7354e44a53dacfca88885db80d379cf0d789d506d6e9b04d58b79d50f7d346e2" }
+hints = [
+    "If the TEA step says 'TEA keys are 16 bytes', the key field still contains something else, or a character is missing.",
+    "If it says 'TEA works on 8-byte blocks', the From hex step is missing or comes after TEA decrypt.",
+    "The output starts with flag{te4.",
+]
+success = "You decrypted a real cipher. The flag even tells you why TEA was recognisable: its delta is built from the golden ratio. To confirm, run crackme13 and type the flag: it says `Correct! You decrypted the flag.`"
+
+[[steps]]
+title = "What you did, and what changes in harder challenges"
+goal = "Generalise the method."
+text = '''
+You followed the full crypto workflow:
+
+1. **Recognise** the algorithm by its magic constant (`0x9E3779B9`).
+2. **Find the key** by following the data into the cipher function.
+3. **Find the ciphertext** where the program compares.
+4. **Decrypt** with a ready-made implementation.
+
+Harder challenges make steps 2 and 3 harder, never step 4:
+
+- **The key is computed**, for example XORed with a constant or built from several pieces. Then run the code that builds it under the debugger and read the finished key from memory just before the cipher is called. (A breakpoint on the call to the cipher function, then read the register that holds the key pointer: `rdx` for the second argument on Windows.)
+- **The ciphertext is not text** but raw bytes in the data section. Select them in the Hex view and use **Hex: Send Selection to Workbench** (`Ctrl+Shift+B`) to load them as input.
+- **A different cipher**: RC4 (**RC4** operation), AES (**AES decrypt**, which also needs to know the *mode* and maybe an **IV**, a starting value for chaining blocks), XTEA (**XTEA decrypt**).
+- **Modified constants**: authors sometimes change the delta or the number of rounds. Then the ready-made decryptor gives garbage, and you write a small Rust program that copies the decompiled cipher and runs it backwards.
+
+After this lesson you can see crackme13's source: compare it with what you reconstructed.
+'''
+success = "Crypto challenges are usually treasure hunts for the key, not mathematics. Next: when there is no known algorithm at all, let a solver do the thinking."

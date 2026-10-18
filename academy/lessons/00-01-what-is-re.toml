@@ -2,61 +2,275 @@ id = "l0-what-is-re"
 level = 0
 order = 1
 title = "What is reverse engineering?"
-summary = "What reversers do, why, and what is allowed."
+summary = "What reversers do and why, what is allowed, and how the Academy works."
 badge = "First steps"
+goals = [
+    "explain in your own words what reverse engineering is",
+    "name the main reasons people reverse programs",
+    "tell legal and ethical reversing apart from harmful use",
+    "use the Academy: the Do this box, hints, Learn more, the Glossary and Explain Mode",
+]
 
 [[steps]]
-title = "Welcome"
+title = "Welcome to the Academy"
+goal = "Know what this course expects from you and what it will teach."
 text = '''
-When you write Rust and run `cargo build`, the compiler turns your code into **machine code**: the raw bytes the processor executes. Names, comments and types mostly disappear.
+Welcome! This Academy teaches you **reverse engineering** from the very beginning.
 
-**Reverse engineering** is going the other way: you only have the program, and you work out what it does by reading its machine code, watching it run, and rebuilding its logic step by step.
+You only need to know some **basic Rust**: variables, functions, `if`, `loop`, `match`, `Vec`, `String` and `cargo run`. Everything else is explained here, in order, before you need it. You do not need to know anything about hexadecimal numbers, processors, assembly or debuggers yet.
 
-ORRESS is a tool for exactly that, and this Academy teaches you to use it, starting from zero.
+The course has eight levels:
+
+- **Level 0, Foundations** (this level): how a computer runs a program, how numbers and text are stored, what a compiler produces, and a first tour of ORRESS.
+- **Level 1**: reading the instructions a processor runs, and cracking your first practice programs.
+- **Levels 2 to 7**: more and more powerful techniques, up to the tools experts use.
+
+Each lesson is a list of short **steps**. Read a step, do what it asks, and continue. You see your position in the row of dots at the top of this panel: click a dot to go back to an earlier step at any time.
+
+Take your time. There is no timer, and you can stop and continue later: your progress is saved automatically.
+
+Press **Next** below to continue.
+'''
+
+[[steps]]
+title = "Building forward, reversing backward"
+goal = "Understand the basic idea of reverse engineering."
+text = '''
+When you write a Rust program, you write **source code**: text that people can read.
+
+```rust
+fn main() {
+    let password = "swordfish";
+    let input = std::env::args().nth(1).unwrap_or_default();
+    if input == password {
+        println!("Welcome!");
+    } else {
+        println!("Wrong password");
+    }
+}
+```
+
+`cargo build` gives that text to the **compiler**. The compiler translates it into **machine code**: a long list of numbers that the processor of your computer can run directly. The result is a program file, such as `myapp.exe` on Windows.
+
+The program file does not contain your source code. Your variable names, your comments and the nice structure of your code are mostly gone. What is left are numbers.
+
+**Reverse engineering** is going the other way. You only have the program file, and you work out what it does: by reading its machine code, by looking at the text and data inside it, and by watching it run. Step by step you rebuild an understanding of the original logic. For the program above, a reverser would find the text `swordfish` inside the file and the place where the input is compared with it.
+
+People who do this are called **reversers**. ORRESS is a tool for reversers, and this Academy teaches you to use it.
+'''
+deep_dive = '''
+Reverse engineering is much older than software. Engineers have always taken apart machines made by others to learn how they work. For software the idea is the same, but the "taking apart" is done with tools that show you the bytes, the instructions and the behavior of a program.
 '''
 
 [[steps]]
 title = "Why people reverse programs"
+goal = "Know the main reasons for reverse engineering."
 text = '''
-- **CTF competitions** (Capture The Flag): "reversing" challenges hide a secret *flag* such as `flag{...}` inside a program. You win points by finding it.
-- **Malware analysis**: find out what a malicious program does, so it can be detected and stopped.
-- **Security research**: find bugs in software you cannot see the source of.
-- **Compatibility**: understand an old file format or protocol so new software can work with it.
+Reverse engineering is used for many good reasons:
 
-Most of what you learn here applies to all four.
+- **CTF competitions.** CTF stands for *Capture The Flag*. In a CTF, teams solve security puzzles for points. In the "reversing" puzzles you get a program that hides a secret text, the *flag*, which looks like `flag{y0u_f0und_m3}`. You find the flag by understanding the program.
+- **Malware analysis.** **Malware** is software made to do harm, such as viruses or programs that steal passwords. Analysts reverse it to learn what it does, so that it can be detected, blocked and cleaned up.
+- **Security research.** Researchers look for mistakes (bugs) in programs whose source code they do not have, so the bugs can be fixed before criminals find them.
+- **Compatibility.** Sometimes the only documentation of an old file format or a device is the program that uses it. Reversing it lets new software work with old data.
+- **Learning.** Reading what a compiler made from your own code is one of the best ways to understand how computers really work.
+
+Most of what you learn in this Academy is useful for all of these. The practice programs in this course are small CTF-style puzzles called **crackmes**: programs that ask for a password and are made to be reversed. You will open the first one at the end of this level.
+'''
+
+[[steps]]
+title = "What is a flag?"
+goal = "Check that you know the goal of a reversing challenge."
+text = '''
+Let us check the most important idea from the previous step.
+
+In a CTF reversing challenge, you receive a program. Somewhere in its logic a secret is hidden, the flag. Sometimes the flag is printed when you type the right password; sometimes the flag *is* the password; sometimes it is calculated from your input. Your job is to understand the program well enough to get the flag, and then submit it on the CTF website for points.
+
+Which of these describes the goal of a reversing challenge?
+'''
+check = { kind = "choice", options = [
+    "Make the program crash as fast as possible",
+    "Understand the program well enough to find the hidden flag",
+    "Rewrite the program in another language",
+    "Delete the program so nobody else can solve it",
+], correct = 1, explain = [
+    "Crashing a program teaches you nothing about where the flag is.",
+    "Exactly: understanding comes first, and the flag follows from it.",
+    "You may write small helper programs, but rewriting the challenge is not the goal.",
+    "That would only spoil the fun for others, and you would still not have the flag.",
+] }
+hints = [
+    "Think about the word in the name: Capture The ...",
+    "The flag is a secret text inside the program's logic.",
+]
+success = '''
+Right. In every reversing challenge the real work is *understanding*. That is also what this course trains.
 '''
 
 [[steps]]
 title = "Legal and ethical use"
+goal = "Know what is allowed and what is not."
 text = '''
-Reverse engineering itself is a normal, legal skill. What you *do* with it matters:
+Reverse engineering itself is a normal, legal skill that is taught at universities and used by security companies every day. What you *do* with it is what matters.
 
-- Reversing CTF challenges, malware samples in a safe lab, and your own programs is fine.
-- Cracking software to avoid paying for it, or to share it, is not.
-- Malware is only analyzed in an isolated virtual machine, never on your everyday computer or a work network.
+**Fine:**
+
+- reversing CTF challenges and crackmes: they are made to be reversed;
+- reversing your own programs;
+- analyzing malware samples inside a safe, isolated lab (Level 6 shows you how to set one up);
+- security research done according to the rules of the software maker or a bug bounty program.
+
+**Not fine:**
+
+- removing the license check from software so you do not have to pay for it, or sharing such a "cracked" copy;
+- breaking into systems or accounts that are not yours;
+- running malware on your everyday computer or on a work or school network, where it can spread.
+
+Laws differ per country, and license agreements can add rules. When in doubt, ask, or stick to material that was made for practice, like the programs in this Academy.
 
 Which of these is fine?
 '''
 check = { kind = "choice", options = [
-    "Cracking a paid game to share it online",
+    "Cracking a paid game and sharing it online",
     "Solving a reversing challenge you downloaded from a CTF event",
     "Running a malware sample on your work laptop to see what it does",
     "Removing the license check from software you did not buy",
-], correct = 1 }
-hints = ["Only one option harms nobody."]
+], correct = 1, explain = [
+    "That is copyright infringement: it costs the makers money and is illegal in most countries.",
+    "Correct: CTF challenges are made to be reversed.",
+    "Never run malware outside an isolated lab. It can spread over the network and do real damage.",
+    "That is software piracy, even if you only use it yourself.",
+] }
+hints = ["Only one of the options harms nobody and breaks no rules."]
 success = '''
-Right. CTF challenges are made to be reversed. The others either hurt someone or put a network at risk.
+Right. CTF challenges are made to be reversed. The other options either hurt someone or put a network at risk.
 '''
 
 [[steps]]
-title = "How the Academy works"
+title = "Two ways to look at a program"
+goal = "Know the difference between static and dynamic analysis."
 text = '''
-Each lesson is a series of short steps. Many steps give you a **task** that you do in ORRESS itself: open a view, run a command, answer a question, or crack a practice program. The lesson notices when you did it.
+Reversers have two basic ways to study a program, and you will learn both.
 
-- Stuck? Every task has **hints**, from a gentle nudge to almost the answer.
-- A yellow outline (**spotlight**) shows where to look in the interface.
-- **Explain Mode** is on: hover over anything in ORRESS and the Explain panel tells you what it is.
-- You earn **XP** for each step and lesson, and **badges** for milestones.
+**Static analysis** means looking at the program file *without running it*. You read the text inside it, the numbers, and the machine code turned into readable form. ORRESS has many views for this. It is safe (nothing runs), and you can look at every part of the program, also the parts that rarely run.
+
+**Dynamic analysis** means *running* the program and watching what it does: which values it calculates, which files it opens, what it prints. A **debugger** is the classic tool for this: it can pause a running program and show you its memory. Dynamic analysis answers questions quickly, but it only shows the paths the program actually takes, and running unknown programs can be dangerous.
+
+Good reversers switch between the two all the time. Level 2 of this Academy is about static analysis, Level 3 about dynamic analysis.
+
+You suspect a program contains a password as plain text. You open it in ORRESS and search the text inside the file, without starting the program. Which kind of analysis is that?
+'''
+check = { kind = "choice", options = [
+    "Static analysis",
+    "Dynamic analysis",
+], correct = 0, explain = [
+    "Correct: you looked at the file without running it.",
+    "Dynamic analysis means running the program. Here the program never ran.",
+] }
+hints = ["Did the program run?"]
+
+[[steps]]
+title = "How a lesson works"
+goal = "Know every part of a lesson step."
+text = '''
+Every step in this panel has the same parts, from top to bottom:
+
+- **The title**, and below it a short **Goal** line: what this step is for.
+- **The text**: the explanation. Read it fully before you start the task. Everything a task asks is explained in the text above it.
+- **Learn more** (only on some steps): a folded part with extra details for the curious. You never need it to continue. Click it to unfold it.
+- **Do this:** a box with a numbered list of exact actions, when the step wants you to do something in ORRESS. Follow the numbers in order.
+- **Your task:** a line that says what the lesson is waiting for, sometimes with a button or an answer box. When you did it, it changes to **Done** and an explanation of what you just saw appears in green.
+- **Show hint 1 of 3**: if you are stuck, click it. The first hint is a small nudge; the last one almost gives the answer. Using hints is fine: learning is the goal.
+- **Words in this step**: every technical word the step uses, with a one-line explanation. This step, for example, mentions a *crackme* and *reverse engineering*. Click a word to read more about it in the Glossary.
+- **Back** and **Next**. Next stays grey until the task is done. On steps without a task, like this one, you can press Next right away.
+
+You earn **XP** (experience points) for every finished step and lesson, and **badges** for milestones.
+
+Below the text of this step, unfold **Words in this step** and look at what it shows. Then press **Next**.
+'''
+deep_dive = '''
+This is a "Learn more" part. In real steps it holds background information, history, or details that are interesting but not needed to continue. You can fold it again by clicking its title.
+'''
+
+[[steps]]
+title = "The Glossary"
+goal = "Look up a word in the Glossary."
+text = '''
+The **Glossary** is the Academy's dictionary. Every technical word used in the lessons is explained there in plain language, often with a small Rust example. When you meet a word you do not know, or forgot, look it up: that is what it is for.
+
+There are three ways to reach it:
+
+1. the small **Glossary** button next to the lesson title, at the top of this panel;
+2. the **Glossary** tab at the top of the **Academy** tab (open it with **Learn > Open Academy** in the menu bar);
+3. a click on any word under **Words in this step**.
+
+The Glossary opens in the big area in the middle of the window, so this lesson stays visible on the right. Each entry shows the word and a one-line explanation. Click the word to unfold the full explanation.
+
+Try it now. Look up the word **bit** and read its explanation. Then answer: how many different values can a single bit hold?
+'''
+instructions = [
+    "At the top of this lesson panel, next to the lesson title, click the small **Glossary** button.",
+    "The **Academy** tab opens in the middle of the window, on its **Glossary** page. Click into the **Search:** box at the top and type `bit`.",
+    "Click the word **bit** in the list to unfold its explanation, and read it.",
+    "Come back to this lesson panel on the right, type the number in the answer box below and press **Check**.",
+]
+check = { kind = "answer", answers = ["2", "two"] }
+hints = [
+    "The Glossary entry for bit says which values a bit can have.",
+    "A bit is either 0 or 1.",
+    "0 and 1 are two values. Type 2.",
+]
+success = '''
+A bit holds one of two values: 0 or 1. Remember the Glossary: whenever a lesson uses a word you are not sure about, it is one click away.
+'''
+
+[[steps]]
+title = "Explain Mode"
+goal = "Switch Explain Mode off and on, and know what it does."
+text = '''
+ORRESS has a feature made for learners: **Explain Mode**. When it is on, almost everything you hover over with the mouse gets a tooltip in plain language: buttons, columns, numbers, and the words and names in code. You never have to guess what something on the screen means.
+
+The **Explain** panel keeps the last explanation, so you can read it calmly after you moved the mouse away. It is a tab in the dock on the right side of the window (a **dock** is a side area that holds panels as tabs).
+
+Explain Mode is on by default. The switch is in the **status bar**: the thin bar at the very bottom of the window. On its right side you find a small button that says **Explain: on**. Clicking it toggles Explain Mode; the button then says **Explain: off**.
+
+Leave Explain Mode on while you learn. Later, when you know your way around, you can switch it off with **Ctrl+Alt+E** or **View > Toggle Explain Mode** in the menu bar.
+
+Try the switch now. The lesson notices the first click; the second click turns Explain Mode back on.
+'''
+instructions = [
+    "Look at the status bar at the very bottom of the window. On the right side, find the button **Explain: on** (it is highlighted with a yellow outline).",
+    "Click it once. It now says **Explain: off**.",
+    "Click it once more, so it says **Explain: on** again.",
+    "Hover the mouse over the button for a moment and read the tooltip that appears.",
+]
+spotlight = "explain_toggle"
+check = { kind = "action", id = "view::ToggleExplainMode" }
+hints = [
+    "The status bar is the thin bar along the bottom edge of the ORRESS window.",
+    "The button is near the bottom right corner, next to the key cap that shows Ctrl+Shift+P.",
+]
+success = '''
+That is Explain Mode. Make sure it says **Explain: on** again: in the next lessons, hovering over things is a great way to learn.
+'''
+
+[[steps]]
+title = "What comes next"
+goal = "Know the plan for Level 0."
+text = '''
+You now know what reverse engineering is, why people do it, what is allowed, and how the Academy works.
+
+Before you can read a program the way a reverser does, you need a few foundations. The rest of Level 0 builds them, one lesson each:
+
+1. **How a computer runs a program**: the processor, memory, the operating system, and machine code.
+2. **Binary and hexadecimal**: the number systems reversers use every minute.
+3. **Sizes and negative numbers**: `u8` to `u64`, overflow, and why `0xFFFFFFFF` can mean -1.
+4. **Bytes and text**: how letters are stored as numbers, and in which order the bytes of a number are stored.
+5. **Memory and addresses**: what a pointer really is, and how a `Vec` or `String` looks in memory.
+6. **From Rust to machine code**: what the compiler keeps and what it throws away.
+7. **Inside an executable file**: what is stored in a program file besides the code.
+8. **A tour of ORRESS**: you open a real practice program and look around.
+
+Every lesson has small exercises. They are all explained beforehand; none of them needs knowledge you have not been given. If an exercise feels hard, read the text again, or take a hint.
 
 Press **Finish lesson** to collect your first badge.
 '''

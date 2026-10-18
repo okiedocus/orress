@@ -1,0 +1,801 @@
+# Level 1: Reading assembly. Terms first used in the Level 1 lessons.
+# General computer terms (CPU, register, instruction, byte, address, pointer, stack ...)
+# are in 0-foundations.toml.
+
+# ---------------------------------------------------------------- registers
+
+[[term]]
+term = "general-purpose register"
+aliases = ["general-purpose registers"]
+short = "One of the 16 registers of an x86-64 CPU that programs can use for any value: rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp and r8 to r15."
+text = '''
+Each general-purpose register holds 64 bits, like a Rust `u64`. Think of them as 16 variables built into the CPU:
+
+```rust
+let mut rax: u64 = 0;
+let mut rbx: u64 = 0;
+// ... 16 in total
+```
+
+"General purpose" means any instruction can use them for any value, but conventions give some of them a usual job: `rax` holds results, `rcx`/`rdx`/`r8`/`r9` carry function arguments on Windows, and `rsp` always points at the top of the stack.
+'''
+see = ["register", "rax", "rsp", "sub-register", "calling convention"]
+
+[[term]]
+term = "rax"
+aliases = ["eax", "ax", "al", "ah"]
+short = "The first general-purpose register. Holds the result of calculations and the return value of functions. eax, ax and al are its lower 32, 16 and 8 bits."
+text = '''
+`rax` is where a function leaves its **return value**, on Windows and on Linux. The smaller names give access to its lower part:
+
+| Name | Bits | Rust type it typically holds |
+|---|---|---|
+| `rax` | all 64 | `u64`, `usize`, a pointer |
+| `eax` | lower 32 | `u32`, `i32` |
+| `ax` | lower 16 | `u16` |
+| `al` | lowest 8 | `u8`, `bool` |
+| `ah` | bits 8 to 15 | (rare) |
+
+Example: if `rax` is `0x1122334455667788`, then `eax` is `0x55667788`, `ax` is `0x7788` and `al` is `0x88`. A function returning `bool` puts it in `al`, which is why `test al, al` follows so many calls.
+'''
+see = ["sub-register", "return value", "general-purpose register"]
+
+[[term]]
+term = "rbx"
+aliases = ["ebx", "bx", "bl"]
+short = "A general-purpose register with no fixed job. On Windows and Linux it is non-volatile: a function that uses it must restore it."
+see = ["general-purpose register", "non-volatile register"]
+
+[[term]]
+term = "rcx"
+aliases = ["ecx", "cx", "cl"]
+short = "A general-purpose register. On Windows it carries the first argument of a function; compilers also like it as a loop counter."
+text = '''
+Under the Windows x64 calling convention, `rcx` holds the first argument when a function starts. `mov ecx, 1` followed by `call` means "call with 1 as the first argument". On Linux (System V) `rcx` is the fourth argument. Its historical name is "counter register".
+'''
+see = ["Windows x64 calling convention", "argument", "loop counter"]
+
+[[term]]
+term = "rdx"
+aliases = ["edx", "dx", "dl"]
+short = "A general-purpose register. On Windows it carries the second argument of a function (on Linux the third)."
+text = '''
+For a slice argument `&[u8]` on Windows, `rcx` holds the address of the bytes and `rdx` the length. That is why a password check often starts with `cmp rdx, N`: the length check. Some functions also return a second value in `rdx`, next to `rax`.
+'''
+see = ["Windows x64 calling convention", "slice", "argument"]
+
+[[term]]
+term = "rsi"
+aliases = ["esi", "sil"]
+short = "A general-purpose register. Non-volatile on Windows; on Linux it carries the second argument of a function."
+see = ["System V calling convention", "non-volatile register"]
+
+[[term]]
+term = "rdi"
+aliases = ["edi", "dil"]
+short = "A general-purpose register. Non-volatile on Windows; on Linux and macOS it carries the first argument of a function."
+see = ["System V calling convention", "non-volatile register"]
+
+[[term]]
+term = "rbp"
+aliases = ["ebp", "base pointer", "frame pointer"]
+short = "The base pointer: often holds a fixed address inside the current function's stack frame, so local variables can be found at [rbp-8], [rbp-16] ..."
+text = '''
+A classic prologue sets it up:
+
+```text
+push rbp          ; save the caller's rbp
+mov  rbp, rsp     ; rbp = fixed reference point for this function
+sub  rsp, 16      ; room for locals at [rbp-8] and [rbp-16]
+```
+
+Optimised code often does not use `rbp` this way and uses it as an ordinary register instead.
+'''
+see = ["stack frame", "prologue", "rsp"]
+
+[[term]]
+term = "rsp"
+aliases = ["esp", "stack pointer"]
+short = "The stack pointer: always holds the address of the top of the stack. push, pop, call and ret change it."
+text = '''
+The stack grows downward, so `push` makes `rsp` 8 smaller and `pop` makes it 8 bigger. `sub rsp, 0x28` reserves 0x28 bytes of stack space; `add rsp, 0x28` gives them back. Local variables are often addressed relative to it, like `[rsp+0x20]`. `rsp` is never used for anything other than the stack.
+'''
+see = ["stack", "push", "pop", "stack frame"]
+
+[[term]]
+term = "rip"
+short = "The x86-64 name of the instruction pointer: the address of the next instruction. Jumps, calls and returns change it."
+text = '''
+You never write `rip` directly. After each instruction the CPU adds the instruction's length to it; `jmp`, conditional jumps, `call` and `ret` set it to a new address. It also appears inside brackets in rip-relative addressing, which ORRESS shows already resolved to a full address.
+'''
+see = ["instruction pointer", "jump instruction", "rip-relative addressing"]
+
+[[term]]
+term = "r8 to r15"
+aliases = ["r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "r8d", "r9d", "r8b"]
+short = "Eight more general-purpose registers, numbered instead of named. r8 and r9 carry the 3rd and 4th argument on Windows."
+text = '''
+Their smaller parts use a letter at the end: `r8d` is the lower 32 bits, `r8w` the lower 16, `r8b` the lowest 8. On Windows, `r8`-`r11` are volatile and `r12`-`r15` non-volatile. The Academy's CPU simulator has them, but its Registers pane shows only the first eight registers.
+'''
+see = ["general-purpose register", "Windows x64 calling convention"]
+
+[[term]]
+term = "sub-register"
+aliases = ["sub-registers", "partial register", "partial registers"]
+short = "A smaller part of a 64-bit register, under its own name: eax is the lower half of rax, al its lowest byte."
+text = '''
+Using `eax` is like `rax as u32` in Rust. One surprising rule: **writing a 32-bit sub-register clears the upper 32 bits** of the full register (`mov eax, 1` makes all of `rax` equal to 1). Writing an 8-bit or 16-bit part (`al`, `ax`) leaves the other bits alone.
+'''
+see = ["rax", "general-purpose register"]
+
+# ---------------------------------------------------------------- reading instructions
+
+[[term]]
+term = "mnemonic"
+aliases = ["mnemonics"]
+short = "The short name of an instruction's operation, like mov, add or jmp."
+text = '''
+In `add rax, 5`, `add` is the mnemonic and `rax` and `5` are the operands. Mnemonics are abbreviations: `mov` = move (copy), `cmp` = compare, `jne` = jump if not equal, `lea` = load effective address. With Explain Mode on, hover over a mnemonic in the Disassembly view to see what it does.
+'''
+see = ["operand", "instruction"]
+
+[[term]]
+term = "operand"
+aliases = ["operands"]
+short = "A value an instruction works on: a register, an immediate number, or a memory location in square brackets."
+text = '''
+In Intel syntax the first operand is the **destination** and the second the **source**: `mov rbx, rax` is `rbx = rax;`. Most instructions take two operands, some one (`inc rcx`, `push rax`) and some none (`ret`).
+'''
+see = ["destination operand", "source operand", "immediate value", "memory operand"]
+
+[[term]]
+term = "destination operand"
+aliases = ["destination"]
+short = "The first operand in Intel syntax: where the result is written. In add rax, rbx it is rax."
+see = ["operand", "source operand", "Intel syntax"]
+
+[[term]]
+term = "source operand"
+aliases = ["source operands"]
+short = "The second operand in Intel syntax: the value that is read. In mov rbx, rax it is rax."
+see = ["operand", "destination operand"]
+
+[[term]]
+term = "immediate value"
+aliases = ["immediate", "immediate values", "immediates"]
+short = "A number written directly inside an instruction, like the 5 in mov rax, 5."
+text = '''
+The number is part of the instruction's bytes, not stored elsewhere in memory. That is why a password compared character by character (`cmp byte ptr [rax], 0x52`) never shows up in the Strings view: the characters are immediate values inside the code.
+'''
+see = ["operand", "machine code"]
+
+[[term]]
+term = "Intel syntax"
+short = "The way of writing x86 assembly that ORRESS uses: mnemonic, then destination, then source (mov rax, 5)."
+text = '''
+Read every two-operand instruction as `destination = destination (op) source`: `sub rax, 1` is `rax -= 1;`. Windows tools and most reverse engineering tools use Intel syntax.
+'''
+see = ["AT&T syntax", "destination operand"]
+
+[[term]]
+term = "AT&T syntax"
+aliases = ["AT&T"]
+short = "Another way of writing x86 assembly, common on Linux: source first, registers with %, numbers with $ (movq $5, %rax)."
+see = ["Intel syntax"]
+
+[[term]]
+term = "assembler"
+aliases = ["assemblers", "assemble"]
+short = "A tool that turns assembly text into machine code bytes: the opposite of a disassembler."
+see = ["disassembler", "assembly language", "machine code"]
+
+[[term]]
+term = "Disassembly view"
+aliases = ["disassembly", "disassembly listing"]
+short = "ORRESS's view of a program's machine code as assembly: one instruction per line, with addresses, names and comments."
+text = '''
+Open it with Ctrl+D or from the Project panel. Useful keys (they need the view to have keyboard focus): **N** rename, **;** comment, **X** cross-references, **Space** graph, **Ctrl+F** find, **Ctrl+G** go to an address, **Esc** go back. Click a name or address in an instruction to go there; hover over a number to see it in decimal and as a character.
+'''
+see = ["disassembler", "Find bar"]
+
+[[term]]
+term = "CPU simulator"
+aliases = ["simulator"]
+short = "The Academy's small pretend x86-64 CPU: type assembly, then Step or Run it and watch registers, flags and the stack."
+text = '''
+Open it from **Learn > Academy: CPU Simulator**. Buttons: **Step** (one instruction), **Run** (to the end), **Step back** (undo a step), **Reset** (start again; also needed to edit after running). It knows the instructions of Level 1, the 64-bit registers and `eax` to `esp`, and only 8-byte memory accesses on its own small stack.
+'''
+see = ["stepping", "register", "status flags"]
+
+[[term]]
+term = "stepping"
+aliases = ["step through", "steps through", "single-step"]
+short = "Running a program one instruction at a time, to see exactly what each one changes."
+see = ["CPU simulator"]
+
+# ---------------------------------------------------------------- moving and arithmetic
+
+[[term]]
+term = "mov"
+aliases = ["`mov`"]
+short = "Copy a value into a register or memory: mov rax, rbx is rax = rbx. The source keeps its value."
+text = '''
+Forms you will see: `mov rax, 42` (a number), `mov rbx, rax` (a register), `mov rax, [rsp+8]` (load from memory), `mov [rsp+8], rax` (store to memory). There is no memory-to-memory form, and `mov` never changes the status flags.
+'''
+see = ["operand", "memory operand", "movzx"]
+
+[[term]]
+term = "arithmetic instruction"
+aliases = ["arithmetic instructions", "`add`"]
+short = "An instruction that calculates: add, sub, inc, dec, neg, imul. The first operand is input and output (add rax, 5 is rax += 5)."
+text = '''
+| Instruction | Rust |
+|---|---|
+| `add rax, rbx` | `rax += rbx;` |
+| `sub rax, 5` | `rax -= 5;` |
+| `inc rcx` / `dec rcx` | `rcx += 1;` / `rcx -= 1;` |
+| `neg rax` | `rax = -rax;` |
+| `imul rax, rbx` | `rax *= rbx;` |
+
+All of them update the status flags. Results that do not fit wrap around.
+'''
+see = ["sub", "inc", "imul", "status flags", "wrapping"]
+
+[[term]]
+term = "sub"
+aliases = ["`sub`"]
+short = "Subtract: sub rax, 5 is rax -= 5. sub rsp, N reserves N bytes of stack space."
+see = ["arithmetic instruction", "cmp", "rsp"]
+
+[[term]]
+term = "inc"
+aliases = ["`inc`"]
+short = "Increment: add 1 to a register or memory value (inc rcx is rcx += 1). Leaves the carry flag unchanged."
+see = ["dec", "loop counter"]
+
+[[term]]
+term = "dec"
+aliases = ["`dec`"]
+short = "Decrement: subtract 1 (dec rcx is rcx -= 1). Sets ZF when the result is 0, so dec + jnz makes a count-down loop."
+see = ["inc", "loop", "ZF"]
+
+[[term]]
+term = "neg"
+aliases = ["`neg`", "negate"]
+short = "Negate: change the sign of a value (neg rax is rax = -rax), using two's complement."
+see = ["two's complement", "bitwise NOT"]
+
+[[term]]
+term = "imul"
+aliases = ["`imul`"]
+short = "Signed multiply: imul rax, rbx is rax *= rbx; imul rax, rbx, 4 is rax = rbx * 4."
+text = '''
+Compilers avoid multiplying when they can: `x * 2` may become `add rax, rax`, `x * 8` a shift (`shl rax, 3`), and `x * 3` a `lea`. All compute the same result.
+'''
+see = ["arithmetic instruction", "shift", "lea"]
+
+# ---------------------------------------------------------------- bits
+
+[[term]]
+term = "bitwise operation"
+aliases = ["bitwise operations", "bitwise"]
+short = "An operation that works on each bit position separately: AND, OR, XOR, NOT and the shifts."
+text = '''
+| Rust | Instruction |
+|---|---|
+| `a & b` | `and` |
+| `a \| b` | `or` |
+| `a ^ b` | `xor` |
+| `!a` | `not` |
+| `a << n`, `a >> n` | `shl`, `shr` |
+
+Programs that hide or check secrets (passwords, keys, flags) use these constantly.
+'''
+see = ["bitwise AND", "bitwise OR", "XOR", "bitwise NOT", "shift", "mask"]
+
+[[term]]
+term = "bitwise AND"
+aliases = ["`and`", "and instruction"]
+short = "A result bit is 1 only where both input bits are 1. With a mask it keeps some bits and clears the rest: and eax, 0xF keeps the last hex digit."
+text = '''
+Rust `x & 0xF`. Common uses: `x & 1` (is it odd?), `x & 0xFF` (the lowest byte), and `x % 8` for unsigned `x`, which compilers turn into `and eax, 7`.
+'''
+see = ["mask", "bitwise operation", "test instruction"]
+
+[[term]]
+term = "bitwise OR"
+aliases = ["`or`", "or instruction"]
+short = "A result bit is 1 where at least one input bit is 1. With a mask it switches bits on: x | 0x20 makes an ASCII letter lower case."
+see = ["mask", "bitwise operation"]
+
+[[term]]
+term = "XOR"
+aliases = ["exclusive or", "`xor`", "xor eax, eax"]
+short = "Exclusive or: a result bit is 1 where the two input bits differ. XOR with the same key twice gives the original back."
+text = '''
+Two facts make XOR important for reverse engineers:
+
+- **Any value XOR itself is 0.** `xor eax, eax` is the usual way to write `rax = 0`.
+- **XOR twice with the same key undoes it.** `(x ^ key) ^ key == x`, so the same operation hides and reveals data:
+
+```rust
+let hidden = b'K' ^ 0x5A;   // 0x11
+let back = hidden ^ 0x5A;   // b'K' again
+```
+
+That is why XOR is the most common way to hide passwords and text in crackmes and malware.
+'''
+see = ["XOR cipher", "bitwise operation", "mask"]
+
+[[term]]
+term = "bitwise NOT"
+aliases = ["`not`", "not instruction"]
+short = "Flip every bit: 0 becomes 1 and 1 becomes 0. Rust's !x for integers. not 0 is -1 (all bits set)."
+see = ["bitwise operation", "neg"]
+
+[[term]]
+term = "shift"
+aliases = ["shifts", "shl", "shr", "sar", "shift left", "shift right"]
+short = "Move all bits left (shl) or right (shr). Shifting left by n multiplies by 2 to the power n; shifting right divides (unsigned)."
+text = '''
+`shl rax, 3` is `rax * 8`, `shr rax, 4` is `rax / 16` for an unsigned value. `sar` (shift arithmetic right) keeps the sign bit, for signed division. Compilers turn multiplications and divisions by powers of two into shifts.
+'''
+see = ["bitwise operation", "imul"]
+
+[[term]]
+term = "mask"
+aliases = ["masks", "bit mask", "bitmask"]
+short = "A constant used with AND, OR or XOR to pick bits: its 1 bits select which bits are kept, set or flipped."
+text = '''
+`x & 0x0F` keeps the lowest 4 bits, `x | 0x20` sets bit 5, `x ^ 0xFF` flips the lowest 8 bits. Combined with a shift, a mask extracts a field: `(x >> 4) & 0xF` is the second-lowest hex digit.
+'''
+see = ["bitwise AND", "bitwise OR", "XOR"]
+
+# ---------------------------------------------------------------- flags, compare, jump
+
+[[term]]
+term = "status flags"
+aliases = ["CPU flags", "flags register", "rflags"]
+short = "Single bits the CPU sets after arithmetic and comparisons (ZF, SF, CF, OF). Conditional jumps read them."
+text = '''
+Arithmetic and bit instructions (`add`, `sub`, `and`, `xor`, `cmp`, `test` ...) update them; `mov`, `lea`, `push` and `pop` do not. They live together in the register `rflags`. The simulator shows them in its **Flags** row.
+'''
+see = ["ZF", "SF", "CF", "OF", "conditional jump"]
+
+[[term]]
+term = "ZF"
+aliases = ["zero flag"]
+short = "Zero flag: 1 when the last result was 0. After cmp a, b it means a == b; je jumps when it is 1."
+see = ["status flags", "je", "cmp"]
+
+[[term]]
+term = "SF"
+aliases = ["sign flag"]
+short = "Sign flag: 1 when the last result was negative (its top bit is 1)."
+see = ["status flags", "sign bit"]
+
+[[term]]
+term = "CF"
+aliases = ["carry flag"]
+short = "Carry flag: 1 when the last result did not fit as an unsigned number (a carry, or a borrow in a subtraction). After cmp a, b: a < b unsigned."
+see = ["status flags", "unsigned jump", "overflow"]
+
+[[term]]
+term = "OF"
+aliases = ["overflow flag"]
+short = "Overflow flag: 1 when the last result did not fit as a signed number. Signed jumps (jl, jg ...) read it."
+see = ["status flags", "signed jump", "overflow"]
+
+[[term]]
+term = "cmp"
+aliases = ["`cmp`", "compare instruction"]
+short = "Compare: calculates a - b only to set the status flags, and throws the result away. Usually followed by a conditional jump."
+text = '''
+`cmp rax, 7` is the first half of `if rax == 7` (or `<`, `>` ...); the jump after it says which comparison. Example:
+
+```text
+cmp rdx, 7
+jne wrong      ; if rdx != 7 goto wrong
+```
+'''
+see = ["conditional jump", "test instruction", "status flags"]
+
+[[term]]
+term = "test instruction"
+aliases = ["`test`", "test al, al", "test rax, rax", "test eax, eax"]
+short = "test a, b calculates a AND b only to set the flags. test rax, rax asks \"is rax zero?\" (ZF = 1 if so)."
+text = '''
+Right after a call, `test al, al` + `je` means "if the function returned false". `test rax, rax` checks for a zero value: a null pointer, an `Option` that is `None`, an `Ok` result, or a count of 0.
+'''
+see = ["cmp", "ZF", "return value"]
+
+[[term]]
+term = "jump instruction"
+aliases = ["jmp", "`jmp`", "unconditional jump", "jumps"]
+short = "An instruction that makes the CPU continue somewhere else. jmp always jumps; conditional jumps only when the flags say so."
+see = ["conditional jump", "label", "rip"]
+
+[[term]]
+term = "conditional jump"
+aliases = ["conditional jumps", "jcc"]
+short = "A jump that only happens if a condition on the status flags is true, like je (equal) or jl (less). Together with cmp it makes an if."
+text = '''
+| Jump | After `cmp a, b`, jumps if |
+|---|---|
+| `je` / `jz` | a == b |
+| `jne` / `jnz` | a != b |
+| `jl` / `jle` / `jg` / `jge` | a < b, <=, >, >= (signed) |
+| `jb` / `jbe` / `ja` / `jae` | a < b, <=, >, >= (unsigned) |
+
+Compiled `if` statements usually jump *over* the body, so the jump's condition is the opposite of the Rust condition.
+'''
+see = ["je", "jne", "signed jump", "unsigned jump", "inverted condition", "cmp"]
+
+[[term]]
+term = "je"
+aliases = ["jz", "`je`"]
+short = "Jump if equal (also written jz, jump if zero): jumps when ZF = 1."
+see = ["conditional jump", "ZF", "jne"]
+
+[[term]]
+term = "jne"
+aliases = ["jnz", "`jne`"]
+short = "Jump if not equal (also written jnz, jump if not zero): jumps when ZF = 0."
+see = ["conditional jump", "ZF", "je"]
+
+[[term]]
+term = "signed jump"
+aliases = ["signed jumps", "jl", "jle", "jg", "jge"]
+short = "A conditional jump for signed numbers (i32, i64 ...): jl less, jle less or equal, jg greater, jge greater or equal."
+text = '''
+After `mov rax, -1` and `cmp rax, 1`, `jl` jumps (-1 < 1), but the unsigned `jb` does not (as unsigned, `0xffffffffffffffff` is huge). Which kind of jump the compiler used tells you whether the variable was signed.
+'''
+see = ["unsigned jump", "conditional jump", "signed"]
+
+[[term]]
+term = "unsigned jump"
+aliases = ["unsigned jumps", "jb", "jbe", "ja", "jae"]
+short = "A conditional jump for unsigned numbers (u32, usize ...): jb below, jbe below or equal, ja above, jae above or equal."
+text = '''
+Memory aid: **b**elow and **a**bove are unsigned, **l**ess and **g**reater are signed. Lengths and indexes in Rust are `usize`, so bounds checks and `for i in 0..n` loops use `jb` and `jae`.
+'''
+see = ["signed jump", "conditional jump", "unsigned", "bounds check"]
+
+[[term]]
+term = "inverted condition"
+aliases = ["inverted conditions"]
+short = "Compiled if statements jump over their body, so the jump tests the opposite of the Rust condition: if x == 7 becomes cmp + jne."
+see = ["conditional jump"]
+
+[[term]]
+term = "label"
+aliases = ["labels"]
+short = "A name for a place in a program that jumps can go to, written as a name with a colon (done:). ORRESS names them loc_ plus the address."
+see = ["jump instruction", "generated name"]
+
+[[term]]
+term = "loop"
+aliases = ["loops"]
+short = "Code that runs repeatedly. In assembly: a label, a body, a comparison and a conditional jump back up to the label."
+text = '''
+```text
+again:
+    add rax, rcx
+    inc rcx
+    cmp rcx, 6
+    jne again      ; jump back: this makes it a loop
+```
+
+In the Graph view a loop is an arrow that points back up to an earlier block.
+'''
+see = ["loop counter", "back edge", "conditional jump", "infinite loop"]
+
+[[term]]
+term = "loop counter"
+aliases = ["loop counters"]
+short = "The variable that counts the rounds of a loop, often kept in rcx or ecx and changed with inc or dec."
+see = ["loop", "inc", "dec"]
+
+[[term]]
+term = "infinite loop"
+aliases = ["endless loop", "loop that never ends"]
+short = "A loop whose exit condition never becomes true, so it runs forever. The simulator stops it after 10 000 steps."
+see = ["loop"]
+
+# ---------------------------------------------------------------- memory
+
+[[term]]
+term = "memory operand"
+aliases = ["memory operands", "square brackets"]
+short = "An operand in square brackets: the value stored in memory at that address. [rsp+8] means \"the value at address rsp + 8\"."
+text = '''
+`mov rax, rbx` copies the register; `mov rax, [rbx]` reads memory at the address in `rbx`, like `*p` in Rust. Inside the brackets: a register, plus or minus a displacement, optionally plus a second register times 1, 2, 4 or 8: `[rcx+rdx*8]`. Only one operand of an instruction can be in memory.
+'''
+see = ["displacement", "byte ptr", "lea", "dereference"]
+
+[[term]]
+term = "displacement"
+aliases = ["displacements"]
+short = "The fixed number added to a register inside a memory operand: the 8 in [rsp+8] or the -0x10 in [rbp-0x10]."
+text = '''
+Often it is the offset of a local variable in the stack frame, or of a field inside a struct: `[rcx+0x10]` is "the field 16 bytes into the struct that rcx points to".
+'''
+see = ["memory operand", "offset"]
+
+[[term]]
+term = "byte ptr"
+aliases = ["word ptr", "dword ptr", "qword ptr"]
+short = "A size word in front of a memory operand: byte ptr = 1 byte, word ptr = 2, dword ptr = 4, qword ptr = 8."
+text = '''
+`cmp byte ptr [rax+1], 0x33` compares exactly one byte: the second character of a string. The size tells you the type: `byte` for `u8`/`bool`, `dword` for `u32`/`i32`, `qword` for `u64`, `usize` and pointers.
+'''
+see = ["memory operand", "dword", "qword"]
+
+[[term]]
+term = "movzx"
+aliases = ["`movzx`"]
+short = "Move with zero extension: load a small value (a byte or word) into a bigger register and fill the rest with zeros, like byte as u32."
+see = ["zero extension", "mov", "byte ptr"]
+
+[[term]]
+term = "lea"
+aliases = ["`lea`", "load effective address"]
+short = "Load effective address: computes the address in the brackets and stores the address itself, without reading memory. Rust's &x."
+text = '''
+```text
+mov rbx, [rsp+8]   ; rbx = the value at rsp+8      (let v = x;)
+lea rbx, [rsp+8]   ; rbx = the address rsp+8        (let p = &x;)
+```
+
+`lea rcx, [0x1400183d0]` loads the address of a string. Compilers also use `lea` as a fast calculator: `lea eax, [rcx+rcx*2]` is `rcx * 3`.
+'''
+see = ["memory operand", "pointer", "rip-relative addressing"]
+
+[[term]]
+term = "scaled index"
+aliases = ["scale factor", "scale"]
+short = "The register-times-number part of a memory operand, like rdx*8 in [rcx+rdx*8]. The number (1, 2, 4 or 8) is usually the size of an array element."
+see = ["memory operand", "byte ptr"]
+
+[[term]]
+term = "rip-relative addressing"
+aliases = ["rip-relative"]
+short = "Addressing data by its distance from the next instruction ([rip+0x172c4]), so code works wherever it is loaded. ORRESS shows the resolved address."
+see = ["rip", "lea", "ASLR"]
+
+# ---------------------------------------------------------------- the stack and functions
+
+[[term]]
+term = "push"
+aliases = ["`push`", "pushes", "pushed"]
+short = "Put a value on top of the stack: rsp goes down by 8, then the value is stored at [rsp]."
+text = '''
+`push rax` is the same as `sub rsp, 8` followed by `mov [rsp], rax`. Functions push the non-volatile registers they use in their prologue, and pop them in the epilogue.
+'''
+see = ["pop", "stack", "rsp"]
+
+[[term]]
+term = "pop"
+aliases = ["`pop`", "pops", "popped"]
+short = "Take the top value off the stack into a register: read [rsp], then rsp goes up by 8."
+text = '''
+The stack is last in, first out: after `push rax` and `push rbx`, the first `pop` returns the value of `rbx`. Every push must be matched by a pop, or the next `ret` takes the wrong value as its return address.
+'''
+see = ["push", "stack", "balanced stack"]
+
+[[term]]
+term = "stack frame"
+aliases = ["stack frames"]
+short = "The part of the stack that belongs to one running function: its saved registers, local variables and the return address."
+see = ["prologue", "epilogue", "rbp", "local variable"]
+
+[[term]]
+term = "prologue"
+aliases = ["prologues", "function prologue"]
+short = "The first instructions of a function, which set up its stack frame: push registers, sub rsp, N (and maybe push rbp; mov rbp, rsp)."
+see = ["epilogue", "stack frame"]
+
+[[term]]
+term = "epilogue"
+aliases = ["epilogues", "function epilogue"]
+short = "The last instructions of a function, which undo its prologue in reverse order: add rsp, N, pop registers, ret."
+see = ["prologue", "ret"]
+
+[[term]]
+term = "balanced stack"
+aliases = ["balanced"]
+short = "A stack where everything a function pushed or reserved has been removed again, so that ret finds the return address on top."
+see = ["push", "pop", "return address"]
+
+[[term]]
+term = "call instruction"
+aliases = ["`call`", "call instructions"]
+short = "call f pushes the return address (the address of the next instruction) and jumps to f."
+text = '''
+Before a `call`, look at which argument registers are set (on Windows `rcx`, `rdx`, `r8`, `r9`); after it, look at how `rax` (the return value) is used. A call to a function that never returns (a panic, `exit`) is followed by `ud2`.
+'''
+see = ["ret", "return address", "calling convention"]
+
+[[term]]
+term = "ret"
+aliases = ["`ret`", "return instruction"]
+short = "Return from a function: pop the return address from the stack and jump there."
+see = ["call instruction", "return address", "epilogue"]
+
+[[term]]
+term = "return address"
+aliases = ["return addresses"]
+short = "The address a function goes back to when it returns: the instruction after the call. call pushes it, ret pops it."
+text = '''
+A `call` at `0x140001122` that is 5 bytes long pushes `0x140001127`. In a debugger, the return addresses on the stack tell you which functions called the current one. The Academy's simulator pushes the position of the next line instead of a real address.
+'''
+see = ["call instruction", "ret", "call stack"]
+
+[[term]]
+term = "call stack"
+aliases = ["backtrace", "stack trace"]
+short = "The chain of return addresses on the stack: one for every function that is still running. A panic backtrace prints it."
+see = ["return address", "stack frame"]
+
+[[term]]
+term = "calling convention"
+aliases = ["calling conventions", "convention"]
+short = "The rules for calling functions: which registers carry the arguments and the result, and which registers a function must save."
+see = ["Windows x64 calling convention", "System V calling convention", "volatile register", "non-volatile register"]
+
+[[term]]
+term = "Windows x64 calling convention"
+aliases = ["Windows x64 convention", "Windows convention", "Microsoft x64 calling convention"]
+short = "On Windows: arguments in rcx, rdx, r8, r9, then on the stack; the result in rax; 32 bytes of shadow space for every call."
+text = '''
+```text
+mov rcx, a     ; 1st argument
+mov rdx, b     ; 2nd
+mov r8,  c     ; 3rd
+mov r9,  d     ; 4th
+call f         ; the result comes back in rax
+```
+
+Volatile: `rax`, `rcx`, `rdx`, `r8`-`r11`. Non-volatile: `rbx`, `rbp`, `rdi`, `rsi`, `rsp`, `r12`-`r15`. Every PE file for x86-64 uses it.
+'''
+see = ["System V calling convention", "shadow space", "volatile register", "PE"]
+
+[[term]]
+term = "System V calling convention"
+aliases = ["System V", "SysV"]
+short = "On Linux and macOS: arguments in rdi, rsi, rdx, rcx, r8, r9, then on the stack; the result in rax."
+text = '''
+Memory aid for the order: "**Di**d **Si**r **D**on **C**ook?" (`rdi`, `rsi`, `rdx`, `rcx`), then `r8` and `r9`. ELF and Mach-O programs use it; there is no shadow space.
+'''
+see = ["Windows x64 calling convention", "ELF"]
+
+[[term]]
+term = "argument"
+aliases = ["arguments", "parameter", "parameters"]
+short = "A value passed to a function. On x86-64 the first few arguments go in registers, as the calling convention says."
+see = ["calling convention", "return value"]
+
+[[term]]
+term = "return value"
+aliases = ["return values"]
+short = "The result a function gives back. On x86-64 it is in rax (or eax for a u32, al for a bool or u8)."
+see = ["rax", "calling convention", "test instruction"]
+
+[[term]]
+term = "shadow space"
+aliases = ["home space"]
+short = "On Windows, 32 bytes of stack space that the caller reserves before every call, for the called function to store its four argument registers."
+text = '''
+It explains the typical `sub rsp, 0x28` at the start of Windows functions: 0x20 bytes of shadow space for the functions it calls, plus 8 bytes so that `rsp` stays a multiple of 16. A fifth argument is stored just above it, at `[rsp+0x20]`, right before the call.
+'''
+see = ["Windows x64 calling convention", "stack alignment"]
+
+[[term]]
+term = "volatile register"
+aliases = ["volatile registers", "caller-saved", "caller-saved register"]
+short = "A register that any called function may change (on Windows rax, rcx, rdx, r8-r11). The caller must save it if it needs the value later."
+see = ["non-volatile register", "calling convention"]
+
+[[term]]
+term = "non-volatile register"
+aliases = ["non-volatile registers", "callee-saved", "callee-saved register"]
+short = "A register a function must give back unchanged (on Windows rbx, rbp, rdi, rsi, rsp, r12-r15). A function that uses one pushes it first."
+see = ["volatile register", "prologue", "push"]
+
+[[term]]
+term = "stack alignment"
+aliases = ["16-byte alignment", "aligned stack"]
+short = "The rule that rsp must be a multiple of 16 at every call. Functions reserve \"a multiple of 16, plus 8\" bytes because the return address adds 8."
+see = ["shadow space", "rsp"]
+
+# ---------------------------------------------------------------- Rust patterns
+
+[[term]]
+term = "slice"
+aliases = ["slices", "&[u8]", "&str"]
+short = "A view into a sequence of elements: a fat pointer made of the address of the first element and the number of elements."
+text = '''
+A `&[u8]` or `&str` is 16 bytes: an address and a length. Passed to a function on Windows it takes two registers: `rcx` = address, `rdx` = length. Stored in memory it is two 8-byte slots side by side. `s.len() != 7` becomes `cmp rdx, 7` + `jne`; `s[2]` becomes `byte ptr [rax+2]`.
+'''
+see = ["fat pointer", "bounds check", "rdx"]
+
+[[term]]
+term = "bounds check"
+aliases = ["bounds checks", "bounds checking", "index out of bounds"]
+short = "Rust's check that an index is smaller than the length before s[i] is accessed. Compiled as cmp + jb/jae to code that panics."
+text = '''
+```text
+cmp  rdx, 2          ; is the length at least 2?
+jb   panic_block     ; no: panic "index out of bounds"
+cmp  byte ptr [rax+1], 0x33   ; the real work: s[1]
+```
+
+The panic block calls a function with the index (`ecx`), the length (`rdx`) and the source location (`r8`), and ends in `ud2`. C programs have no such checks, so they are a sign of Rust. When reading for logic, skip them.
+'''
+see = ["panic", "ud2", "unsigned jump"]
+
+[[term]]
+term = "panic"
+aliases = ["panics", "panic!", "panicked"]
+short = "Rust stopping the program because of a bug or failed check (unwrap on None, index out of bounds ...). Panic code never returns."
+see = ["bounds check", "ud2"]
+
+[[term]]
+term = "ud2"
+aliases = ["`ud2`"]
+short = "An instruction that crashes on purpose. Compilers place it after calls that never return (panics, exit), so a block ending in ud2 is a dead end."
+see = ["panic", "call instruction"]
+
+[[term]]
+term = "memcmp"
+short = "A C runtime function that compares two blocks of memory: memcmp(a, b, n) returns 0 if the n bytes are equal. Rust's == on strings often calls it."
+text = '''
+A Rust string comparison compiles to: compare the lengths, then `call memcmp` with `rcx` = first address, `rdx` = second address, `r8` = length, then `test eax, eax` (0 means equal). Because it is imported from a library, it keeps its name in stripped programs.
+'''
+see = ["import", "slice", "test instruction"]
+
+[[term]]
+term = "cmove"
+aliases = ["cmovne", "cmovcc", "conditional move"]
+short = "Conditional move: a mov that only happens if a flag condition is true (cmove: if ZF = 1). A small if without a jump."
+see = ["mov", "conditional jump", "setcc"]
+
+[[term]]
+term = "setcc"
+aliases = ["sete", "setne"]
+short = "Set a byte register to 1 if a flag condition is true, else to 0: sete al makes al = (a == b) after a cmp. Often how a bool result is made."
+see = ["cmove", "return value"]
+
+[[term]]
+term = "nop"
+aliases = ["`nop`", "no operation"]
+short = "An instruction that does nothing. Compilers use it as padding; reverse engineers overwrite unwanted instructions with it when patching."
+see = ["instruction"]
+
+[[term]]
+term = "black_box"
+aliases = ["std::hint::black_box"]
+short = "A Rust function that hides a value from the optimiser, so the compiler cannot precompute or merge code that uses it. The crackmes use it to keep checks readable."
+see = ["optimization"]
+
+[[term]]
+term = "byte literal"
+aliases = ["byte literals", "byte string"]
+short = "Rust's way of writing a byte as a character: b'R' is the u8 value 0x52. A byte string b\"abc\" is a &[u8; 3]."
+see = ["ASCII", "immediate value"]
+
+# ---------------------------------------------------------------- ORRESS views used in Level 1
+
+[[term]]
+term = "Strings view"
+aliases = ["Strings tab"]
+short = "ORRESS's list of all readable text in a file, with a filter box and a Refs column that jumps to the code using each string."
+text = '''
+Open it from the Project panel or with Ctrl+Shift+S. Type in the filter box to narrow the list (case-insensitive). Click the number with `»` in the **Refs** column to jump to the first instruction that uses the string. Rust stores its string literals back to back, so one row can hold several literals glued together.
+'''
+see = ["string literal", "Find bar", "Disassembly view"]
+
+[[term]]
+term = "Find bar"
+short = "The search bar of the Disassembly view (Ctrl+F): finds text in instructions, names and comments. Next (F3) and Previous (Shift+F3) move between matches."
+see = ["Disassembly view"]

@@ -1,0 +1,389 @@
+id = "l1-stack"
+level = 1
+order = 7
+title = "The stack"
+summary = "push, pop and rsp, saving registers, local variables and stack frames."
+goals = [
+    "explain how `push` and `pop` change `rsp` and memory",
+    "use the stack to save and restore a register",
+    "reserve room for local variables with `sub rsp` and give it back",
+    "recognise a function's prologue and epilogue and its stack frame",
+]
+
+[[steps]]
+title = "What the stack is"
+goal = "Picture the stack and the stack pointer `rsp`."
+text = '''
+In Level 0 you heard that a program has two kinds of memory for its variables: the **stack** and the **heap**. Now you will see the stack at work, one instruction at a time.
+
+The stack is a region of memory that a program uses like a stack of plates: you put things on top, and you take them off the top again. The **last** thing you put on is the **first** you take off ("last in, first out").
+
+The register **`rsp`** (the **stack pointer**) always holds the address of the top of the stack. Two strange-looking facts:
+
+1. **The stack grows downward.** Putting something on the stack makes `rsp` *smaller*. The "top" is the lowest address in use.
+2. **Every value is 8 bytes** (on x86-64 the stack works in 8-byte steps).
+
+In Rust terms, it behaves like a `Vec<u64>` with `push` and `pop`:
+
+```rust
+let mut stack: Vec<u64> = Vec::new();
+stack.push(rax);              // push rax
+let rbx = stack.pop().unwrap(); // pop rbx
+```
+
+Look at the **Stack** pane in the simulator. Each line is one 8-byte slot: its address, then its value. The line marked `rsp >` is where `rsp` points. At the start there is one value: `0xdead0000 (end of program)` at address `7ffffff8`. That is a "return address" that the simulator puts there to know when your program has finished; Lesson 8 explains it. Higher addresses are further down in the pane, lower addresses (newer values) appear above.
+
+Every function in a program uses the stack: for its local variables, to save registers, and to remember where to go back to when it is done.
+'''
+spotlight = "sim.stack"
+
+[[steps]]
+title = "push"
+goal = "Know exactly what `push` does."
+text = '''
+`push` puts a value on top of the stack. It does two things:
+
+1. `rsp = rsp - 8` (make room: the stack grows down)
+2. store the value at the new address in `rsp`
+
+So `push rax` is the same as these two instructions:
+
+```text
+sub rsp, 8
+mov [rsp], rax
+```
+
+The value can be a register or a number: `push 5` works too.
+
+The simulator loaded a program with three pushes:
+
+```text
+mov rax, 1
+push rax
+push 2
+push 3
+```
+
+`rsp` starts at `0x7ffffff8`. Each push subtracts 8. Work out what `rsp` will be after the three pushes (hint: 8 in hex is `0x8`, and three times 8 is 24, which is `0x18`). Then step through the program and watch two things after each push: `rsp` in the **Registers** pane turns yellow and gets smaller, and a new line appears at the top of the **Stack** pane.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** four times. After each `push`, look at `rsp` and at the top of the **Stack** pane.",
+    "Type the final value of `rsp` (in hex, starting with `0x`) in the answer box and press **Check**.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+mov rax, 1
+push rax
+push 2
+push 3
+'''
+check = { kind = "answer", answers = ["0x7fffffe0"], number = true }
+hints = [
+    "Three pushes of 8 bytes each: rsp goes down by 24 = 0x18.",
+    "0x7ffffff8 - 0x18 = ?",
+    "0x7ffffff8 - 0x18 = 0x7fffffe0.",
+]
+success = '''
+`rsp` is `0x7fffffe0`: 24 bytes lower than at the start. The value pushed last (3) is at the top, at `0x7fffffe0`; the first one (1) is at `0x7ffffff0`, just above the end-of-program value.
+'''
+
+[[steps]]
+title = "pop, and swapping with the stack"
+goal = "Use `pop` and see last-in, first-out at work."
+text = '''
+`pop` is the opposite of `push`. `pop rbx`:
+
+1. reads the value at the address in `rsp` into `rbx`
+2. `rsp = rsp + 8` (the slot is free again)
+
+```text
+mov rbx, [rsp]
+add rsp, 8
+```
+
+The value stays in memory after a pop (the CPU does not erase it), but it is no longer part of the stack and the next push will overwrite it.
+
+Because the last value pushed is the first popped, you can **swap** two registers with the stack, without a third register:
+
+```text
+push rax      ; stack: rax's value on top
+push rbx      ; stack: rbx's value on top, rax's below it
+pop rax       ; rax gets what was on top: rbx's old value
+pop rbx       ; rbx gets the next one: rax's old value
+```
+
+**Exercise.** The simulator sets `rax` to 1 and `rbx` to 2. Using only `push` and `pop`, swap them, so that `rax` ends as **2** and `rbx` as **1**. Watch the **Stack** pane while you step through it: the values go on, and come off in the opposite order.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Below the two `mov` lines, add `push rax` and `push rbx`.",
+    "Then add two `pop` lines, so that the top value goes into `rax` first.",
+    "Press **Run**. `rax` must be 2 and `rbx` must be 1.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+mov rax, 1
+mov rbx, 2
+; swap rax and rbx using only push and pop
+'''
+check = { kind = "sim", expect = [["rax", 2], ["rbx", 1]], requires = ["push", "pop"] }
+hints = [
+    "Push both values, then pop them back in the other order.",
+    "After `push rax` and `push rbx`, the top of the stack holds 2.",
+    "The four lines are `push rax`, `push rbx`, `pop rax`, `pop rbx`.",
+]
+solution = '''
+mov rax, 1
+mov rbx, 2
+push rax
+push rbx
+pop rax
+pop rbx
+'''
+
+[[steps]]
+title = "Saving a register"
+goal = "Use push and pop to keep a register's value safe."
+text = '''
+The most common use of `push` and `pop` in compiled code is to **save a register** that a piece of code needs to borrow, and to restore it afterwards.
+
+Functions do this at their start and end. Remember the first and last instructions of crackme #1's `main`:
+
+```text
+push rsi          ; save the caller's rsi
+sub  rsp, 0x60
+...               ; main uses rsi for its own purposes
+add  rsp, 0x60
+pop  rsi          ; give the caller its rsi back
+ret
+```
+
+`main` wants to use `rsi`, but whoever called `main` may have something important in it. So `main` pushes it first and pops it back at the end. Lesson 9 explains which registers must be saved like this.
+
+**Exercise.** In the simulator, `rbx` holds 5, a value we want to keep. The code in the middle borrows `rbx` for a calculation. Add a `push` and a `pop` so that `rbx` is **5** again at the end, while `rax` still gets the result of the calculation (**101**).
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Replace the comment `; save rbx here` with `push rbx`.",
+    "Replace the comment `; restore rbx here` with `pop rbx`.",
+    "Press **Run**. `rbx` must be 5 and `rax` must be 101.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rbx, 5        ; a value we want to keep
+; save rbx here
+mov rbx, 100      ; borrow rbx for a calculation
+mov rax, rbx
+add rax, 1        ; the result: 101
+; restore rbx here
+'''
+check = { kind = "sim", expect = [["rax", 101], ["rbx", 5]], requires = ["push", "pop"] }
+hints = [
+    "Save before the register is changed, restore after the calculation.",
+    "`push rbx` goes on the second line, `pop rbx` on the last.",
+]
+solution = '''
+mov rbx, 5
+push rbx
+mov rbx, 100
+mov rax, rbx
+add rax, 1
+pop rbx
+'''
+
+[[steps]]
+title = "Every push needs a pop"
+goal = "Understand why the stack must be balanced."
+text = '''
+The stack must be **balanced**: a function must take off exactly as much as it put on, in the reverse order. If it does not, the next value read from the stack is the wrong one.
+
+Why does that matter so much? Because the stack also holds the **return address**: the place a function goes back to when it ends (Lesson 8). When a function finishes, its `ret` instruction takes the top value from the stack and jumps there. If a push was not undone, `ret` takes that pushed value instead and jumps to a place that is not code at all. On a real computer the program usually crashes.
+
+The simulator checks this for you. If `ret` finds something on the stack that is not a return address, it stops with: *ret jumped to 0x..., which is not a return address. Did a push/pop pair not match?*
+
+Look at this program:
+
+```text
+mov rax, 7
+push rax
+push rax
+pop rbx
+ret
+```
+
+What happens at the `ret`?
+'''
+check = { kind = "choice", options = [
+    "The program ends normally",
+    "ret takes the 7 that was pushed and tries to jump there",
+    "ret pops both 7s",
+    "pop rbx fails because the stack is empty",
+], correct = 1, explain = [
+    "There is still one 7 on top of the stack, above the end-of-program value. ret takes the top value.",
+    "Two pushes, one pop: one 7 is still on top. ret uses it as an address and jumps to the wrong place.",
+    "ret takes exactly one value off the stack, like pop.",
+    "Two values were pushed, so the first pop works fine.",
+] }
+hints = [
+    "Count: how many pushes, how many pops? What is on top when ret runs?",
+]
+success = '''
+Unbalanced stacks are a classic bug. In Level 3 and later you will also meet programs that change the stack on purpose, to confuse disassemblers or to take control of a vulnerable program.
+'''
+
+[[steps]]
+title = "Room for local variables"
+goal = "Reserve stack space with `sub rsp` and give it back with `add rsp`."
+text = '''
+A function's local variables that do not fit in registers live on the stack. A function does not push them one by one; it reserves all the room it needs at once by moving `rsp` down, and finds each variable at a fixed offset from `rsp`:
+
+```rust
+fn f() -> u64 {
+    let a: u64 = 30;
+    let b: u64 = 12;
+    a + b
+}
+```
+
+```text
+sub rsp, 16              ; reserve 16 bytes: room for a and b
+mov qword ptr [rsp], 30      ; a = 30   (a lives at rsp+0)
+mov qword ptr [rsp+8], 12    ; b = 12   (b lives at rsp+8)
+mov rax, [rsp]
+add rax, [rsp+8]         ; rax = a + b
+add rsp, 16              ; give the 16 bytes back
+```
+
+`sub rsp, 16` does not "subtract from a variable called rsp" in any Rust sense: it moves the top of the stack 16 bytes down, which **reserves** those 16 bytes for this function. `add rsp, 16` at the end moves it back, so the stack is balanced again.
+
+In real disassembly you will see `[rsp+0x20]`, `[rsp+0x28]`, `[rsp+0x30]` everywhere: those are local variables. ORRESS's decompiler (Level 2) names them `local_20` and so on, after their offset.
+
+**Exercise.** Type the six instructions above (without the comments if you like). At the end, `rax` must be **42**, and `rsp` must be back at its starting value `0x7ffffff8`, because you gave the space back.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Below the `sub rsp, 16` line, store 30 at `[rsp]` and 12 at `[rsp+8]` with `mov qword ptr`.",
+    "Load the first local into `rax` and add the second one.",
+    "Finish with `add rsp, 16`. Press **Run**. `rax` must be 42 and `rsp` must be `0x7ffffff8`.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+sub rsp, 16          ; reserve room for two local variables
+; a = 30 at [rsp], b = 12 at [rsp+8]
+; rax = a + b
+; give the 16 bytes back
+'''
+check = { kind = "sim", expect = [["rax", 42], ["rsp", 2147483640]], requires = ["sub", "add"] }
+hints = [
+    "Stores: `mov qword ptr [rsp], 30` and `mov qword ptr [rsp+8], 12`.",
+    "Calculation: `mov rax, [rsp]` and `add rax, [rsp+8]`.",
+    "If rsp is 0x7fffffe8 at the end, the last line `add rsp, 16` is missing.",
+]
+solution = '''
+sub rsp, 16
+mov qword ptr [rsp], 30
+mov qword ptr [rsp+8], 12
+mov rax, [rsp]
+add rax, [rsp+8]
+add rsp, 16
+'''
+
+[[steps]]
+title = "Stack frames: prologue and epilogue"
+goal = "Recognise the classic `rbp` stack frame and write its epilogue."
+text = '''
+The part of the stack that belongs to one running function is its **stack frame**: its saved registers and local variables. Many functions build their frame with a fixed pattern of instructions at the start, the **prologue**, and take it down with another fixed pattern at the end, the **epilogue**:
+
+```text
+push rbp          ; prologue: save the caller's rbp
+mov  rbp, rsp     ;           rbp = the top of the stack, as a fixed reference point
+sub  rsp, 16      ;           reserve 16 bytes for local variables
+...               ; body: locals are at [rbp-8], [rbp-16], ...
+mov  rsp, rbp     ; epilogue: free the locals in one go
+pop  rbp          ;           restore the caller's rbp
+ret               ;           return (Lesson 8)
+```
+
+`rbp` (the **base pointer**) stays fixed while the function runs, even when `rsp` moves because of pushes. That is why locals are often written as `[rbp-8]`: "8 bytes below the base of this frame".
+
+Optimised Rust on Windows usually skips `rbp` and uses only `rsp`, like crackme #1's `main` (`push rsi`, `sub rsp, 0x60`). Both styles are common, and both mean the same thing: "set up a frame". Recognising them helps you see **where a function starts and ends**.
+
+**Exercise.** The simulator loaded a function with a prologue and a body that multiplies two locals. Write the **epilogue** (three lines). At the end, `rax` must be **42**, `rbp` must be back at **0** (its value before the prologue), and the program must end with *Done!*, which proves the stack was balanced when `ret` ran.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Step** a few times to watch the prologue: `rbp` and `rsp` change, and the Stack pane grows.",
+    "Press **Reset**. At the end of the program, add `mov rsp, rbp`, `pop rbp` and `ret`.",
+    "Press **Run**. The status line must say *The program returned from its last function. Done!*, `rax` must be 42 and `rbp` 0.",
+]
+spotlight = "sim.code"
+sim_code = '''
+push rbp                     ; prologue
+mov rbp, rsp
+sub rsp, 16
+mov qword ptr [rbp-8], 6     ; let a = 6;
+mov qword ptr [rbp-16], 7    ; let b = 7;
+mov rax, [rbp-8]
+imul rax, [rbp-16]           ; rax = a * b
+; epilogue: free the locals, restore rbp, return
+'''
+check = { kind = "sim", expect = [["rax", 42], ["rbp", 0], ["rsp", 2147483648]], requires = ["pop", "ret"] }
+hints = [
+    "The epilogue undoes the prologue in reverse order.",
+    "First `mov rsp, rbp` frees the locals, then `pop rbp` restores rbp.",
+    "The last line is `ret`.",
+]
+solution = '''
+push rbp
+mov rbp, rsp
+sub rsp, 16
+mov qword ptr [rbp-8], 6
+mov qword ptr [rbp-16], 7
+mov rax, [rbp-8]
+imul rax, [rbp-16]
+mov rsp, rbp
+pop rbp
+ret
+'''
+success = '''
+A complete stack frame, built and taken down. Because the stack was balanced, `ret` found the end-of-program value and the program finished cleanly. Without `mov rsp, rbp`, `pop rbp` would have taken the local `b` instead of the saved `rbp`.
+'''
+
+[[steps]]
+title = "A real stack frame"
+goal = "Read the frame of a real function."
+text = '''
+Here are the first two and last three instructions of crackme #1's `main`, exactly as ORRESS shows them:
+
+```text
+140001100  push rsi
+140001101  sub  rsp, 0x60
+...
+14000127c  add  rsp, 0x60
+140001280  pop  rsi
+140001281  ret
+```
+
+Read it with what you know:
+
+- `push rsi` saves the register `rsi`, because `main` uses it.
+- `sub rsp, 0x60` reserves room for local variables. Inside `main` you will see them as `[rsp+0x20]`, `[rsp+0x28]` up to `[rsp+0x58]`.
+- `add rsp, 0x60` gives the room back, `pop rsi` restores `rsi`, `ret` returns.
+
+The prologue and epilogue match exactly, in reverse order. That is your proof that the stack is balanced.
+
+How many bytes does `main` reserve for its local variables? Give the answer in decimal or hex.
+'''
+instructions = [
+    "Find the `sub rsp, ...` instruction in the prologue above.",
+    "Type its number in the answer box (`0x60` or its decimal value) and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x60"], number = true }
+hints = [
+    "The number in `sub rsp, 0x60` is the size of the reserved room.",
+    "0x60 = 6 * 16 = 96.",
+]
+success = '''
+0x60 = 96 bytes. You now understand the stack: push, pop, saving registers, local variables and frames. The stack has one more job, the most important one: remembering where to return to. That is the next lesson.
+'''

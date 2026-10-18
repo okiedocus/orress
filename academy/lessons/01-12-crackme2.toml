@@ -2,79 +2,310 @@ id = "l1-crackme2"
 level = 1
 order = 12
 title = "Byte by byte"
-summary = "A password that never appears as text: read it from the comparisons."
+summary = "A password that never appears as text: read it from the comparisons, one character at a time."
+goals = [
+    "find `main` with Go to main and find the call that decides the result",
+    "rename a function and leave comments, so your findings are saved",
+    "read character comparisons and turn their numbers into text",
+    "crack a program whose password is not in its strings",
+]
 badge = "Byte by Byte"
 reveal_source = "crackme02"
 
 [[steps]]
 title = "Meet crackme #2"
+goal = "Open the second practice program."
 text = '''
-Crackme #2 also asks for a password, but this time the Strings view will not help. Open it.
+Crackme #2 looks the same from the outside: it asks for a password and says *Correct!* or *Wrong password. Try again!*. But this time the programmer was more careful. The password is never stored as text, so the Strings view cannot show it.
+
+How can a program check a password it does not store? By comparing each character of your input with a **number**: the character's code (Level 0: `'A'` is 65, `'a'` is 97). The Rust code could be:
+
+```rust
+fn check_password(s: &[u8]) -> bool {
+    s.len() == 3 && s[0] == b'a' && s[1] == b'b' && s[2] == b'c'
+}
+```
+
+`b'a'` is a byte literal: the number 97. In the compiled program, these numbers end up inside `cmp` instructions, as immediate values, not as text in the data. So you have to read the code. Everything you learned in this level comes together here.
+
+Press the button below to open it.
 '''
+instructions = [
+    "Press the **Open crackme02** button below.",
+    "Wait until `crackme02.exe` appears in the **Project** panel on the left.",
+]
 check = { kind = "open_crackme", name = "crackme02" }
 
 [[steps]]
 title = "No password in the strings"
+goal = "Check that the Strings view really does not help this time."
 text = '''
-Open the **Strings** view and look: you will find *Correct!* and *Wrong password*, but nothing that looks like a password. The program must check the password another way. Time to read code.
+Always check the easy way first: maybe the programmer forgot to hide something. Open the **Strings** view of `crackme02.exe` and filter for `password`.
+
+You will find one row with the glued literals `Password: Wrong password. Try again!`, and another with *Correct! You read the password byte by byte.* Compare with crackme #1: there, the password sat between `Password: ` and `Wrong password`. Here nothing is between them.
+
+Try a few more filters if you like: `pass`, `key`, `secret`. Nothing that looks like a password.
+
+So the password is not stored as text. Time to read the code. The plan:
+
+1. go to `main`;
+2. find the decision between *Correct!* and *Wrong*;
+3. follow the call that makes that decision;
+4. read the checks inside it.
+
+Make sure you open the Strings view of the right file: the **Project** panel now lists both `crackme01.exe` and `crackme02.exe`, each with its own views.
 '''
+instructions = [
+    "In the **Project** panel on the left, under `crackme02.exe`, click **Strings**.",
+    "Type `password` in the filter box and read the rows that are left.",
+]
+spotlight = "tree.Strings"
 check = { kind = "view", view = "Strings" }
+success = '''
+No password in sight. Some programs hide their secrets better than others, and that is when reading code becomes necessary.
+'''
 
 [[steps]]
 title = "Go to main"
+goal = "Jump to the program's own main function."
 text = '''
-Press **Ctrl+Shift+M** to jump to `main`. Scroll through it and find the shape you learned: read a line, remove the line ending (the compares with `0xa` and `0xd` are `'\n'` and `'\r'`), then **call a function**, `test al, al`, and `je` to *Wrong password*.
+In Lesson 8 you learned that a program does not start in `main`: Windows starts it at its entry point, which runs start-up code first. ORRESS recognises `main` for you, and **Go to main** takes you there in one move.
+
+There are three ways to do it. Use whichever you like:
+
+- press **Ctrl+Shift+M**;
+- in the menu bar, click **Go**, then **Go to main**;
+- in the **Info** view, click the **Go to main** button at the top.
+
+The Disassembly view opens with the cursor on the first instruction of `main`. You will recognise its start from crackme #1: `push rsi`, `sub rsp, 0x60`, then a `lea rcx` with the comment `"=== ORRESS Academy - Crackme #2 ==="` and a call to the print function.
+
+Make sure `crackme02.exe` is the file you are working on: click one of its tabs (or one of its views in the Project panel) first. Go to main works on the active file.
 '''
+instructions = [
+    "Click the **Strings** tab of `crackme02.exe` so that it is the active file.",
+    "Press **Ctrl+Shift+M** (or click **Go** > **Go to main** in the menu bar).",
+    "Check that the toolbar of the Disassembly view says `main`, and that the first lines are `push rsi` and `sub rsp, 0x60`.",
+]
 check = { kind = "cursor_in_main" }
-hints = ["Ctrl+Shift+M, or open the palette and type main."]
-
-[[steps]]
-title = "Follow and name the check"
-text = '''
-That called function returns a `bool`: it is the password check. Click its name (`sub_...`) in the `call` instruction to jump into it. Then press **N** and rename it to `check_password`.
-
-Naming functions as you understand them is the most important habit in reverse engineering: the names show up everywhere, and they are saved with your work.
-'''
-check = { kind = "renamed" }
 hints = [
-    "The call is just before test al, al near the end of main.",
-    "Click the function name in the call, then press N while the disassembly has focus.",
+    "Ctrl+Shift+M jumps to main of the active file.",
+    "If nothing happens, first click a tab of crackme02.exe, then press Ctrl+Shift+M again.",
 ]
 
 [[steps]]
-title = "Read the comparisons"
+title = "Find the decision"
+goal = "Find the call whose result decides Correct or Wrong."
 text = '''
-Inside `check_password` you see the pattern from the calling-conventions lesson: `cmp rdx, 7` checks the length. Then, one after another:
+Now scroll down through `main`. Much of it you have seen in crackme #1 and in Lesson 10: printing the prompt, `String::new()` (three `mov qword ptr` lines), `read_line`, and then the two `strip_suffix` calls, which compare the last byte with `0xa` (`'\n'`) and `0xd` (`'\r'`).
+
+Right after that comes the part that matters. In crackme #1 the comparison was written directly in `main`. Here `main` calls a function instead, and then uses its `bool` result. You know this pattern from Lesson 9:
 
 ```text
-cmp byte ptr [rax], 0x52      ; first character
-cmp byte ptr [rax+1], 0x33    ; second character
-...
+call sub_????????     ; the password check: returns a bool in al
+test al, al           ; false?
+je   loc_140001487    ; then: "Wrong password. Try again!"
 ```
 
-Between them are `cmp rdx, 2` / `jb ...`: Rust's bounds checks, which you can skip. **Hover over each number** (0x52, 0x33, …): ORRESS shows which character it is. Write the characters down in order.
+The Find bar gets you there quickly: search for `test al`.
+
+Remember that the `sub_` name is made of the function's address. That address is what you need now. Which function does `main` call right before `test al, al`? Type its address.
 '''
+instructions = [
+    "Click into the Disassembly view and press **Ctrl+F**. Type `test al` and press Enter.",
+    "Press **Next** until the cursor is on a `test al, al` line that is followed by `je loc_140001487`.",
+    "Look at the `call` line just above it. Type the address of the called function (the hex number after `sub_`, with `0x` in front) and press **Check**.",
+]
 spotlight = "view.Disassembly"
-hints = ["The offsets [rax], [rax+1], [rax+2] … give the order."]
+check = { kind = "answer", answers = ["0x140001100", "140001100", "sub_140001100"] }
+hints = [
+    "The call you want is the one directly above `test al, al`, near the end of main.",
+    "Click `loc_140001487` to check that it prints the Wrong password message, then press Esc to come back.",
+    "The call is `call sub_140001100`, so the address is 0x140001100.",
+]
+success = '''
+`main` calls `sub_140001100` and decides on its result. That function is the password check.
+'''
+
+[[steps]]
+title = "Give it a name"
+goal = "Rename the function so your discovery is saved."
+text = '''
+You know what `sub_140001100` does, so give it a real name. Renaming is the most important habit in reverse engineering: the name then appears everywhere the function is used (in every `call`, in the Functions view, in the decompiler), and ORRESS saves it with your work. Over time, the unnamed program turns into a readable one.
+
+In the Disassembly view, the key **N** renames. On a line with a `call`, it renames the function that is called, so you do not have to go inside first.
+
+A good name says what the function does. Rust's naming style (snake_case) works well: `check_password`. If you give a name that is already used, ORRESS tells you.
+
+The toolbar of the Disassembly view lists the most useful keys: *N rename · ; comment · X xrefs · Space graph · Ctrl+F find · Esc back*.
+'''
+instructions = [
+    "In the Disassembly view, click the line `call sub_140001100` (just above `test al, al`).",
+    "Press **N**. A window *Rename 0x140001100* opens.",
+    "Type `check_password` and press Enter (or click **OK**).",
+    "Check that the line now reads `call check_password`.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "renamed" }
+hints = [
+    "Click the call line first, so the cursor is on it, then press N.",
+    "If N does nothing, click the line again: the Disassembly view must have keyboard focus.",
+]
+success = '''
+The call now reads `call check_password`. Every place in the program that calls it shows the new name too.
+'''
+
+[[steps]]
+title = "Inside check_password"
+goal = "Follow the call and get an overview of the check."
+text = '''
+Now go inside: **click the name** `check_password` in the `call` line. ORRESS jumps to the first instruction of the function. (**Esc** brings you back to where you were, like a browser's Back button.)
+
+You will recognise its beginning from Lesson 10:
+
+```text
+sub  rsp, 0x38            ; prologue: room for locals and shadow space
+cmp  rdx, 7               ; s.len() == 7 ?
+jne  loc_14000125b        ; no: return false
+```
+
+`rcx` holds the address of your input, `rdx` its length: the two halves of the slice `&[u8]`. Then the function checks the characters one by one. Each check has the same shape:
+
+```text
+mov  [rsp+0x28], rcx            ; (black_box: store the slice ...)
+mov  qword ptr [rsp+0x30], 7    ; (... and its length)
+...                             ; (a bounds check: cmp rdx, N / jb -> panic)
+mov  rax, [rsp+0x28]            ; rax = address of the input
+cmp  byte ptr [rax+1], 0x33     ; s[1] == 0x33 ?
+jne  loc_14000125b              ; no: return false
+```
+
+Scroll through the function. Count the instructions that compare one byte of the input with a number: the lines with `cmp byte ptr [rax...]`. How many are there?
+'''
+instructions = [
+    "In the Disassembly view, click the name `check_password` in the line `call check_password`.",
+    "Scroll down through the function until you reach the `ret` lines and the blocks that end in `ud2`.",
+    "Count the lines that start with `cmp byte ptr [rax`. Type the number and press **Check**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["7"], number = true }
+hints = [
+    "Use Ctrl+F with `byte ptr [rax` and press Next repeatedly, counting the matches in this function.",
+    "There is one comparison per character, and the length check said how many characters there are.",
+    "Seven: one for each character of a 7-character password.",
+]
+success = '''
+Seven comparisons for seven characters: one for `[rax]`, then `[rax+1]` up to `[rax+6]`. The last one is followed by `sete al` (set `al` to 1 if equal) instead of a jump: its result is the function's return value.
+'''
+
+[[steps]]
+title = "Read the characters"
+goal = "Turn the seven numbers into characters."
+text = '''
+Now write the seven comparisons down in order, by the offset in the brackets:
+
+| offset | compared with | character |
+|---|---|---|
+| `[rax]` | `0x52` | ? |
+| `[rax+1]` | `0x33` | ? |
+| `[rax+2]` | ... | ? |
+| ... | ... | ... |
+| `[rax+6]` | ... | ? |
+
+Skip the lines in between: the `mov [rsp+0x28], rcx` and `mov qword ptr [rsp+0x30], 7` lines are `black_box` storing the slice, and every `cmp rdx, N` followed by `jb` is a bounds check (Lesson 10). Only the `cmp byte ptr` lines matter.
+
+To turn a number into a character, you have two tools:
+
+- **Hover** over the number in the Disassembly view. ORRESS shows it in hex and decimal, and *as a character*, for example `as a character: 'R'`.
+- The **ASCII table** below: find the hex code, read the character next to it.
+
+Remember from Level 0 that digits are characters too: `'0'` is `0x30`, `'1'` is `0x31`, and so on. A password can mix letters and digits.
+
+When you have the whole table, read the characters from top to bottom: that is the password. Continue to the next step to enter it.
+'''
+instructions = [
+    "In the Disassembly view, find each `cmp byte ptr [rax...], 0x..` line of `check_password`.",
+    "Hover over the number on each of those lines and write down the character ORRESS shows.",
+    "Put the seven characters in the order of the offsets, from `[rax]` to `[rax+6]`.",
+]
+spotlight = "view.Disassembly"
+widget = "ascii_table"
+hints = [
+    "The offsets [rax], [rax+1], [rax+2] ... give the order.",
+    "0x52 is 'R' and 0x33 is '3'.",
+]
 
 [[steps]]
 title = "Enter the password"
+goal = "Prove that you read the check correctly."
 text = '''
-Put the seven characters together and type the password.
+Put the seven characters together and type the password below.
+
+Check yourself before you press **Check**:
+
+- it has exactly 7 characters (the length check said so);
+- the first character is the one compared at `[rax]`, the last the one at `[rax+6]`;
+- upper and lower case matter: `0x52` is `'R'`, while `'r'` is `0x72`. Both appear in this password.
+
+If it is not accepted, go back to the table and look at each number again. A common mistake is reading a digit as a letter: `0x33` is the digit `'3'`, not the letter `'e'` (which is `0x65`).
+
+You could also test your answer without the lesson: run `crackme02.exe` from a terminal, the way the last step of the previous lesson described, and type the password. If it prints *Correct! You read the password byte by byte.*, you got it.
 '''
+instructions = [
+    "Type the seven characters in the answer box, in order, without spaces.",
+    "Press **Check**.",
+]
+widget = "ascii_table"
 check = { kind = "secret", sha256 = "2bfa401089ad1adbbf882bbd49236b2043d5e6f0f1c9a4d7bea8f7bef5f7f3ea" }
 hints = [
     "0x52 is 'R', 0x33 is '3', 0x76 is 'v'.",
-    "It looks like the word 'Reverse', written with 3 instead of e.",
-    "R3v3rs…",
+    "It looks like the word 'Reverse', with the e's written as 3.",
+    "R3v3rs...",
 ]
+success = '''
+That is the password. You read it directly out of the machine code, character by character, even though it was never stored as text. That is real reverse engineering.
+'''
 
 [[steps]]
 title = "Leave a note"
+goal = "Add a comment to the disassembly."
 text = '''
-Good reversers leave notes for their future selves. Click the first `cmp byte ptr [rax], 0x52` line, press **;** and write a comment such as `first char must be 'R'`.
+Good reverse engineers leave notes for their future selves. A program you understood today looks unfamiliar again next month; your notes bring the understanding back. ORRESS saves comments with your work, like names.
+
+In the Disassembly view, the key **;** (semicolon) adds a comment to the line the cursor is on. Your comment then appears at the end of that line, in the place where ORRESS normally shows its own notes, like the text of strings.
+
+Write down what you found: on the first character check, a comment such as `first char must be 'R'`. Or, on the `cmp rdx, 7` line, `password length must be 7`.
+
+From now on, make it a habit: whenever you understand a line that was not obvious, rename what you can (**N**) and comment the rest (**;**).
 '''
+instructions = [
+    "In the Disassembly view, click the line `cmp byte ptr [rax], 0x52` in `check_password`.",
+    "Press **;** (the semicolon key). A window *Comment at 0x...* opens.",
+    "Type a note, for example `first char must be 'R'`, and press Enter (or click **OK**).",
+]
+spotlight = "view.Disassembly"
 check = { kind = "commented" }
+hints = [
+    "Click the line first so the Disassembly view has keyboard focus, then press ;",
+]
+
+[[steps]]
+title = "Level 1 complete"
+goal = "Look back at what you can do now."
+text = '''
+You started this level not knowing what a register is. Now you can:
+
+- read x86-64 instructions in Intel syntax and predict what they do;
+- calculate with arithmetic and bit instructions, and recognise XOR;
+- follow flags, comparisons, jumps and loops, and turn them into `if` and `while`;
+- read memory operands, `lea`, the stack, stack frames and function calls;
+- apply the Windows and Linux calling conventions to read arguments and results;
+- recognise Rust's slices, strings, bounds checks, panics, `Option` and `Result`;
+- crack two real programs: one with its password in the strings, one with its password inside `cmp` instructions.
+
+Press **Finish lesson**. The source code of crackme #2 then appears below this lesson. Look at `check_password` and compare it with what you read: the length check, the seven comparisons, and `black_box`, which stopped the compiler from merging the seven checks into one big comparison.
+
+In **Level 2** you will analyse bigger programs without running them: the structure of PE and ELF files, the Graph view, the decompiler (press **F5** on a function to see it as Rust-like code), and your first XOR-encoded password.
+'''
 success = '''
-You read a password straight out of machine code. That is real reverse engineering! Level 1 is complete; the source code of the crackme is unlocked below. Next up in Level 2: static analysis of bigger programs and your first XOR-encoded secret.
+Level 1 is complete. Well done: this was the hardest step of the whole course, and you made it.
 '''

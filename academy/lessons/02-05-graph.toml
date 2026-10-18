@@ -1,0 +1,318 @@
+id = "l2-graph"
+level = 2
+order = 5
+title = "The graph view: code as a picture"
+summary = "Basic blocks and arrows: read ifs, if/else and loops as shapes, so you see a function's structure before you read its instructions."
+goals = [
+    "explain what a basic block and a control-flow graph are",
+    "read the colours of the arrows: taken, not taken, always",
+    "recognise an if, an if/else, a chain of checks and a loop by their shape",
+    "move between the graph and the linear disassembly with Space",
+]
+badge = "Graph Reader"
+
+[[steps]]
+title = "From lines to boxes"
+goal = "Understand basic blocks and the control-flow graph."
+text = '''
+The disassembly is a long list. Jumps make you hop up and down in it, and after three
+jumps you have lost track. The **graph view** draws the same function as a picture.
+
+It cuts the function into **basic blocks**: runs of instructions that always execute
+together, from top to bottom. A block ends at a jump (or a `ret`), and a new block starts
+wherever a jump can land. Inside a block nothing can branch, so you can read it as one
+small step.
+
+Then it draws an **arrow** (a *graph edge*) for every way to get from one block to the
+next. Boxes plus arrows form the function's **control-flow graph**.
+
+Take this Rust code:
+
+```rust
+if code.len() != 6 {
+    return false;          // block B
+}
+return code[0] == b'K';    // block C
+```
+
+The compiled code has block A (`cmp rdx,6` / `jne B`), block B and block C. From A there
+are two arrows: to B when the jump is taken (the length is not 6), and to C when it is not
+taken and the CPU simply continues below (*fall-through*).
+
+ORRESS colours the arrows:
+
+- **green**: the conditional jump is **taken** (its condition is true);
+- **red**: the jump is **not taken** (execution falls through to the next block);
+- **blue**: always, either an unconditional `jmp` or plain fall-through.
+'''
+
+[[steps]]
+title = "Open crackme #10"
+goal = "Have the practice program open."
+text = '''
+You will draw the three functions you named in the last lesson: `is_valid`, `checksum`
+and `main`. If you skipped the naming lesson, they are still called `sub_1400012f0` and
+`sub_1400012c0`; use those names wherever this lesson says `is_valid` or `checksum`.
+'''
+instructions = ["Press the **Open crackme10** button below."]
+check = { kind = "open_crackme", name = "crackme10" }
+
+[[steps]]
+title = "Draw is_valid"
+goal = "Open the graph view for one function."
+text = '''
+The graph view always shows the function the cursor is in. The quickest way there:
+put the cursor in the function in the disassembly and press **Space**. Press **Space**
+again (in the graph) to go back to the linear listing.
+
+In the graph you can:
+
+- **drag** with the mouse to move around;
+- hold **Ctrl** and **scroll** to zoom (or use the **-** and **+** buttons);
+- press **Fit** to see the whole function at once;
+- click a function name inside a box to go to that function;
+- use **N**, **;** and **X** as in the disassembly.
+
+The toolbar shows the function's name and how many blocks, instructions, bytes and
+callers it has.
+'''
+instructions = [
+    "Click inside the disassembly (press **Ctrl+D** first if it is not open).",
+    "Press **Ctrl+G**, type `is_valid` (or `1400012f0`) and press **Enter**.",
+    "Press **Space**. The tab **crackme10.exe · Graph** opens.",
+    "Press **Fit** in the graph's toolbar to see the whole function.",
+]
+spotlight = "tree.Graph"
+check = { kind = "view", view = "Graph" }
+hints = [
+    "Space only works while the disassembly has keyboard focus: click inside it first.",
+    "You can also click **Graph** in the Project panel; it shows the function the cursor is in.",
+]
+
+[[steps]]
+title = "Read is_valid as a picture"
+goal = "Follow the arrows of a chain of checks."
+text = '''
+`is_valid` has 4 blocks (the toolbar says so). Read them top to bottom:
+
+1. **Top block**: `cmp rdx,6` and `jne`. A **green** arrow goes to a small block at the
+   bottom (taken: the length is not 6); a **red** arrow goes to the next check.
+2. **Second block**: `cmp byte ptr [rcx],0x4b` and `jne`. It compares the **first byte**
+   of the code (`[rcx]`: the byte the pointer points to) with 0x4B. Again a green arrow to
+   the small block, a red arrow onwards.
+3. **Third block**: `call checksum`, `cmp eax,0x1f4`, `sete al`, `ret`. The result of
+   the comparison becomes the return value.
+4. **Small block**: `xor eax,eax`, `ret`: return 0, which is `false`.
+
+Two arrows from different checks pointing to the same "return false" box: this shape is a
+**chain of checks**. In Rust it is a row of `if ... { return false; }` lines, or
+conditions joined with `&&`. You will see it in almost every crackme.
+
+0x4B is a character code. Which character must a valid code start with? (Hover the number
+in the graph with Explain Mode on, or use the ASCII table below.)
+'''
+widget = "ascii_table"
+instructions = [
+    "In the graph of `is_valid`, find the block with `cmp byte ptr [rcx],0x4b`.",
+    "Look up 0x4B in the ASCII table below (or hover over `0x4b` in the graph).",
+    "Type the character (one letter, upper or lower case matters) in the answer box.",
+]
+spotlight = "view.Graph"
+check = { kind = "answer", answers = ["K"], case_sensitive = true }
+hints = [
+    "0x4B = 75 in decimal.",
+    "It is an upper-case letter between J and L.",
+    "Type `K`.",
+]
+success = '''
+`K`. You now know three rules for a valid code: 6 characters, starting with `K`, and the
+checksum must be 500. You read them from a picture of four boxes.
+'''
+
+[[steps]]
+title = "The shape of if/else"
+goal = "Recognise an if/else in main."
+text = '''
+Now look at `main`. Its graph is bigger (20 blocks), because the standard library's input
+handling was inlined into it (copied into `main` by the compiler). Do not try to read
+everything. Look for the shape that matters.
+
+Find the block that ends with:
+
+```text
+call     is_valid
+test     al,al
+je       loc_140001297
+```
+
+Two arrows leave it:
+
+- one goes to a block that loads *Licence accepted. Welcome!*;
+- the other goes to a block that loads *Invalid licence code.*.
+
+The two paths never meet again: one prints and returns, the other prints and exits. This
+two-way split is an **if/else**. In Rust:
+
+```rust
+if is_valid(line.as_bytes()) {
+    println!("Licence accepted. Welcome!");
+} else {
+    println!("Invalid licence code.");
+    std::process::exit(1);
+}
+```
+
+`je` jumps when the zero flag is set, and `test al,al` sets it when `al` is 0, so the jump
+is **taken** when `is_valid` returned `false`.
+
+What colour is the arrow that leads to the *Invalid licence code.* block?
+'''
+instructions = [
+    "Press **Space** to go back to the disassembly, then **Ctrl+Shift+M** to go to `main`.",
+    "Click the line `call is_valid` and press **Space**. The graph opens with that block in view.",
+    "Look at the two arrows that leave the block, and at the strings in the two blocks they go to.",
+]
+check = { kind = "choice", options = [
+    "Green: the je is taken when is_valid returned false",
+    "Red: the je is not taken when is_valid returned false",
+    "Blue: it is always taken",
+], correct = 0, explain = [
+    "Right. test al,al sets the zero flag when al is 0 (false), so je jumps to the failure message: a taken jump, green.",
+    "When is_valid returns false, al is 0, the zero flag is set and je IS taken. Red is the success path.",
+    "Blue arrows are unconditional. This one depends on the result of is_valid.",
+] }
+hints = [
+    "`test al,al` sets the zero flag when al is 0.",
+    "`je` = jump if equal = jump if the zero flag is set.",
+]
+
+[[steps]]
+title = "The shape of a loop"
+goal = "Find the loop in checksum by its back edge."
+text = '''
+A loop has an unmistakable shape: an arrow that goes **back up** to a block that already
+ran. That arrow is called a **back edge**. Everything between its target and its start is
+the loop body.
+
+Open the graph of `checksum`. It has 4 blocks:
+
+1. a start block: `xor eax,eax` (sum = 0), `test rdx,rdx`, `je` (an empty slice skips
+   the loop);
+2. a set-up block: `xor r9d,r9d` (i = 0);
+3. the **loop block** (`loc_1400012d0`): read a byte, add it to `eax`, `inc r9`, `cmp`,
+   `jne`. Its green arrow goes **back to its own top**: the back edge;
+4. an end block: `pop`, `ret`.
+
+Here the whole loop body is one basic block, so the back edge points to the block itself.
+In bigger loops it points back to the first block of the body.
+
+How many instructions does the loop block have? (Count the instruction lines in the box;
+the label line `loc_1400012d0:` is not an instruction.)
+'''
+instructions = [
+    "Click a box in the graph so the graph has keyboard focus, then press **Space** to return to the disassembly.",
+    "Press **Ctrl+G**, type `checksum` (or `1400012c0`) and press **Enter**, then press **Space**.",
+    "Press **Fit**. Find the box whose green arrow loops back to itself.",
+    "Count its instructions and type the number in the answer box.",
+]
+spotlight = "view.Graph"
+check = { kind = "answer", answers = ["7"], number = true }
+hints = [
+    "The loop block starts with `movzx r10d,byte ptr [rcx+r9]`.",
+    "It ends with `jne loc_1400012d0`.",
+    "movzx, mov, movzx, add, inc, cmp, jne: 7 instructions.",
+]
+success = '''
+7 instructions run once per byte of the code. Notice what you did: you found the loop
+without reading a single instruction first, only by looking for an arrow that goes back.
+'''
+
+[[steps]]
+title = "Loops in Rust and in the graph"
+goal = "Map the parts of a Rust loop to the blocks of the graph."
+text = '''
+The source of `checksum` is a `while` loop:
+
+```rust
+let mut sum: u32 = 0;          // block 1: xor eax,eax
+let mut i = 0;                 // block 2: xor r9d,r9d
+while i < code.len() {         // block 1: test rdx,rdx / je  (first check)
+    sum += code[i] as u32;     // block 3: movzx ... add eax,r10d
+    i += 1;                    // block 3: inc r9
+}                              // block 3: cmp rdx,r9 / jne   (check again, jump back)
+return sum;                    // block 4: ret
+```
+
+The compiler turned the loop around. A `while` checks its condition *before* each round.
+The machine code checks once before the loop (is the slice empty?) and then *at the end*
+of each round (is `i` equal to the length yet?). That way each round needs only one jump.
+You will see this "check at the bottom" shape for most `for` and `while` loops.
+
+So when you see a back edge, ask three questions:
+
+1. **Where is the counter set up?** (here `r9 = 0`, before the loop)
+2. **What changes each round?** (`r9 += 1`, `eax += byte`)
+3. **When does it stop?** (the compare before the back edge: `r9 == rdx`, the length)
+
+The answers give you the loop in Rust.
+'''
+
+[[steps]]
+title = "Shapes to recognise"
+goal = "Know the common shapes by sight."
+text = '''
+With practice you read a function's shape in one look, before any instruction:
+
+| Shape in the graph | In Rust |
+|---|---|
+| a box splits in two, one side skips a box, they join again | `if cond { ... }` |
+| a box splits in two, two separate boxes, they join again (or both end) | `if cond { ... } else { ... }` |
+| several boxes whose green arrows all point to one small box | a chain of checks: `if !a { return false; } if !b { return false; }` |
+| an arrow going back up to an earlier box | a loop: `while`, `for`, `loop` |
+| one box with many arrows to many boxes | a `match` (often a jump table) |
+| a long straight column of boxes without back edges, that look alike | an unrolled loop (lesson 7 shows one) |
+
+Two tips:
+
+- **Start with the arrows that leave the function**: the boxes ending in `ret` and calls
+  like `exit`. Follow the arrows backwards from the success message to see which
+  conditions lead there.
+- **Use names and comments in the graph too.** **N**, **;** and **X** work exactly as in
+  the disassembly.
+
+You see a box with an arrow that points back up to an earlier box. What is it?
+'''
+check = { kind = "choice", options = [
+    "A loop",
+    "An if without else",
+    "A function call",
+], correct = 0, explain = [
+    "Right. An arrow back to an earlier block is a back edge: the code runs again.",
+    "An if only goes forward: it skips some boxes and joins again further down.",
+    "Calls do not get arrows in the graph: a call returns to the next instruction in the same block.",
+] }
+
+[[steps]]
+title = "Graph or listing?"
+goal = "Know when to use which view."
+text = '''
+Both views show exactly the same instructions. Use each for what it is good at:
+
+- **Graph** (Space): to see the **structure** of a function: where it branches, where it
+  loops, which path leads to success. Best for functions up to a few dozen blocks.
+- **Disassembly** (Space again, or Ctrl+D): to read **details** line by line, to see data
+  and neighbouring functions, and for huge functions where the graph becomes a maze.
+
+A good routine for a new function: open the graph, press **Fit**, find the loops and the
+exits, then read the blocks that matter in either view.
+
+What you know about crackme #10 now:
+
+- `is_valid`: a chain of three checks: length 6, first byte `K`, `checksum` = 500;
+- `checksum`: one loop that adds up all bytes;
+- `main`: an if/else on the result of `is_valid`.
+
+That is nearly the whole program. In the next lesson the **decompiler** writes all of
+this as Rust for you, and you will see where you can trust it and where you cannot.
+'''
+success = "Lesson complete. You can read a function's structure from its shape."

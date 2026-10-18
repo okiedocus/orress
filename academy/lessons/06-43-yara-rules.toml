@@ -1,12 +1,20 @@
 id = "l6-yara-rules"
 level = 6
-order = 42
+order = 43
 title = "Writing YARA rules"
 summary = "Turn 'I recognise this malware' into a reusable detection: rule anatomy, string types, conditions, and ORRESS's live YARA workbench."
 badge = "Rule Writer"
+reveal_source = "crackme15"
+goals = [
+    "say what YARA is and name the three parts of a rule",
+    "tell apart text, hex and regex strings and read an anchor like `at 0`",
+    "read a condition's boolean logic and tune its strictness",
+    "write a rule in the YARA workbench that matches the training sample",
+]
 
 [[steps]]
 title = "What is YARA?"
+goal = "Understand YARA as a way to turn recognition into reusable detection."
 text = '''
 You've triaged a sample and recognised something distinctive — a marker string, a config blob, a chunk of code. **YARA** lets you turn that recognition into a **reusable, shareable detection**.
 
@@ -74,6 +82,7 @@ $mz at 0 and $dos
 
 Which single keyword there makes the rule require **both** the MZ signature *and* the DOS-stub string, so that a file with only one of them does **not** match?
 '''
+instructions = ["Type the single keyword from the condition and press Check."]
 check = { kind = "answer", answers = ["and"], number = false, case_sensitive = false }
 hints = ["It's the boolean operator between the two conditions.", "`A and B` is true only when both A and B are true."]
 success = "`and` — both must hold. Swap it for `or` and either one alone would match; that's how you tune a rule's strictness."
@@ -89,12 +98,100 @@ ORRESS lets you write and test rules live. The **YARA workbench** opens with the
 
 Open the **YARA workbench** now (Ctrl+Shift+Y, the View menu, or the command palette).
 '''
+instructions = [
+    "Press **Ctrl+Shift+Y**, or the **View** menu -> **Open View** -> **Open YARA Workbench**.",
+    "(Or **Ctrl+Shift+P** and type \"YARA\".)",
+    "Note the example rule in the editor and the **Scan open file** button above it.",
+]
 check = { kind = "action", id = "view::Yara" }
 spotlight = "view.Yara"
 hints = ["Ctrl+Shift+Y opens it — or Ctrl+Shift+P and type \"YARA\"."]
 
 [[steps]]
+title = "Load the sample to match"
+goal = "Open the training sample so your rule has something to scan."
+text = '''
+Let us write a rule that catches the training sample. First make it the open file: the YARA
+workbench's **Scan open file** button scans whatever file is active.
+
+Open crackme15 with the button below (it is harmless -- it only prints and exits).
+'''
+instructions = ["Click the **Open crackme15** button below to load the training sample."]
+check = { kind = "open_crackme", name = "crackme15" }
+hints = ["The Open button is here in the lesson panel.", "It becomes the active file that Scan open file will target."]
+success = "crackme15 is open. Now pick a string to key your rule on."
+
+[[steps]]
+title = "Pick a distinctive string"
+goal = "Choose a marker that identifies the sample but not clean files."
+text = '''
+A good rule keys on something **distinctive and stable** -- a string that appears in this sample
+(and its variants) but not in thousands of benign programs. Compiler boilerplate like
+`"This program cannot be run in DOS mode"` is in *every* PE, so it is useless for identification.
+
+crackme15 carries a unique marker string planted for exactly this purpose. If you open the
+**Strings** view (Ctrl+Shift+S) and filter for `ORRESS`, you will find it: a single, unmistakable
+identifier beginning `ORRESS_TRAINING`.
+
+What is that full marker string? (It begins `ORRESS_TRAINING_...`.)
+'''
+instructions = [
+    "Open the **Strings** view (press **Ctrl+Shift+S**).",
+    "In the filter box, type `ORRESS` to narrow the list.",
+    "Type the full marker string (the one beginning `ORRESS_TRAINING_`) and press Check.",
+]
+check = { kind = "answer", answers = ["ORRESS_TRAINING_SAMPLE_v1"], number = false, case_sensitive = true }
+spotlight = "tree.Strings"
+hints = [
+    "Filter the Strings view for ORRESS.",
+    "It is one token, no spaces, ending in a version like _v1.",
+    "The marker is ORRESS_TRAINING_SAMPLE_v1 (match the capitals exactly).",
+]
+success = "ORRESS_TRAINING_SAMPLE_v1 -- distinctive, stable and unique to this sample. That is exactly the kind of string to build a rule around."
+
+[[steps]]
+title = "Write and test your rule"
+goal = "Write a rule in the workbench that matches the sample and scan it."
+text = '''
+Now write the rule. Go to the **YARA workbench** (Ctrl+Shift+Y) and replace the example with a
+rule keyed on the marker you found:
+
+```text
+rule orress_training_sample {
+    meta:
+        author = "you"
+        description = "matches the ORRESS Level 6 training sample"
+    strings:
+        $marker = "ORRESS_TRAINING_SAMPLE_v1"
+    condition:
+        $marker
+}
+```
+
+Then click **Scan open file**. With crackme15 active you should see one match: rule
+`orress_training_sample`, pattern `$marker`, with its offset and a byte preview.
+
+Because this marker is unique to the training sample, the same rule run against crackme01 (the
+Level 1 password crackme) would **not** match -- a true positive here, no false positive there.
+That is a working detection. When you are done, continue.
+'''
+instructions = [
+    "Open the **YARA workbench** (**Ctrl+Shift+Y**).",
+    "Select all the text in the rule editor and replace it with the rule shown above.",
+    "Click the **Scan open file** button and confirm one match for `$marker`.",
+]
+check = { kind = "action", id = "view::Yara" }
+spotlight = "view.Yara"
+hints = [
+    "Ctrl+Shift+Y opens the workbench; the editor is at the top.",
+    "Paste the rule exactly, keeping the quotes around the marker string.",
+    "Scan open file runs the rule against crackme15 -- you want one match.",
+]
+success = "You wrote a rule, scanned the sample and got a match. That rule is now a reusable, shareable detection: point it at a thousand files and it finds this sample and its variants, while leaving clean files alone."
+
+[[steps]]
 title = "Writing rules that last"
+goal = "Learn the craft of rules that catch variants without false positives."
 text = '''
 A good rule catches the family and its variants without ever firing on clean files. The craft:
 

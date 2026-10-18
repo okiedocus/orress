@@ -2,56 +2,254 @@ id = "l1-crackme1"
 level = 1
 order = 11
 title = "Your first crackme"
-summary = "Find a password that is hidden in plain sight."
+summary = "Find a password that is hidden in plain sight, then confirm it in the code."
+goals = [
+    "open a practice program and read its Info view",
+    "find readable text with the Strings view and its filter",
+    "jump from a string to the code that uses it",
+    "read the password check in the Disassembly view and confirm your answer",
+]
 badge = "First Crack"
 reveal_source = "crackme01"
 
 [[steps]]
 title = "Meet crackme #1"
+goal = "Open your first practice program."
 text = '''
-Time for a real target. **Crackme #1** is a small Rust program that asks for a password and says *Correct!* or *Wrong password*. Your job: find the password without guessing.
+Time for a real target. A **crackme** is a small program made to be reverse engineered: it asks for a password (or a key) and tells you whether it is right. Your job is to find the password by reading the program, not by guessing.
 
-Open it with the button below. (ORRESS saves it in its config folder under `academy/crackmes`, so you can also run it from a terminal and type passwords.)
+**Crackme #1** is a Rust program for Windows. When you run it, it prints:
+
+```text
+=== ORRESS Academy - Crackme #1 ===
+Password:
+```
+
+and then *Correct!* or *Wrong password. Try again!*.
+
+In this lesson you will:
+
+1. look at what kind of file it is (the **Info** view);
+2. search its text for clues (the **Strings** view);
+3. follow a clue into the code (the **Disassembly** view);
+4. read the check with everything you learned in this level, and confirm the password.
+
+Press the button below to open it. ORRESS writes the program into its config folder (under `academy/crackmes`) and opens it for analysis. Opening a program in ORRESS never runs it: ORRESS only reads its bytes. That is called **static analysis**, and it is always safe.
 '''
+instructions = [
+    "Press the **Open crackme01** button below.",
+    "Wait a moment until the **Project** panel on the left shows `crackme01.exe` with a list of views under it.",
+]
 check = { kind = "open_crackme", name = "crackme01" }
+success = '''
+`crackme01.exe` is open. ORRESS opened two tabs in the middle: **Hex** (the raw bytes) and **Info** (an overview). The **Project** panel on the left lists every view of the file.
+'''
 
 [[steps]]
-title = "First look"
+title = "First look: the Info view"
+goal = "Learn what kind of program this is before reading any code."
 text = '''
-Read the **Info** view. Note what ORRESS detected: a 64-bit Windows program written in **Rust**, with no function names (stripped). It also suggests looking at the strings first: the fastest first step with any unknown program.
+Always start with the **Info** view. It answers "what is this file?" in a few seconds. Look for these things, from top to bottom:
+
+- **The format**: *PE (Windows executable)*. A PE file is a Windows program, so the Windows x64 calling convention applies (Lesson 9): arguments in `rcx`, `rdx`, `r8`, `r9`, the result in `rax`.
+- **The architecture**: *x86-64*, the instruction set you learned in this level.
+- **Detections**: ORRESS recognised the language as **Rust** (because the file contains paths with `/rustc/` in them).
+- **Stripped**: the file has no function names, only names of imported functions. You will see `sub_...` names.
+- **Observations and tips**: ORRESS noticed that the program compares strings, and suggests first steps.
+
+At the top of the view there is a row of buttons: **Go to main**, **Functions**, **Disassembly**, **Strings** and more. They open those views of this file. You will use them in a moment.
+
+This first look already tells you a lot: a Windows Rust program without names, that compares text. The quickest first move for such a program is to look at its strings.
 '''
+instructions = [
+    "In the middle of the window, click the **Info** tab (or, in the **Project** panel on the left, click **Info** under `crackme01.exe`).",
+    "Read the view from top to bottom and find the format, the architecture and the detected language.",
+]
+spotlight = "tree.Info"
 check = { kind = "view", view = "Info" }
+success = '''
+A 64-bit Windows program written in Rust. You know its calling convention, its instruction set and its language before reading a single instruction.
+'''
 
 [[steps]]
 title = "Open the strings"
+goal = "List all readable text in the program."
 text = '''
-Open the **Strings** view from the Project panel. It lists every piece of readable text in the program: messages, file names, error texts, and sometimes much more.
+The **Strings** view lists every piece of readable text ORRESS found in the file: messages the program prints, file paths, error texts of the Rust standard library, names of Windows functions, and sometimes much more.
+
+A program that compares your input with a fixed password has to keep that password somewhere. If the programmer did not hide it, it sits right there among the other text.
+
+The view has these columns:
+
+- **Offset**: where the text is in the file;
+- **Address**: where it is in memory when the program runs (the number you will see in the Disassembly view);
+- **Section**: which part of the file it is in (constant text is usually in `.rdata`);
+- **Type**: ASCII (one byte per character) or UTF-16 (two bytes per character);
+- **Refs**: how many instructions use this text. You will use this column in a minute;
+- **Text**: the text itself.
+
+Above the table there is a filter box (*Filter (case-insensitive)...*), and below it a line that counts the strings: well over a thousand. That is a lot of text, mostly from the Rust standard library. The filter will help you find what matters.
 '''
+instructions = [
+    "In the **Project** panel on the left, click **Strings** under `crackme01.exe`. (Or click the **Strings** button at the top of the Info view, or press **Ctrl+Shift+S**.)",
+    "Scroll through the list for a moment to see what kind of text a program contains.",
+]
 spotlight = "tree.Strings"
 check = { kind = "view", view = "Strings" }
 
 [[steps]]
 title = "Find the password"
+goal = "Use the filter to find the password among the strings."
 text = '''
-Look for the messages the program prints, like *Correct!* and *Wrong password*. A program that compares your input with a fixed password must keep that password somewhere, and the simplest place is right next to its other strings.
+Scrolling through more than a thousand strings is slow. Use the filter box: it shows only the strings that contain what you type, ignoring upper and lower case.
 
-Type the password you found below.
+Start with what you know the program prints: *Password:* and *Wrong password*. Type `password` in the filter box.
+
+You will see a row whose text looks like several messages glued together. That is normal for Rust: it stores its string literals **back to back** in memory, without anything between them. A Rust `&str` is not ended by a zero byte; it carries its length instead (Lesson 10 showed the pointer and the length side by side). So nothing separates one literal from the next, and the Strings view sees one long piece of text. Your job is to see where one literal ends and the next begins.
+
+Read that row carefully. One part is the prompt *Password:*, one part is the error message, and between them is something that is neither. That is the password.
 '''
+instructions = [
+    "Click into the filter box above the table (it says *Filter (case-insensitive)...*) and type `password`.",
+    "In the **Text** column, read the row that starts with `Password: `.",
+    "Find the part between `Password: ` and `Wrong password`. Type it in the answer box below and press **Check**.",
+]
 spotlight = "view.Strings"
 check = { kind = "secret", sha256 = "945fc2e5cdad07b7dde9a4681f1d6bf18d03222decc42a7b964dd7e77eb25a1c" }
 hints = [
-    "Use the filter box. What word might a password contain? Try filtering for 'open'.",
-    "Rust stores string literals back to back. Look at the strings near 'Correct!'.",
-    "It starts with open_ and ends with a number.",
+    "Filter for `password` and look at the row that begins with `Password: `.",
+    "Rust stores literals back to back. Split the row: `Password: ` | ??? | `Wrong password. Try again!`",
+    "It starts with `open_` and ends with a number.",
+]
+success = '''
+That is the password. Finding it in the strings is a strong clue, but a reverse engineer confirms a clue in the code. Maybe that text is only a decoy, and the real check is different. Let's find out.
+'''
+
+[[steps]]
+title = "Jump to the code that uses it"
+goal = "Follow a string into the function that uses it."
+text = '''
+The **Refs** column says how many instructions use a string. It shows a number followed by `»`. Because Rust glues its literals together, the row with the password is used by several instructions: one for the prompt, one for the password, one for the error message. Clicking the `»` takes you to the **first** instruction that uses it.
+
+This is one of the most useful moves in reverse engineering: from a message the program prints (*Wrong password*) to the code that prints it. The decision between *Correct!* and *Wrong* is never far away from there.
+
+When you click, ORRESS opens the **Disassembly** view and puts the cursor on that instruction. Look at the toolbar of the Disassembly view: it shows where the cursor is, for example `main+0x16`. You are inside `main`, the program's own main function. ORRESS found `main` even though the program has no names, by recognising how the Rust runtime calls it.
+
+The line you land on is:
+
+```text
+140001116  lea  rcx, [0x1400183f4]  ; "Password: open_sesame_101Wrong password. Try again"
+```
+
+You know this pattern (Lesson 6 and Lesson 9): load the address of a text into `rcx`, the first argument, to pass it to the print function.
+'''
+instructions = [
+    "In the Strings view, find the row that starts with `Password: ` (keep the filter `password`).",
+    "In that row, click the link with `»` in the **Refs** column.",
+    "The **Disassembly** view opens. Check that the toolbar at the top says `main+...`.",
+]
+spotlight = "view.Strings"
+check = { kind = "cursor_in_main" }
+hints = [
+    "The Refs column is the fifth column, between Type and Text.",
+    "Click the number with » in it, not the text.",
 ]
 
 [[steps]]
-title = "Confirm it in the code"
+title = "Find the password check"
+goal = "Locate the instruction that loads the password."
 text = '''
-Finding a password in the strings is a good guess; reversers confirm it in the code. Your password sits in the middle of a longer line, so click the **»** in the **Refs** column of that line: ORRESS jumps to the code that uses it, inside `main`. Every instruction that loads a string has the text as a comment, so look for `; "open_sesame_101"`.
+You are at the start of `main`. The password check is further down. Rather than scrolling, use the Disassembly view's **Find** bar: it searches the listing, including the comments that ORRESS adds with the text of each string.
 
-Around it you will see a length check (`cmp` with 0xF = 15, the password's length) and the comparison that decides between *Correct!* and *Wrong*. Run the crackme from a terminal and try the password if you like!
+Search for `open_sesame`. One match is the line where you are now (its comment contains the whole glued string). Press **Next** until you reach the other one:
+
+```text
+14000121a  lea  rdx, [0x1400183fe]    ; "open_sesame_101Wrong password. Try again!"
+```
+
+Note the address in the brackets: `0x1400183fe`. That is 10 bytes after the start of the glued string (`0x1400183f4`), which is exactly the length of `Password: `. So this instruction points at the password itself, not at the prompt. The comment shows all the text from that address on, because ORRESS cannot know where the literal ends. The code knows: look at the next two lines.
+
+```text
+140001221  mov  [rsp+0x20], rdx
+140001226  mov  qword ptr [rsp+0x28], 0xf
+```
+
+Lesson 10 described this pattern: a `&str` stored on the stack as an address and a length, side by side. What is the length of the password string, in decimal?
+'''
+instructions = [
+    "Click into the Disassembly view, then press **Ctrl+F**. A **Find** bar appears at the top.",
+    "Type `open_sesame` and press Enter. Then press **Next** (or **F3**) until the cursor is on the line `lea rdx, [0x1400183fe]`.",
+    "Read the two lines below it. Type the length that is stored at `[rsp+0x28]`, in decimal, and press **Check**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["15"], number = true }
+hints = [
+    "The length is the number in `mov qword ptr [rsp+0x28], 0xf`.",
+    "Hover over `0xf` in the Disassembly view to see it in decimal.",
+    "0xf = 15. Count the characters of the password: it has 15.",
+]
+success = '''
+15 characters, exactly the length of the password you found. Only the first 15 bytes from `0x1400183fe` belong to it; the rest is the next literal.
+'''
+
+[[steps]]
+title = "Read the decision"
+goal = "Confirm the password by reading the comparison."
+text = '''
+Now read the comparison below it, using the cheat sheet from Lesson 10. Here are the lines that matter, with comments:
+
+```text
+140001234  cmp  r8, [rsp+0x28]     ; your input's length == 15 ?
+140001239  jne  loc_1400012a5      ; no: go to "Wrong password"
+14000123b  mov  rdx, [rsp+0x20]    ; 2nd argument: address of the password
+140001240  test rax, rax           ; (part of strip_suffix: which pointer to use)
+140001243  cmovne rcx, rax         ;  rcx = 1st argument: address of your input
+140001247  call ????               ; compare 15 (r8) bytes
+14000124c  test eax, eax           ; result 0 = equal?
+14000124e  jne  loc_1400012a5      ; no: go to "Wrong password"
+140001250  lea  rcx, [0x140018428] ; "Correct! You cracked your first program."
+```
+
+This is the string comparison pattern: first the lengths, then a function that compares the bytes, then `test eax, eax`. If both checks pass, the code runs on into the *Correct!* message. You can click `loc_1400012a5` to check that it really prints *Wrong password* (press **Esc** to come back).
+
+So the program compares your input, byte for byte, with the 15 bytes at `0x1400183fe`: `open_sesame_101`. The string you found was not a decoy.
+
+What is the name of the function that compares the bytes (the `????` above)? Look at the line `140001247` in ORRESS.
+'''
+instructions = [
+    "In the Disassembly view, find the line with address `140001247`, a few lines below the `lea rdx` line.",
+    "Read the name after `call` on that line.",
+    "Type that name in the answer box and press **Check**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["memcmp"] }
+hints = [
+    "It is a function imported from the C runtime, so it has a real name.",
+    "Its name means \"memory compare\".",
+]
+success = '''
+`memcmp`. It has a name because the program imports it from a Windows library, and imports keep their names even in a stripped program.
+'''
+
+[[steps]]
+title = "Try it for real"
+goal = "Run the crackme with the password (optional)."
+text = '''
+You have read the whole check. If you want, run the program and see it accept your password. This is optional: the lesson does not check it.
+
+ORRESS saved the program in its config folder, in the subfolder `academy`, then `crackmes`. To run it:
+
+1. In the menu bar, click **Help**, then **Open Config Folder**. Your file manager opens.
+2. Go into `academy`, then `crackmes`. You see `crackme01.exe`.
+3. Open a terminal in that folder (in Windows Explorer: type `cmd` in the address bar and press Enter).
+4. Type `crackme01.exe` and press Enter. Type the password and press Enter.
+
+The program says *Correct! You cracked your first program.*
+
+Running practice programs from the Academy is safe: they only read what you type and print an answer. Be careful with programs from elsewhere. Unknown programs should only be run in a safe environment (Level 6 explains how).
+
+Press **Finish lesson** to complete it. The original Rust source code of the crackme will then appear at the bottom of this lesson. Compare it with what you read: the `println!` calls, `read_line`, the two `strip_suffix` calls, and the comparison with `==`.
 '''
 success = '''
-You cracked your first program! The source code is now unlocked below. Notice `black_box`: without it the compiler would have stored the password as two 8-byte numbers inside the instructions instead of as text, and the Strings view would not find it. ORRESS still shows such text in a comment (`"open_ses" (text stored in a number)`). You will meet that trick again in Level 2.
+You cracked your first program! Look at the source below and notice `black_box`: without it, the compiler would not have kept the password as text. It would have turned the comparison into two 8-byte numbers inside the instructions, and the Strings view would not have found it. ORRESS still shows such text in a comment (`"open_ses" (text stored in a number)`). You will meet that trick again later. Next: a password that never appears as text at all.
 '''

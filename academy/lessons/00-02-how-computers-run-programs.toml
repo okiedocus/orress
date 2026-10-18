@@ -1,0 +1,345 @@
+id = "l0-computer"
+level = 0
+order = 2
+title = "How a computer runs a program"
+summary = "The CPU, memory, storage and the operating system; program versus process; what machine code is."
+goals = [
+    "name the main parts of a computer and what each one does",
+    "explain how the CPU runs a program, one instruction at a time",
+    "tell the difference between a program file and a running process",
+    "explain what the operating system does for a program",
+]
+
+[[steps]]
+title = "The parts of a computer"
+goal = "Know what the CPU, memory and storage are."
+text = '''
+To reverse a program, you need a picture of what happens when it runs. Three parts of the computer matter most:
+
+- The **CPU** (central processing unit, also called the **processor**) is the part that does the work. It calculates, compares numbers and decides what to do next. It is very fast, but it can only remember a handful of values at a time.
+- **Memory**, also called **RAM**, is the working space. It holds the program that is running and all the data it works on. It is much bigger than what the CPU can hold, a few gigabytes on a normal computer, and still fast. Memory is cleared when the computer is switched off.
+- **Storage**, such as an SSD or a hard disk, holds files: your documents, and also the program files themselves. It is very large but slow compared to memory, and it keeps its contents when the power is off.
+
+A kitchen is a good picture. The CPU is the cook. Memory is the kitchen counter: the cook can only work with what lies on the counter. Storage is the pantry: everything is kept there, but the cook first has to bring it to the counter.
+
+Your Rust program follows exactly this path. `cargo build` writes `myapp.exe` to storage. When you start it, the program is copied into memory, and the CPU runs it from there.
+'''
+
+[[steps]]
+title = "Where does it live?"
+goal = "Check that you can tell memory and storage apart."
+text = '''
+Remember the three parts from the previous step:
+
+- the **CPU** does the work, but holds only a few values;
+- **memory** (RAM) holds running programs and their data, and is cleared when the power goes off;
+- **storage** (SSD or disk) holds files and keeps them without power.
+
+You built a Rust program yesterday with `cargo build` and switched the computer off for the night. Where is the program now?
+'''
+check = { kind = "choice", options = [
+    "In the CPU",
+    "In memory (RAM)",
+    "In storage (the SSD or disk), as a file",
+    "Nowhere: it has to be built again",
+], correct = 2, explain = [
+    "The CPU holds only a few values, and only while the computer runs.",
+    "Memory is cleared when the power goes off.",
+    "Correct: the program file stays in storage until you delete it.",
+    "Files in storage survive a restart, so the program is still there.",
+] }
+hints = ["Which part keeps its contents when the power is off?"]
+
+[[steps]]
+title = "Memory is a long row of bytes"
+goal = "Picture memory as numbered boxes."
+text = '''
+Memory is one very long row of small boxes. Each box holds one **byte**: a small number from 0 to 255. (The next lessons explain bytes in detail.) Every box has a number, its **address**, starting at 0.
+
+In Rust terms, memory behaves like one giant `Vec<u8>`:
+
+```rust
+let mut memory: Vec<u8> = vec![0; 16]; // 16 boxes, addresses 0 to 15
+memory[3] = 200;                       // write 200 into the box at address 3
+let value = memory[3];                 // read it back
+```
+
+Everything a program uses lives in these boxes: numbers, text, pictures, and also the program's own code. A value that does not fit in one byte, like a large number, uses several boxes next to each other.
+
+The CPU reads and writes memory by address: "give me the byte at address 3", "store 200 at address 3". Real computers have billions of boxes, so real addresses are big numbers. Lesson 6 of this level is all about memory and addresses.
+
+A tiny computer has 16 bytes of memory, numbered from 0 like the `Vec` above. What is the address of the **last** byte?
+'''
+check = { kind = "answer", answers = ["15"], number = true }
+instructions = [
+    "Count the addresses: the first box is 0, the second is 1, and so on.",
+    "Type the address of the 16th box in the answer box and press **Check**.",
+]
+hints = [
+    "Like the indexes of a Vec with 16 elements.",
+    "The first index is 0, so the last one is one less than 16.",
+]
+success = '''
+15. Just like indexes in a `Vec`, addresses start at 0, so the last of 16 bytes has address 15. Reversers count from 0 all the time.
+'''
+
+[[steps]]
+title = "The CPU follows instructions"
+goal = "Understand the fetch, decode, execute loop."
+text = '''
+A program, for the CPU, is a list of **instructions**. An instruction is one small command, such as "add these two numbers", "copy this value", "compare these two numbers" or "continue at another place in the program". Every instruction does very little. A program needs millions of them, but a CPU runs billions per second.
+
+The CPU runs instructions in a loop that never stops:
+
+1. **Fetch**: read the next instruction from memory.
+2. **Decode**: work out what the instruction means.
+3. **Execute**: do it.
+
+Then it moves on to the next instruction, and starts again. To know where it is, the CPU keeps the address of the next instruction in a special place, the *instruction pointer*.
+
+Here is that loop written in Rust, for a pretend CPU:
+
+```rust
+let mut ip = 0;               // instruction pointer: where we are
+loop {
+    let op = memory[ip];      // 1. fetch
+    match op {                // 2. decode
+        1 => { /* add */ }    // 3. execute
+        2 => { /* copy */ }
+        0 => break,           // stop
+        _ => panic!("unknown instruction"),
+    }
+    ip += 1;                  // go to the next instruction
+}
+```
+
+A real CPU does exactly this, only in hardware and much faster. **Executing** a program means: running this loop over the program's instructions. When an instruction says "continue at another place", the CPU changes the instruction pointer. That is how `if`, `loop` and function calls work underneath.
+'''
+
+[[steps]]
+title = "Instructions are numbers"
+goal = "Run a tiny program in your head."
+text = '''
+Memory only holds numbers, so instructions are stored as numbers too. Each kind of instruction has a code number, its *opcode*. Instructions stored as numbers are called **machine code**.
+
+Let us invent a toy machine. It has one variable inside it, `acc` (short for *accumulator*), which starts at 0, and it knows three instructions:
+
+| bytes | meaning |
+|---|---|
+| `1 n` | add n to `acc` |
+| `2 n` | multiply `acc` by n |
+| `0` | stop |
+
+In Rust:
+
+```rust
+let program = [1, 5, 2, 3, 1, 4, 0];
+let (mut acc, mut ip) = (0, 0);
+loop {
+    match program[ip] {
+        1 => { acc += program[ip + 1]; ip += 2; }
+        2 => { acc *= program[ip + 1]; ip += 2; }
+        _ => break,
+    }
+}
+```
+
+Let us run `[1, 5, 2, 3, 1, 4, 0]` by hand. `1 5`: add 5, so `acc` = 5. `2 3`: multiply by 3, so `acc` = 15. `1 4`: add 4, so `acc` = 19. `0`: stop. The result is **19**.
+
+Notice that some instructions take more than one byte: the opcode, followed by its value. Real machine code works the same way.
+
+Now you: run the program `[1, 2, 2, 5, 1, 1, 2, 2, 0]`. What is in `acc` when it stops?
+'''
+instructions = [
+    "Start with `acc` = 0. Read the bytes from left to right, two at a time (`1 2`, then `2 5`, and so on) until you reach `0`.",
+    "Type the final value of `acc` in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["22"] }
+hints = [
+    "The pairs are: 1 2, 2 5, 1 1, 2 2, then 0.",
+    "Add 2 (2), multiply by 5 (10), add 1 (11), then multiply by 2.",
+    "11 * 2 = 22.",
+]
+success = '''
+22. You just did what a CPU does: fetch an opcode, decode it, execute it, move on. Reading machine code by hand is slow, so tools like ORRESS translate it into readable text for you.
+'''
+
+[[steps]]
+title = "Real machine code and assembly"
+goal = "Know what assembly language is."
+text = '''
+Real processors work exactly like the toy machine, with many more instructions. Here is one real instruction for a PC processor, as it is stored in memory:
+
+```text
+48 01 D8
+```
+
+These three numbers (written in *hexadecimal*, which the next lesson teaches) mean: "add the value in one storage slot of the CPU to another". The CPU's storage slots are called **registers**; they are the CPU's own tiny, very fast variables. Level 1 teaches them.
+
+Nobody wants to read `48 01 D8`. So every instruction also has a short text form, called **assembly language** (or *assembly* for short):
+
+```text
+add rax, rbx
+```
+
+`add` is the operation, `rax` and `rbx` are the names of two registers. A **disassembler** is a tool that turns machine code bytes back into assembly text. ORRESS has one built in: its **Disassembly** view shows a program's machine code as assembly.
+
+Remember the difference:
+
+- **machine code**: the numbers the CPU executes;
+- **assembly**: the same instructions written as text for people;
+- **source code** (like Rust): what the programmer wrote, much higher-level. One line of Rust often becomes many instructions.
+
+What does the CPU actually execute?
+'''
+check = { kind = "choice", options = [
+    "The Rust source code",
+    "Assembly text like add rax, rbx",
+    "Machine code: instructions stored as numbers in memory",
+    "Whatever the disassembler shows",
+], correct = 2, explain = [
+    "The CPU cannot read Rust. The compiler translates Rust into machine code first.",
+    "Assembly is the text form for people. The CPU only sees the numbers.",
+    "Correct: the CPU fetches numbers from memory and executes them.",
+    "The disassembler only translates machine code into text for you to read; it does not run anything.",
+] }
+hints = ["The CPU reads its instructions from memory, and memory only holds numbers."]
+
+[[steps]]
+title = "Program and process"
+goal = "Tell a program file and a running process apart."
+text = '''
+Two words that are easy to mix up:
+
+- A **program** (or **executable**) is a file in storage, like `myapp.exe`. It contains machine code and data, and it does nothing on its own.
+- A **process** is a program that is *running*. When you start the program, the operating system creates a process: it copies the program into memory, gives it space for its data, and lets the CPU run its instructions.
+
+You can start the same program several times. Then there is one program file, but several processes, each with its own memory. If one of them changes a variable, the others do not see it.
+
+```rust
+// Run this program twice at the same time:
+// two processes, each with its own `count`.
+fn main() {
+    let mut count = 0;
+    loop {
+        count += 1;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        println!("{count}");
+    }
+}
+```
+
+On Windows you can see all processes in the Task Manager (Ctrl+Shift+Esc); every line is one process.
+
+For reversing this matters: in **static analysis** you study the *program* file; in **dynamic analysis** you study a running *process*.
+
+You open Notepad three times. How many processes of Notepad are running?
+'''
+check = { kind = "choice", options = [
+    "One: there is only one notepad.exe file",
+    "Three: one process for every time you started it",
+    "Zero: processes only exist while you type",
+], correct = 1, explain = [
+    "There is one program file, but every start creates a new process.",
+    "Correct: each start creates its own process with its own memory.",
+    "A process exists from start to exit, whether it is busy or not.",
+] }
+hints = ["Each time you start a program, the operating system creates a new ..."]
+
+[[steps]]
+title = "The operating system"
+goal = "Know what the operating system does for a program."
+text = '''
+The **operating system** (**OS**), such as Windows, Linux or macOS, is the program that manages the computer. For every process it:
+
+- **loads** the program: reads the file from storage and copies it into memory;
+- gives the process its own memory and keeps processes apart, so one cannot read another's memory;
+- shares the CPU, so many processes seem to run at the same time;
+- offers **services**: reading and writing files, drawing windows, printing text, network connections.
+
+A normal program is not allowed to touch the hardware directly. When it wants to print text or open a file, it asks the OS. The low-level way to ask is a **system call**. Most programs ask through **libraries** instead: collections of ready-made functions. On Windows, the OS offers its functions in files called **DLLs** (dynamic-link libraries), such as `kernel32.dll`. The set of functions a library offers is its **API**.
+
+Follow a `println!` in Rust:
+
+```rust
+println!("Hello");
+// -> Rust's standard library formats the text
+// -> on Windows it calls WriteConsoleW in kernel32.dll
+// -> the OS draws the text in the console window
+```
+
+This is a gift for reversers: even when everything else in a program has lost its name, the names of the OS functions it uses are still in the file, because the OS needs them to connect the program to the library. A program that uses functions to open network connections is probably talking to the internet.
+'''
+
+[[steps]]
+title = "Who prints the text?"
+goal = "Check your understanding of the OS's role."
+text = '''
+Recall: a normal program cannot touch the hardware. To print, open files or use the network, it asks the operating system, usually through library functions in DLLs like `kernel32.dll`.
+
+Your Rust program runs `println!("Hello")` and the text appears on the screen. Who actually puts the text on the screen?
+'''
+check = { kind = "choice", options = [
+    "Your program writes directly to the screen hardware",
+    "The operating system, after your program asked it to",
+    "The compiler, while building the program",
+    "The CPU, without any software involved",
+], correct = 1, explain = [
+    "Normal programs are not allowed to touch hardware directly; the OS protects it.",
+    "Correct: the standard library asks the OS (on Windows through kernel32.dll), and the OS does it.",
+    "The compiler is finished long before the program runs.",
+    "The CPU runs the instructions, but the instructions that draw the text belong to the OS.",
+] }
+hints = ["The previous step followed a println! from Rust to the screen."]
+
+[[steps]]
+title = "Different CPUs, different machine code"
+goal = "Know what a CPU architecture is."
+text = '''
+Not all CPUs understand the same machine code. A family of CPUs with the same instructions is called an **architecture**. The two you will meet most are:
+
+- **x86-64** (also called x64 or AMD64): almost every Windows PC and laptop, and most servers. The crackmes in this Academy are x86-64 programs.
+- **ARM64** (also called AArch64): phones, tablets, Apple computers with M-series chips, and more and more servers.
+
+The bytes `48 01 D8` mean "add" to an x86-64 CPU, but something completely different (or nothing) to an ARM64 CPU. So a program is always built for one architecture. In Rust, you choose it with the *target*:
+
+```text
+cargo build --target x86_64-pc-windows-msvc     (Windows on x86-64)
+cargo build --target aarch64-apple-darwin       (macOS on ARM64)
+```
+
+You will also hear **32-bit** and **64-bit**. That is the size of the numbers the CPU works with most easily, and the size of its addresses. Modern computers are 64-bit; older programs and small devices are often 32-bit. The "64" in x86-64 and ARM64 means 64-bit.
+
+ORRESS can read programs for many architectures and shows which one a file is for in its **Info** view.
+
+You copy an x86-64 Windows program to a phone with an ARM64 processor. Can the phone's CPU run its machine code directly?
+'''
+check = { kind = "choice", options = [
+    "Yes, machine code is the same everywhere",
+    "No, ARM64 CPUs understand different machine code than x86-64 CPUs",
+], correct = 1, explain = [
+    "Each architecture has its own machine code; the same bytes mean different things.",
+    "Correct: a program must be built (or translated) for the architecture it runs on.",
+] }
+hints = ["What does the word architecture mean in this step?"]
+
+[[steps]]
+title = "The whole journey"
+goal = "Put all the pieces together."
+text = '''
+Here is the whole journey of a Rust program, from your editor to the CPU:
+
+1. You write **source code** in `main.rs`.
+2. `cargo build` runs the **compiler**, which translates it into **machine code** for one **architecture**, and writes an **executable** file to storage.
+3. You start the program. The **operating system** reads the file, copies it into **memory** and creates a **process**.
+4. The **CPU** fetches, decodes and executes the instructions, one after another, from memory.
+5. When the program wants to print or read a file, it asks the operating system through **library** functions.
+
+A reverser starts at step 2's result: the executable file. In **static analysis** you read the file; in **dynamic analysis** you watch the process.
+
+There is still one big question: everything is numbers. The next lesson teaches you the way reversers write numbers: **binary** and **hexadecimal**. After that, you will see bytes like `48 01 D8` and know what they are.
+
+Every bold word in this step is in the Glossary. If one of them feels unclear, unfold **Words in this step** below and click it.
+
+Press **Finish lesson** to complete this lesson.
+'''

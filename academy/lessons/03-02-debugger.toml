@@ -1,0 +1,306 @@
+id = "l3-debugger"
+level = 3
+order = 2
+title = "The debugger"
+summary = "Start crackme #2 under ORRESS's control, read its registers and status line, and let it run to the end."
+badge = "Debugger"
+goals = [
+    "open the Debugger panel and start a program under the debugger",
+    "read the status line and recognise a runtime address",
+    "find the registers, the stack and the Breakpoints list in the panel",
+    "let the program run, give it input in its console window, and read its exit code",
+    "pause, stop and restart a debugging session",
+]
+
+[[steps]]
+title = "What a debugger does"
+goal = "Know the four things a debugger can do."
+text = '''
+A **debugger** is a program that runs another program under its control. On Windows, the debugger asks the operating system to start the program as a **debuggee**. From then on, Windows reports to the debugger whenever something important happens in that process, and the process stays frozen until the debugger lets it go on.
+
+With that control, a debugger can do four things:
+
+1. **Stop** the program at an instruction you choose. Such a stop point is a **breakpoint**.
+2. **Step**: run exactly one instruction, then stop again. You know stepping from the CPU simulator in Level 1; now it happens on a real program.
+3. **Show** the state while the program is stopped: the registers, the status flags, the stack and any memory you ask for.
+4. **Change** that state: put a different value into a register, then let the program continue.
+
+While the program is stopped, nothing in it moves. You can take as long as you want to look around. Only when you press **Continue** or **Step** does the CPU execute its instructions again.
+
+ORRESS's debugger is in the **Debugger panel**, in the bottom dock. It works with the file whose tab you used last, so it always debugs the program you are looking at.
+
+In this lesson you use it on crackme #2, the program from the end of Level 1. You already know its password check, so you can concentrate on the debugger itself.
+
+**On Linux or macOS?** The panel will tell you that native debugging needs Windows. Read this lesson anyway: the next lessons build on its words. You can press **Next** on the steps you cannot do.
+'''
+
+[[steps]]
+title = "Open crackme #2"
+goal = "Open the program you will debug."
+text = '''
+Open crackme #2 again. If it is still open from Level 1, the button brings its tab to the front.
+
+ORRESS opens the **Hex** and **Info** tabs and analyses the program, as before. Opening a file still does not run it. The program runs only when you press **Start debugging** in a moment.
+
+Remember what you found in Level 1: `main` reads a line, calls the password check at `0x140001100` (you named it `check_password`), and then decides with `test al, al` and `je` whether to print "Correct!" or "Wrong password".
+'''
+instructions = [
+    "Click the button **Open crackme02** below.",
+    "Wait until the **Project** panel on the left shows `crackme02.exe` with its views.",
+]
+check = { kind = "open_crackme", name = "crackme02" }
+hints = ["The button is below the Do this box."]
+
+[[steps]]
+title = "Open the Debugger panel"
+goal = "Find the Debugger panel and its start screen."
+text = '''
+The Debugger panel opens in the **bottom dock**. There are three ways to open it:
+
+- press **F6**;
+- in the menu bar, click **View**, then **Open View**, then **Open Debugger**;
+- in the command palette (**Ctrl+Shift+P**), type `debugger` and pick **Open Debugger**.
+
+Before a program runs, the panel shows its **start screen**:
+
+- the title **Debugger** and a short explanation (hover over the title for more);
+- the button **Start debugging**;
+- a line saying that the program will stop at `main`;
+- the **Breakpoints** list, which is empty for now.
+
+On Linux and macOS, a yellow line replaces the button: native debugging is available on Windows only.
+
+The bottom dock may be small. You can drag its top edge upwards to make it taller, which helps in the next steps: the panel will show many registers.
+'''
+instructions = [
+    "Click the `crackme02.exe` tab you want to debug (for example **Info**), so it is the file you used last.",
+    "Press **F6** (or click **View > Open View > Open Debugger**).",
+    "Look at the start screen in the bottom dock. If it is small, drag its top edge upwards.",
+]
+spotlight = "dock.bottom"
+check = { kind = "action", id = "view::Debugger" }
+hints = [
+    "F6 is the shortcut. The panel appears in the bottom dock.",
+    "Or open the command palette with Ctrl+Shift+P and type: debugger",
+]
+success = '''
+That is the Debugger panel. It belongs to the bottom dock, next to tools such as **Cross-references** and **Terminal**.
+'''
+
+[[steps]]
+title = "Start debugging"
+goal = "Start the program and read where it stopped."
+text = '''
+Press **Start debugging**. Three things happen:
+
+1. Windows starts `crackme02.exe` as a debuggee. Because the crackme is a console program, a **console window** opens: a black window where the program will print text and read your input. It is still empty, because `main` has not run yet. The console may appear in front of ORRESS; click the ORRESS window to come back.
+2. You did not set any breakpoint yet, so ORRESS sets one at `main` for you. The start-up code runs, calls `main`, and the program stops at its first instruction.
+3. The panel changes: a row of buttons (**Continue**, **Step**, **Pause**, **Stop**), then a **status line**, then the registers.
+
+The status line says why the program stopped, for example:
+
+```text
+stopped at breakpoint 0x7ff6a1b412f0
+```
+
+That is a **runtime address**, as in the previous lesson. Your number will be different, because ASLR picks a new base on every run. But the last four hex digits are always those of `main`.
+
+What are the last four hex digits of the address in your status line?
+'''
+instructions = [
+    "In the Debugger panel, click **Start debugging**.",
+    "If a black console window appears in front, click the ORRESS window to come back to it.",
+    "Read the status line under the buttons in the Debugger panel.",
+    "Type the last four hex digits of the address and press **Check**.",
+]
+spotlight = "view.Debugger"
+check = { kind = "answer", answers = ["12f0", "0x12f0", "12f0h"] }
+hints = [
+    "The status line is the line of text just below the Continue / Step / Pause / Stop buttons.",
+    "main is at file address 0x1400012F0. ASLR does not change the last four digits.",
+    "The answer is 12f0. (If you are not on Windows, type it anyway to continue.)",
+]
+success = '''
+`12f0`: the program is stopped at the first instruction of `main`. Your runtime address is different from everyone else's, but its end always matches the file address `0x1400012F0`.
+
+Look at the Disassembly view too (**Go > Go to main**): the line of `main`'s first instruction is tinted green, with a small green triangle in the left gutter, and a red dot shows the breakpoint. The green line is always the instruction that will run **next**.
+'''
+
+[[steps]]
+title = "The registers"
+goal = "Read the registers of a stopped program."
+text = '''
+Below the status line, the panel lists the **registers**, two per row: `rax` and `rbx`, `rcx` and `rdx`, `rsi` and `rdi`, `rbp` and `rsp`, `r8` to `r15`, and at the end `rip` and `rsp` once more. Every value is shown as 16 hex digits, because each register holds 64 bits. Hover over a value to see it in decimal.
+
+These are not guesses: this is the real CPU state of the stopped program. You will see the values change as the program runs. After a step, the registers that changed are shown in a different color, so you notice at once what the last instruction did.
+
+Below the registers are:
+
+- a **set** row, to change a register (lesson 5);
+- the **flags** line: `CF`, `ZF`, `SF`, `OF`, `PF`, `DF`, `TF`. A flag that is set is highlighted. Hover over one to read what it means. You know `ZF`, `SF`, `CF` and `OF` from Level 1.
+
+One register always holds the address of the next instruction to run. Its value should therefore be the same as the address in the status line. Which register is it?
+'''
+instructions = [
+    "In the Debugger panel, find the register list under the status line.",
+    "Find the register whose value ends in `12f0`.",
+]
+spotlight = "view.Debugger"
+check = { kind = "choice", options = ["rsp", "rip", "rax"], correct = 1, explain = [
+    "rsp is the stack pointer: the address of the top of the stack. It points into the stack, not into the code.",
+    "Right. rip, the instruction pointer, holds the address of the next instruction. It is a runtime address, like the one in the status line.",
+    "rax is a general-purpose register. At this moment it holds whatever the start-up code left in it.",
+] }
+hints = ["Level 1: which register is the instruction pointer?"]
+success = '''
+`rip` holds the address of the next instruction, as a runtime address. The CPU reads its next instruction from there.
+'''
+
+[[steps]]
+title = "Stack, memory and breakpoints"
+goal = "Find the three sections at the bottom of the panel."
+text = '''
+Under the flags, the panel has three sections that you can fold open and closed:
+
+- **Stack**: the top of the stack, 8 bytes per row. The left column is the address, the right column the 8-byte value stored there. The row marked `rsp>` is where `rsp` points: the top of the stack. When the program has just entered a function, this row holds the **return address** (Level 1).
+- **Memory**: closed at first. You type an address or a register name, press **Show**, and see 128 bytes of the program's memory as hex and as characters. You will use it in lesson 4.
+- **Breakpoints**: every breakpoint you set in this file. Each entry has a small **x** button to remove it, and a link with the address or name. Click the link to jump there in the Disassembly view.
+
+The breakpoint list uses **file addresses** and names, like the rest of ORRESS. When a breakpoint is inside a function with a name, the list shows the name plus an offset, such as `main+0x123`. A breakpoint on the first instruction of a function shows the name alone.
+
+ORRESS keeps your breakpoints per file, also when the program is not running. The next time you start this file, the same breakpoints are set again.
+
+What does the Breakpoints list show for the breakpoint that ORRESS set for you?
+'''
+instructions = [
+    "In the Debugger panel, scroll down below the flags.",
+    "Look at the **Stack** section and find the row that starts with `rsp>`.",
+    "Look at the **Breakpoints** section and read its entry.",
+    "Type the text of the entry and press **Check**.",
+]
+check = { kind = "answer", answers = ["main", "main+0x0"] }
+hints = [
+    "ORRESS set the breakpoint on the first instruction of a function.",
+    "The entry is the name of that function: main.",
+]
+success = '''
+`main`. The name is a link: click it, and the Disassembly view jumps to `main`.
+'''
+
+[[steps]]
+title = "Continue and give input"
+goal = "Let the program run to the end and read how it ended."
+text = '''
+The program is still frozen at the first instruction of `main`. Press **Continue**: the program now runs freely until it reaches another breakpoint, or until it ends.
+
+There are no other breakpoints. So `main` runs, prints its title and `Password: ` in the console window, and then waits for you to type. While it waits, the status line says *running...*: the program is not stopped, it is waiting for input. **Pause** is now enabled.
+
+Go to the console window, type a wrong password such as `hello`, and press **Enter**. The program compares, prints `Wrong password. Try again!`, and ends. The console window usually closes at once, so you may not be able to read that line. That is fine: the debugger tells you how the program ended.
+
+When the program has ended, the panel shows the start screen again, with one extra line at the top:
+
+```text
+Last run: the program exited (code N)
+```
+
+`N` is the program's **exit code**: a number every program hands to the operating system when it ends. What is it after a wrong password?
+'''
+instructions = [
+    "In the Debugger panel, click **Continue**.",
+    "Click the console window of `crackme02.exe` (look for it in the taskbar if you cannot see it).",
+    "Type `hello` and press **Enter**.",
+    "Come back to ORRESS and read the line **Last run:** at the top of the Debugger panel.",
+    "Type the number in brackets and press **Check**.",
+]
+spotlight = "view.Debugger"
+check = { kind = "answer", answers = ["1"], number = true }
+hints = [
+    "If nothing happens after Enter, check that you typed into the console window and not into ORRESS.",
+    "The line reads: Last run: the program exited (code ...).",
+    "Look at the Rust source of crackme #2 from Level 1: what does it call after printing Wrong password?",
+]
+success = '''
+Exit code `1`. In the Rust source of crackme #2, the wrong branch calls `std::process::exit(1)`.
+'''
+
+[[steps]]
+title = "Exit codes"
+goal = "Use the exit code to tell success from failure."
+text = '''
+Every process ends with an **exit code**, a number for the operating system. The convention is simple:
+
+- `0` means *success*;
+- anything else means *something went wrong*. The program decides which number means what.
+
+In Rust:
+
+```rust
+fn main() {
+    if ok {
+        println!("Correct!");
+        // main returns normally: the exit code is 0
+    } else {
+        println!("Wrong password. Try again!");
+        std::process::exit(1);   // the exit code is 1
+    }
+}
+```
+
+All Academy crackmes follow this rule: exit code `0` for the correct password, `1` for a wrong one. That is very useful in this level. The console window closes as soon as the program ends, but the line **Last run:** in the Debugger panel stays. It tells you whether you won, even if you never saw the text.
+
+(Programs that crash end with a large, strange exit code instead, for example `-1073741819`, which is `0xC0000005` in hex: Windows' code for *access violation*. If you ever see such a number, the program did not end by itself.)
+
+You enter the correct password `R3v3rs3` in crackme #2 under the debugger. What will the line **Last run:** show?
+'''
+check = { kind = "choice", options = [
+    "the program exited (code 0)",
+    "the program exited (code 1)",
+    "stopped at breakpoint main",
+], correct = 0, explain = [
+    "Right. On the correct password, main returns normally, and a normal end is exit code 0.",
+    "Code 1 comes from std::process::exit(1), which only runs for a wrong password.",
+    "The breakpoint at main is hit when the program starts, before you type anything. After Continue, the program runs to the end.",
+] }
+hints = ["Which branch calls std::process::exit(1)?"]
+success = '''
+Exit code `0`. Try it if you are on Windows: **Start debugging**, **Continue**, type `R3v3rs3` in the console, press Enter.
+'''
+
+[[steps]]
+title = "Pause, Stop and start again"
+goal = "Know how to interrupt and end a debugging session."
+text = '''
+You know **Continue**. The other buttons in the row are:
+
+- **Step**: runs exactly one instruction, then stops. Only enabled while the program is stopped. The next lesson is about stepping.
+- **Pause**: stops a program that is running, wherever it is at that moment. If it is waiting for your input, it is stopped somewhere inside a Windows DLL, not in the crackme's own code; the Disassembly view then has no line to mark. Pause is most useful for a program stuck in a long loop.
+- **Stop**: ends the program at once. Its exit code then is not the program's own.
+
+When a run has ended, in any way, the panel shows **Start debugging** again with the **Last run:** line. You can debug the same program as often as you want. The breakpoints stay.
+
+The keys **F5** (Continue), **F10** and **F11** (Step) and **Shift+F5** (Stop) work only while the **Debugger panel has the keyboard focus**: click into the panel first. Everywhere else, **F5** opens the decompiler. The buttons always work, so the lessons use the buttons.
+
+Try it now: start the program again, and while it waits at `main`, press **Stop**.
+'''
+instructions = [
+    "In the Debugger panel, click **Start debugging**. The program stops at `main` again.",
+    "Click **Stop**. The program ends, and the panel shows **Last run:** and **Start debugging**.",
+]
+check = { kind = "continue" }
+
+[[steps]]
+title = "What you can do now"
+goal = "Sum up the debugger basics."
+text = '''
+You started a real program under a debugger, and you can now:
+
+- open the **Debugger panel** (**F6**) for the file you used last;
+- **start** a program: ORRESS stops it at `main` if you set no breakpoint;
+- read the **status line**: why it stopped, at which runtime address;
+- read the **registers** (`rip` is the next instruction) and the **flags**;
+- find the **Stack**, **Memory** and **Breakpoints** sections;
+- **continue**, type input in the program's console window, and read the **exit code** in the **Last run:** line;
+- **pause**, **stop**, and start again.
+
+Stopping at `main` is a start, but the interesting code is further on: the password check. In the next lesson you set your own breakpoints, stop right before the check, and follow the program **one instruction at a time** into it.
+'''

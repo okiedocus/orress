@@ -1,82 +1,304 @@
 id = "l7-time-travel-debugging"
 level = 7
-order = 50
+order = 1
 title = "Time-travel debugging"
-summary = "Record an execution once and step backward through it: why reverse debugging changes everything, and how to do it in ORRESS."
+summary = "Record a function once, then step backward through it to find exactly which instruction caused a result."
+goals = [
+    "explain what an execution trace is and why stepping backward is useful",
+    "record a trace of one function in the Emulator",
+    "move backward and forward through the trace and read the registers at each step",
+    "follow a wrong result back to the instruction and the input byte that caused it",
+]
 badge = "Time Traveller"
 
 [[steps]]
-title = "The trouble with going forward"
+title = "Welcome to the Expert level"
+goal = "See why a normal debugger makes some questions hard."
 text = '''
-Welcome to Expert level. The first superpower: **debugging backward**.
+Welcome to the last level. You can already read assembly, use the decompiler, the debugger and the emulator, and you have solved crackmes with keygens, solvers and side channels. This level adds four expert skills: **time-travel debugging**, **binary diffing**, kernel **drivers and rootkits**, and **automating ORRESS with scripts**. It ends with a final project that uses everything.
 
-An ordinary debugger only moves forward. You hit a breakpoint, step past the interesting moment, and then realise the value you wanted is three instructions back — too late. Your only option is to restart and set an earlier breakpoint, over and over, hoping the program behaves the same each time. For a crash deep in a loop, or a value you can't explain, that's agony.
+Start with a problem you have probably met. A normal debugger only moves **forward**. You set a breakpoint, run, and step one instruction at a time. Now imagine you step past the interesting moment: the register you wanted to see has already been overwritten. The only way back is to restart the program and stop earlier. If the program behaves a little differently each run (other input, other timing, random values), you may never see the same moment twice.
 
-The question you really want to ask is "**how did this register end up wrong, and which instruction did it?**" Forward-only debugging makes you guess your way there. There's a better way.
+Most real questions are about the **past**:
+
+- "This function returned `false`. Which comparison failed?"
+- "This register holds a strange value. Which instruction wrote it?"
+- "The program crashed here. What led up to it?"
+
+Answering them by moving forward means guessing where to stop, again and again. In this lesson you learn a way to answer them directly, by recording the run once and then walking **backward** through it.
 '''
 
 [[steps]]
-title = "Record once, replay freely"
+title = "Record once, replay as often as you like"
+goal = "Understand what a trace is."
 text = '''
-**Time-travel debugging (TTD)** flips the model. Instead of stepping a live process, you **record the whole execution** — every instruction, with a snapshot of the CPU at each one — into a **trace**. Then you move **backward and forward** through that recording as much as you like, without ever re-running the program.
+**Time-travel debugging** works in two phases.
 
-Now the hard questions become easy:
+1. **Record.** The program (or one function) runs once. After **every** instruction, the tool saves a small **snapshot**: the address of the instruction that just ran and the values of all registers at that moment. This list of snapshots is called an **execution trace**.
+2. **Replay.** You move through the saved list instead of the live program. Stepping forward means "show the next snapshot", stepping backward means "show the previous one". Nothing runs again, so going back is as easy as going forward.
 
-- "What was `rax` fifty instructions ago?" -> scrub back fifty steps and read it.
-- "When did this flag get set?" -> jump to the step where it changed.
-- "What led to the crash?" -> start at the end and walk backward to the cause.
+In Rust, a trace is not much more than a `Vec`:
 
-Debugging stops being a live chase and becomes **searching a recording** you already hold.
+```rust
+struct Snapshot {
+    addr: u64,       // the instruction that just ran
+    regs: [u64; 16], // rax, rcx, rdx, ... r15 after it ran
+}
+
+let trace: Vec<Snapshot> = record(function, input);
+let now = &trace[193];     // look at step 193
+let before = &trace[192];  // "step back" is just index - 1
+```
+
+Because the recording never changes, every question you ask gets the same answer, every time. That property is called **deterministic replay**, and it is what makes time travel reliable: you can look at step 193, jump to step 10, and come back to step 193 to find exactly the same values.
+'''
+deep_dive = '''
+Professional tools record whole programs: WinDbg's Time Travel Debugging on Windows, `rr` on Linux, and record-and-replay modes in emulators such as QEMU. They also record memory writes, system calls and thread switches, so a trace of a big program can be gigabytes.
+
+ORRESS records inside its own emulator, one function at a time, and saves the registers (not memory) after each instruction. That keeps traces small and fast. If you need to know what memory looked like at a step, run the same function again with the same input: the emulator is deterministic, so it does exactly the same thing.
 '''
 
 [[steps]]
-title = "What time-travel is for"
+title = "What does stepping back do?"
+goal = "Check that the idea of a trace is clear."
 text = '''
-TTD shines at one particular kind of problem. Which?
+You recorded a trace and are looking at step 50. You click **step back** once. Think about what really happens inside the tool before you answer.
 '''
 check = { kind = "choice", options = [
-  "Working backward from a bad value or a crash to the exact instruction that caused it",
-  "Making the program run faster",
-  "Compiling source code into a binary",
-  "Encrypting the program so it can't be analysed",
-], correct = 0 }
+    "The tool shows the saved snapshot of step 49; nothing is executed again",
+    "The CPU runs instruction 50 backwards to undo it",
+    "The tool restarts the program and runs it again until step 49",
+    "The program's memory is restored from a backup on disk",
+], correct = 0, explain = [
+    "Right. The run was recorded once; stepping back only shows an earlier entry of the recorded list.",
+    "A CPU cannot run instructions backwards. Many instructions also destroy information (for example `xor eax, eax` forgets the old value), so undoing them is impossible. That is why the state is saved before it is lost.",
+    "That is what you must do with a normal debugger. A trace makes it unnecessary: the earlier step is already saved.",
+    "Nothing is stored on disk and no memory is restored. ORRESS's trace keeps the registers of every step in memory and simply shows another entry.",
+] }
 hints = [
-  "Think about the one question forward-only debugging can't answer without restarting.",
-  "It's about cause-and-effect: tracing an effect back to its cause in the execution.",
+    "A trace is a list that was filled in during one single run.",
+    "Going from index 50 to index 49 of a `Vec` does not run anything.",
 ]
-success = "Exactly — TTD is about root cause: you have the symptom at the end and step backward to find the instruction responsible."
+success = "Exactly. Time travel is reading a recording. That is why it is cheap to go back and forth hundreds of times."
 
 [[steps]]
-title = "Time-travel in ORRESS"
+title = "The program for this lesson"
+goal = "Get to know crackme17 and its check function."
 text = '''
-ORRESS's **Emulator** has time-travel built in. Press the **Record** button (marked with a record icon) and it runs the function, capturing every instruction and the register file at each step. A **slider** then appears: drag it to scrub through the execution, and at each step ORRESS shows the instruction that ran and the registers at that point, with the ones that **changed at that step highlighted**.
+For this lesson you use a new practice program, **crackme17**, "KeyVault 1.0". It asks for a licence key and prints "Access granted" or "Access denied". The check is done by one function. Written in Rust it looks like this (the expected bytes `ENC` are a secret table in the program's data):
 
-Open the **Emulator** tab (F7, the View menu, or the command palette) and look for the Record button.
+```rust
+fn check_key(key: &[u8]) -> bool {
+    for &b in key {                       // 1. every byte must be printable
+        if !(0x20..=0x7e).contains(&b) { return false; }
+    }
+    let mut i = 0;
+    while i < key.len() {                 // 2. compare byte by byte
+        if i >= 10 { return false; }
+        if (key[i] ^ 0x5c).wrapping_add(i as u8) != ENC[i] {
+            return false;                 // stops at the first wrong byte
+        }
+        i += 1;
+    }
+    true
+}
+```
+
+So each key byte is XORed with `0x5c`, its position `i` is added, and the result must equal `ENC[i]`.
+
+The argument `key: &[u8]` is a **slice**: a pointer to the bytes plus their length. On Windows the first two arguments arrive in `rcx` and `rdx`, so `rcx` holds the address of the key and `rdx` holds its length. Remember this, you need it when you start the function in the Emulator.
+
+Click **Open crackme17** below to open the program.
 '''
-check = { kind = "action", id = "view::Emulator" }
+instructions = [
+    "Click the **Open crackme17** button below this text.",
+    "Wait until the tabs `crackme17.exe · Hex` and `crackme17.exe · Info` appear.",
+]
+check = { kind = "open_crackme", name = "crackme17" }
+hints = ["The button is part of this lesson step, just under the text."]
+success = "crackme17 is open. ORRESS analysed it in the background, so its functions and disassembly are ready."
+
+[[steps]]
+title = "Find check_key"
+goal = "Find the address of the check function yourself."
+text = '''
+The program is stripped, so `check_key` has no name. You know how to find it: `main` reads a line, calls the check, and then tests the result with `test al, al` (a `bool` comes back in `al`, the lowest byte of `rax`).
+
+In crackme17, that call sits at address `0x140001223` inside `main`. The **Go to** bar of the disassembly jumps to any address you type. Read the instruction at that address: it is a `call` to a function named `sub_...`. The part after `sub_` is the function's address.
+'''
+instructions = [
+    "Press **Ctrl+D** to open the **Disassembly** of crackme17.",
+    "Press **Ctrl+G**. A **Go to** bar appears at the top of the disassembly.",
+    "Type `140001223` and press **Enter**.",
+    "The disassembly jumps to that address. Read the instruction on that line: `call sub_...`. The line below it is `test al,al`.",
+    "Type the called address, with `0x` in front (for example `0x140001000`), in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x1400012c0"], number = true }
+hints = [
+    "The answer is the hex number after `sub_` on the `call` line.",
+    "Type it with `0x` in front, so ORRESS reads it as hexadecimal.",
+    "The line reads `call sub_1400012c0`. Type `0x1400012c0`.",
+]
+success = "`check_key` starts at `0x1400012c0`. Click the name `sub_1400012c0` in the disassembly if you want to look at it: you will find the two loops from the Rust code, the `xor ...,0x5c` and the `add`."
+
+[[steps]]
+title = "Record a trace"
+goal = "Run check_key once in the Emulator and record every instruction."
+text = '''
+Now record `check_key` with a key that is **almost** right. The real key is 10 characters long. You will use `ORR-DIFX-7`, which has one wrong character. Your job in the next steps is to find out, with time travel only, **which** character is wrong.
+
+The Emulator calls a function like this: it copies your **Input** text into a scratch buffer in its memory and passes the buffer's address as the first argument (`rcx`). With the box **pass input length as arg1** ticked, it also passes the length as the second argument (`rdx`). `check_key` takes a slice, so it needs both: tick the box.
+
+The **Record** button runs the function exactly like **Run**, but saves a snapshot after every instruction (at most 100 000). When it finishes, a **Time-travel** section appears under the buttons, with a line such as `step 200 / 200   @ 0x140001343`: the step you are looking at, the number of the last step, and the address of the instruction of that step. Steps are counted from 0, so a trace with 201 instructions ends at step 200.
+'''
+instructions = [
+    "Press **F7** to open the **Emulator** tab (or use **View > Open View > Open Emulator**).",
+    "In the **Run function** part, click into the **Function address** field and type `0x1400012c0`.",
+    "Click into the **Input** field and type `ORR-DIFX-7`.",
+    "Tick the box **pass input length as arg1**.",
+    "Click the **Record** button (next to **Run**).",
+    "Under **Time-travel**, read the line `step ... / ...`. Type the second number (the last step) in the answer box.",
+]
 spotlight = "view.Emulator"
-hints = ["F7 opens it — or Ctrl+Shift+P and type \"Emulator\". The Record button is near the run controls."]
+check = { kind = "answer", answers = ["200"], number = true }
+hints = [
+    "The line looks like `step 200 / 200   @ 0x...`. After recording, ORRESS shows the last step.",
+    "If you got a much smaller number such as 16, the box **pass input length as arg1** was not ticked, so `rdx` held a random length. Tick it and click **Record** again.",
+    "The trace has 201 instructions, numbered 0 to 200. Type `200`.",
+]
+success = "You recorded 201 instructions of `check_key`. Everything that happened in this run is now saved, and you can look at any moment of it."
 
 [[steps]]
-title = "Which way is back?"
+title = "Reading one step"
+goal = "Understand what the Time-travel panel shows."
 text = '''
-The scrubber is a timeline of the recorded steps. Moving the slider toward higher numbers steps *forward* through the execution; moving it toward lower numbers does the opposite — the move an ordinary debugger can't make.
+Look at the **Time-travel** section. It has:
 
-Moving the slider one step toward lower numbers takes you one instruction which direction in time? (One word.)
+- Four small buttons. Hover them to see their names: **first** (step 0), **step back**, **step forward** and **last**.
+- A **step** slider. Drag it, or click the number next to it and type a step number.
+- The line `step N / last   @ address`: which step you look at and the address of the instruction that ran in that step.
+- The 16 registers, `rax` to `r15`. These are the values **after** the instruction of this step ran. Registers that **changed** in this step are drawn in a warning colour (bold).
+- At the bottom, why the recording stopped. `stop: Target(...)` means the function returned normally.
+
+You are on the last step. Its address is `0x140001343`, which is the `ret` at the end of `check_key`. So `rax` here holds the return value. `check_key` returns a `bool`, and a `bool` is in `al`, the lowest byte of `rax`: `1` means true, `0` means false.
 '''
-check = { kind = "answer", answers = ["back", "backward", "backwards"], number = false, case_sensitive = false }
-hints = ["It's the direction that gives time-travel debugging its name.", "Lower step number = earlier in the execution."]
-success = "Backward — stepping to earlier recorded steps is the whole point: you replay the past without re-running the program."
+instructions = [
+    "In the **Time-travel** section, check that the line says `step 200 / 200   @ 0x140001343`. If not, click the **last** button (the fourth small button).",
+    "Read the value of `rax` in the register grid.",
+    "Type that value in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0"], number = true }
+hints = [
+    "`rax` is the first register in the grid, top left.",
+    "It is written in hex, padded with spaces: `0x0` is zero.",
+    "The function returned false, so `rax` is `0`.",
+]
+success = "`rax` is 0: `check_key` said **false**, as expected for a wrong key. That is the symptom. Now you travel back in time to find its cause."
 
 [[steps]]
-title = "A method for root cause"
+title = "Back to the failing comparison"
+goal = "Walk backward to the comparison that failed and read the loop counter."
 text = '''
-Use the trace deliberately:
+Here is the core of the byte loop of `check_key`, as ORRESS shows it in the disassembly:
 
-1. **Record the execution** of the function or region you care about. The trace is bounded (a fixed maximum number of steps), so aim it at the interesting code rather than the whole program.
-2. **Start at the symptom.** Scrub to the end — the crash, the wrong return value, the bad register.
-3. **Walk backward along the data.** Find the step where that register last changed; read the instruction and the state there. If its inputs are also suspect, step back to where *they* were set. Follow the dependency chain upstream.
-4. **Stop at the root.** When you reach the instruction that first introduced the bad value, you've found the cause — no guessing, no restarts.
+```text
+14000131b  movzx ebx,byte ptr [rcx+r9]   ; rbx = key[i]       (r9 is i)
+140001320  xor   bl,0x5c                 ; key[i] ^ 0x5c
+140001323  mov   [rsp+0x2f],bl           ; (black_box: store...)
+140001327  movzx esi,byte ptr [rsp+0x2f] ; (...and load again into rsi)
+14000132c  add   esi,r9d                 ; + i
+14000132f  cmp   sil,[r9+r11]            ; compare with ENC[i]
+140001333  jne   loc_1400012e7           ; different: return false
+```
 
-Because the recording is a **deterministic replay**, the same execution is there every time you look — a decisive advantage over re-running code that behaves differently on each run. That reliable, reversible view of an execution is one of the most powerful tools an expert has.
+`r9` is the loop counter `i`, and `r11` holds the address of the `ENC` table. The `cmp` at `0x14000132f` runs once for every byte that is checked. The **last** time it runs is the comparison that failed. Walking backward from the end, the first `cmp` you meet is that last one.
+'''
+instructions = [
+    "Make sure you are on the last step (`step 200 / 200`).",
+    "Click the **step back** button (the second small button) once and read the address after `@`.",
+    "Keep clicking **step back** until the line shows `@ 0x14000132f`. It takes seven clicks; watch the address change with each click.",
+    "On that step, read the value of `r9` in the register grid.",
+    "Type the value of `r9` in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["7"], number = true }
+hints = [
+    "It takes seven clicks on **step back**. The step number is then 193.",
+    "You can also click the number next to the **step** slider and type `193`.",
+    "At step 193, `r9` is `0x7`. Type `7`.",
+]
+success = '''At step 193, `r9` = 7: the comparison failed for byte number 7, counted from 0. In `ORR-DIFX-7` that is the eighth character, `X`. Also notice the step just after it: at step 195 `rax` becomes 0 (the `xor eax,eax` of `return false`), which is where the symptom you saw at the end was created.'''
+
+[[steps]]
+title = "Follow the data upstream"
+goal = "Find the input byte that produced the wrong value."
+text = '''
+At step 193 the CPU compared `sil` (the low byte of `rsi`) with `ENC[7]`. `rsi` is `0xb` there. Where did that `0xb` come from? This is the most important time-travel move: **follow a value backward to the instruction that wrote it**, then look at that instruction's inputs, and repeat.
+
+Step back one at a time and watch which register is highlighted:
+
+- Step 192, `add esi,r9d`: `rsi` becomes `0xb`. Its inputs were `rsi` and `r9` (7).
+- Step 191, `movzx esi,...`: `rsi` becomes `0x4`, loaded from the stack.
+- Step 190, `mov [rsp+0x2f],bl`: no register changes; `bl` was stored.
+- Step 189, `xor bl,0x5c`: `rbx` becomes `0x4`.
+- Step 188, `movzx ebx,byte ptr [rcx+r9]`: `rbx` is loaded with `key[7]`, the byte **you typed**.
+
+So the chain is: your byte, XOR `0x5c`, plus 7, compared with `ENC[7]`. Read the value that step 188 loaded.
+'''
+instructions = [
+    "From step 193, click **step back** five times, until the line shows `step 188 / 200   @ 0x14000131b`.",
+    "Read the highlighted register `rbx`.",
+    "Type its value (in hex with `0x`, or as a character in single quotes) in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x58"], number = true }
+hints = [
+    "At step 188 only one register is highlighted: `rbx`.",
+    "It is a small number: the ASCII code of one character of `ORR-DIFX-7`.",
+    "`rbx` is `0x58`, which is the character `X`. Type `0x58` or `'X'`.",
+]
+success = '''`0x58` is `'X'`, the wrong character, and you found it without reading the source and without running the program twice. You can even compute the right character now: `ENC[7]` must equal `(c ^ 0x5c) + 7`. You will learn to read `ENC` from the program with a script later in this level.'''
+
+[[steps]]
+title = "When to use time travel"
+goal = "Know which questions a trace answers best."
+text = '''
+You just did a complete **root cause** analysis: you started at the symptom (`rax` = 0), went back to the decision that caused it (the failing `cmp` at step 193), and followed the compared value back to its origin (the byte you typed, at step 188).
+
+You want to know which instruction last changed `r8` before step 150 in a trace. Which way is best?
+'''
+check = { kind = "choice", options = [
+    "Go to step 150 and click step back until `r8` is highlighted",
+    "Set a breakpoint on every instruction and run the program again",
+    "Read the whole function in the decompiler and guess",
+    "Record the trace again with a bigger step limit",
+], correct = 0, explain = [
+    "Right. A highlighted register means it changed in that step, so the first highlight of `r8` going backward is the instruction that last wrote it.",
+    "That is the forward-only way. It works, but it is slow, and the trace already contains the answer.",
+    "Reading code helps you understand it, but the trace tells you exactly what happened in this run, with these values.",
+    "The trace already includes step 150 and everything before it. A bigger limit only helps when a run is longer than 100 000 instructions.",
+] }
+hints = [
+    "The panel highlights the registers that changed in the step you are looking at.",
+    "Moving backward from 150, the first step where `r8` lights up is the answer.",
+]
+success = "That is the time-travel workflow: start at the symptom, go back to the last write, look at its inputs, repeat."
+
+[[steps]]
+title = "Method and limits"
+goal = "Take away a repeatable method and know what ORRESS's trace cannot do."
+text = '''
+The method you used works on any recorded function:
+
+1. **Record** the function you suspect, with an input that shows the problem. Keep it small: a trace is limited to 100 000 instructions, so record one function, not a whole program.
+2. **Start at the symptom.** Go to the last step, or to the step where something looks wrong.
+3. **Find the decision.** Step back to the comparison or jump that sent the run the wrong way.
+4. **Follow the data.** Step back to the instruction that wrote each value that decision used. Repeat for that instruction's inputs.
+5. **Stop at the origin**: an input byte, a constant, or a table in memory. That is the root cause.
+
+Know the limits of ORRESS's trace:
+
+- It saves **registers**, not memory. To see what was in memory at a step, run the function again with **Run**: the emulator is deterministic.
+- It runs inside the **emulator**, so it has the emulator's limits: x86-64 only, and calls into Windows are replaced by simple stand-ins. Self-contained functions such as checks, decoders and hash functions work best.
+- If the run stops with an error (for example a memory fault), the steps up to the error are kept, and the last line shows `stopped: ...`. That is often exactly what you want to investigate.
+
+In the next lesson you will compare crackme17 with its successor and find what the vendor changed.
 '''

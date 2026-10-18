@@ -1,0 +1,404 @@
+id = "l1-jumps"
+level = 1
+order = 4
+title = "Decisions: compare and jump"
+summary = "Status flags, cmp, test, labels and conditional jumps: how a Rust if becomes assembly."
+goals = [
+    "explain what the status flags ZF, SF, CF and OF record",
+    "use `cmp` and `test` to compare values",
+    "write labels and jumps, both unconditional and conditional",
+    "turn a Rust `if`/`else` into assembly, and back",
+    "tell signed and unsigned comparisons apart by their jump",
+]
+
+[[steps]]
+title = "Status flags: the CPU's short memory"
+goal = "Know the four status flags and when they change."
+text = '''
+Assembly has no `if`. Instead, the CPU has a few single bits that describe the result of the last calculation. They are called the **status flags** (or CPU flags), and they live together in one special register called `rflags`. Four of them matter:
+
+| Flag | Name | Is 1 when the last result ... |
+|---|---|---|
+| **ZF** | zero flag | was zero |
+| **SF** | sign flag | was negative (its top bit is 1) |
+| **CF** | carry flag | did not fit as an *unsigned* number (a carry out of the top, or a borrow in a subtraction) |
+| **OF** | overflow flag | did not fit as a *signed* number |
+
+Arithmetic and bit instructions (`add`, `sub`, `and`, `xor`, ...) update the flags. `mov` never does. So the flags always describe the last calculation, like a short memory.
+
+Examples:
+
+```text
+mov rax, 5
+sub rax, 5      ; result 0          -> ZF = 1
+mov rax, 3
+sub rax, 5      ; result -2         -> SF = 1, and CF = 1 (3 - 5 needs a borrow)
+xor eax, eax    ; result 0          -> ZF = 1
+```
+
+In the simulator the **Flags** row shows `ZF=0 SF=0 CF=0 OF=0`. A flag that is 1 is shown brighter and in yellow. Hover over a flag name to read what it means.
+
+The next instructions you learn, the conditional jumps, look at these flags to decide whether to jump. That is how every `if`, `while` and `match` in a Rust program works once it is compiled.
+'''
+spotlight = "sim.flags"
+
+[[steps]]
+title = "Watch the flags change"
+goal = "See which flags a subtraction sets."
+text = '''
+The simulator loaded this program:
+
+```text
+mov rax, 5
+sub rax, 5      ; 5 - 5 = 0
+mov rbx, 3
+sub rbx, 5      ; 3 - 5 = -2
+```
+
+Step through it and watch the **Flags** row after every `sub`.
+
+After the first `sub`, the result is 0, so ZF becomes 1.
+
+After the second `sub`, the result is -2. Think about each flag before you look:
+
+- Is the result zero?
+- Is it negative?
+- As unsigned numbers, is 3 smaller than 5, so that the subtraction needs a borrow?
+- As signed numbers, does -2 fit in 64 bits?
+
+Look at the registers too: `rbx` shows `0xfffffffffffffffe` in hex and -2 in decimal. The flags describe the same result in four yes/no answers. They do not store the number itself, only facts about it. A conditional jump on the next pages asks one of those yes/no questions.
+
+Which flags are 1 after the last line?
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** two times and look at the **Flags** row: ZF is 1.",
+    "Press **Step** two more times and look at the **Flags** row again.",
+    "Pick the answer below that matches what you see.",
+]
+spotlight = "sim.flags"
+sim_code = '''
+mov rax, 5
+sub rax, 5      ; 5 - 5 = 0
+mov rbx, 3
+sub rbx, 5      ; 3 - 5 = -2
+'''
+check = { kind = "choice", options = [
+    "Only ZF",
+    "SF and CF",
+    "ZF and CF",
+    "None of them",
+], correct = 1, explain = [
+    "ZF was 1 after the first sub, but the second sub sets the flags again. -2 is not zero.",
+    "-2 is negative (SF = 1), and 3 - 5 as unsigned numbers needs a borrow (CF = 1). -2 fits fine as a signed number, so OF stays 0.",
+    "The result -2 is not zero, so ZF is 0 after the second sub.",
+    "A negative result always sets SF. Step through it once more.",
+] }
+hints = [
+    "The second sub replaces all four flags. Only its result counts.",
+    "-2 is negative: that is one flag. 3 is smaller than 5: that is another.",
+]
+
+[[steps]]
+title = "cmp and test: compare without changing"
+goal = "Know that `cmp` and `test` only set flags."
+text = '''
+Usually a program wants to compare two values without destroying them. For that there are two special instructions that **only set the flags** and throw the result away:
+
+- `cmp a, b` (compare) calculates `a - b` like `sub`, sets the flags, and leaves `a` unchanged.
+- `test a, b` calculates `a & b` like `and`, sets the flags, and leaves `a` unchanged.
+
+So after `cmp rax, 7`:
+
+| If rax ... | then |
+|---|---|
+| equals 7 | `rax - 7` is 0, so **ZF = 1** |
+| is not 7 | ZF = 0 |
+| is smaller than 7 (unsigned) | `rax - 7` needs a borrow, so **CF = 1** |
+
+`test` is mostly used with the same register twice:
+
+```text
+test rax, rax    ; rax & rax is rax itself, so ZF = 1 exactly when rax == 0
+test al, al      ; the same for one byte: ZF = 1 when al == 0 (a bool that is false)
+```
+
+Read `test rax, rax` as the question "is rax zero?". It is everywhere: checking a pointer, checking a `bool` that a function returned, checking whether a count is 0.
+
+Together, `cmp` and `test` cover almost every comparison in a Rust program: `==`, `!=`, `<`, `>`, `<=`, `>=` and "is it zero / false / null?".
+'''
+deep_dive = '''
+`cmp a, b` sets *all four* flags, and different jumps read different combinations of them. For example "a < b as signed numbers" is true when SF differs from OF. Why? If the subtraction did not overflow, a negative result (SF = 1) means a < b. If it did overflow, the sign is wrong, so it is the other way round. You never need to work this out yourself: the jump instruction's name tells you the comparison. But it explains why both SF and OF exist.
+'''
+
+[[steps]]
+title = "Labels and jmp"
+goal = "Make the program continue somewhere else with `jmp`."
+text = '''
+Normally the CPU runs instructions from top to bottom. A **jump** makes it continue somewhere else. `jmp` (jump) always jumps:
+
+```text
+    mov rax, 1
+    jmp skip         ; continue at "skip"
+    mov rax, 99      ; never runs
+skip:
+    add rax, 1       ; rax = 2
+```
+
+`skip:` is a **label**: a name for a place in the program, written as a name followed by a colon. A label is not an instruction; it marks the line after it. In the CPU, `jmp skip` sets `rip` to the address of `skip`.
+
+In a real program there are no label names, only addresses. A jump in ORRESS's Disassembly view looks like `jmp loc_14000128f`: ORRESS invented the label name `loc_14000128f` from the address it jumps to. You can click it to go there, and rename it with **N** once you know what that code does.
+
+Jumping over code is rare on its own. It becomes useful together with conditional jumps, as you will see on the next page.
+
+**Exercise.** The simulator's program sets `rax` to 1 and then to 99. Add a `jmp` and a label so that the `mov rax, 99` line is skipped and `rax` ends as **1**.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Between the two `mov` lines, add the line `jmp skip`.",
+    "After the `mov rax, 99` line, add a line with only the label `skip:`.",
+    "Press **Step** a few times to watch the `>` jump over the line, or press **Run**. `rax` must be 1.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 1
+mov rax, 99     ; this line must be skipped
+'''
+check = { kind = "sim", expect = [["rax", 1]], requires = ["jmp"] }
+hints = [
+    "The jmp goes between the two mov lines, the label after the second one.",
+    "A label is a name followed by a colon on its own line, for example `skip:`.",
+    "The program is: `mov rax, 1`, `jmp skip`, `mov rax, 99`, `skip:`.",
+]
+solution = '''
+mov rax, 1
+jmp skip
+mov rax, 99
+skip:
+'''
+
+[[steps]]
+title = "Conditional jumps: how an if is compiled"
+goal = "Read `cmp` + conditional jump as an `if`."
+text = '''
+A **conditional jump** jumps only if the flags say so; otherwise the CPU continues with the next line. The two most common:
+
+| Instruction | Jumps if | After `cmp a, b` this means |
+|---|---|---|
+| `je` (also written `jz`) | ZF = 1 | a == b |
+| `jne` (also written `jnz`) | ZF = 0 | a != b |
+
+Now look at how a compiler turns an `if` into assembly:
+
+```rust
+if x == 7 {
+    y = 1;
+}
+```
+
+```text
+    cmp rax, 7       ; compare x with 7
+    jne after        ; if x != 7, skip the body
+    mov rbx, 1       ; y = 1;   (the body of the if)
+after:
+```
+
+Line by line:
+
+1. `cmp rax, 7` sets ZF to 1 if `rax` is 7.
+2. `jne after` jumps over the body if they are **not** equal.
+3. `mov rbx, 1` is the body. It runs only if the jump was not taken.
+4. `after:` is where both paths continue.
+
+Notice the **inverted condition**: the Rust says `==`, the assembly says `jne`. The jump means "skip the body", so it jumps in the opposite case. This confuses everyone at first. When you read compiled code, say: "jump *away* if not equal, so the code below runs *if equal*".
+
+An `if`/`else` adds one more jump: at the end of the `if` body, a `jmp` over the `else` body, so that only one of the two runs. You will write one on the next page.
+'''
+
+[[steps]]
+title = "Exercise: if and else"
+goal = "Write an `if`/`else` with `cmp`, a conditional jump and `jmp`."
+text = '''
+Translate this into assembly. `rax` is `x` (already 7), `rbx` is `y`:
+
+```rust
+let y = if x == 7 { 1 } else { 2 };
+```
+
+The shape is:
+
+```text
+    cmp rax, 7
+    jne else_part    ; x != 7: go to the else part
+    mov rbx, 1       ; the "if" part
+    jmp done         ; skip the else part
+else_part:
+    mov rbx, 2       ; the "else" part
+done:
+```
+
+Do not forget the `jmp done`. Without it, the CPU would run on from the `if` part straight into the `else` part, and `rbx` would always end as 2. Compiled code is full of these `jmp` instructions at the end of `if` blocks.
+
+When it works, try this: press **Reset**, change the first line to `mov rax, 8`, and press **Step** repeatedly. Watch the `>` take the other path. (Change it back to 7 before the lesson can check it.)
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line is `mov rax, 7`.",
+    "Below it, type the seven lines of the shape above (including both labels).",
+    "Press **Run**. `rbx` must be 1.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 7
+; rbx = 1 if rax == 7, otherwise 2
+'''
+check = { kind = "sim", expect = [["rbx", 1]], requires = ["cmp", "jne", "jmp"] }
+hints = [
+    "Copy the shape from the text, below the first line.",
+    "Labels end with a colon: `else_part:` and `done:`.",
+    "If rbx ends as 2, the `jmp done` after `mov rbx, 1` is missing.",
+]
+solution = '''
+mov rax, 7
+cmp rax, 7
+jne else_part
+mov rbx, 1
+jmp done
+else_part:
+mov rbx, 2
+done:
+'''
+
+[[steps]]
+title = "Signed or unsigned?"
+goal = "Know that the jump instruction reveals the type of a variable."
+text = '''
+For "less than" and "greater than" there are two sets of jumps, because the same bits mean different numbers as signed or unsigned values:
+
+| Rust types | `<` | `<=` | `>` | `>=` |
+|---|---|---|---|---|
+| signed: `i8`, `i32`, `i64`, `isize` | `jl` (less) | `jle` | `jg` (greater) | `jge` |
+| unsigned: `u8`, `u32`, `u64`, `usize` | `jb` (below) | `jbe` | `ja` (above) | `jae` |
+
+Memory aid: **l**ess and **g**reater for signed; **b**elow and **a**bove for unsigned.
+
+Why does it matter? Take `rax = -1`. In hex that is `0xffffffffffffffff`.
+
+- As a signed number it is -1, so it is **less** than 1: `cmp rax, 1` then `jl` jumps.
+- As an unsigned number it is the biggest value there is, so it is **above** 1: `cmp rax, 1` then `ja` jumps.
+
+The `cmp` is the same in both cases. Only the jump decides how the bits are read. The compiler picks the jump from the Rust type, so **the jump tells you the type** of the variables, information that is otherwise lost in compiled code. Lengths and indexes in Rust are `usize`, so you will mostly see `jb`, `jae` and friends around them.
+
+A program contains `cmp eax, 10` and then `jb small`. Was the variable signed or unsigned?
+'''
+check = { kind = "choice", options = [
+    "Signed, like i32",
+    "Unsigned, like u32",
+    "It cannot be known",
+], correct = 1, explain = [
+    "Signed comparisons use jl, jle, jg and jge. jb is not one of them.",
+    "jb means \"jump if below\", the unsigned version of \"less than\". And `eax` is 32 bits, so most likely a `u32`.",
+    "It can be known: the compiler chose jb because the type is unsigned.",
+] }
+hints = [
+    "Below and above are the unsigned words.",
+]
+
+[[steps]]
+title = "Exercise: the larger of two numbers"
+goal = "Choose the right (signed) jump in a real comparison."
+text = '''
+Write the assembly for this Rust code. `rax` is `a`, `rbx` is `b`, and the result goes in `rcx`:
+
+```rust
+let a: i64 = -3;
+let b: i64 = 2;
+let max = if a >= b { a } else { b };
+```
+
+A good shape: start by assuming `a` is the larger one, and replace it only if that is wrong:
+
+```text
+    mov rcx, rax     ; max = a
+    cmp rax, rbx
+    j?? done         ; if a >= b, keep it
+    mov rcx, rbx     ; otherwise max = b
+done:
+```
+
+You must choose the jump for `j??`. The types are `i64`, signed. Look at the table on the previous page.
+
+Try the wrong kind too: if you use `jae` (unsigned) instead, the simulator will leave -3 in `rcx`, because as an unsigned number `0xfffffffffffffffd` is huge. At the end `rcx` must be **2**.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first two lines set `rax` to -3 and `rbx` to 2.",
+    "Below them, type the shape above and replace `j??` with the signed jump for \"greater or equal\".",
+    "Press **Run**. `rcx` must be 2.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, -3     ; a
+mov rbx, 2      ; b
+; rcx = the larger of a and b (signed)
+'''
+check = { kind = "sim", expect = [["rcx", 2]], requires = ["cmp", "jge"] }
+hints = [
+    "Signed jumps are l and g: less, greater.",
+    "\"Greater or equal\" for signed numbers is `jge`.",
+    "The lines are `mov rcx, rax`, `cmp rax, rbx`, `jge done`, `mov rcx, rbx`, `done:`.",
+]
+solution = '''
+mov rax, -3
+mov rbx, 2
+mov rcx, rax
+cmp rax, rbx
+jge done
+mov rcx, rbx
+done:
+'''
+success = '''
+With `jge`, -3 is correctly smaller than 2. Choosing a signed or unsigned jump is one of the most common bugs in hand-written assembly, and one of the best clues when you read compiled code.
+'''
+
+[[steps]]
+title = "A real decision"
+goal = "Read a decision in a real program and know how ORRESS draws it."
+text = '''
+Here is a real piece of crackme #1, the program you will crack at the end of this level. The comments are added for you:
+
+```text
+cmp  r8, [rsp+0x28]      ; compare the length of your input with 15
+jne  loc_1400012a5       ; not equal: go to loc_1400012a5
+...                      ; (more checks of the password)
+loc_1400012a5:
+lea  rcx, [0x14001840d]  ; "Wrong password. Try again!"
+```
+
+You do not know `[rsp+0x28]` and `lea` yet (Lesson 6); the comments tell you what they do. You know enough to read the decision: compare, and if not equal, jump to the code that prints the error.
+
+In ORRESS's **Graph** view (open it with **Space** in the Disassembly view), every conditional jump splits a box into two arrows:
+
+- a **green** arrow: the jump is taken (the condition is true);
+- a **red** arrow: the jump is not taken, the CPU continues with the next line;
+- a **blue** arrow: a `jmp`, or code that runs on into the next box, always.
+
+An `if`/`else` looks like a diamond: one box splits into two paths that meet again below.
+
+In this snippet, when does the program go to *Wrong password*?
+'''
+check = { kind = "choice", options = [
+    "When the input is exactly 15 characters long",
+    "When the input is not 15 characters long",
+    "Always",
+    "Never: jne only sets a flag",
+], correct = 1, explain = [
+    "If the length is 15, the values are equal, ZF = 1, and `jne` does not jump.",
+    "`jne` jumps when the values differ. A wrong length goes straight to the error message.",
+    "A conditional jump only jumps when its condition holds. `jmp` would always jump.",
+    "`cmp` sets flags; `jne` reads them and jumps. It does not set anything.",
+] }
+hints = [
+    "jne = jump if not equal. What is compared?",
+]
+success = '''
+That is the first check of crackme #1: a password of the wrong length is rejected immediately. You will see this exact code in ORRESS in Lesson 11. You can now read every `if` in compiled code. Next: loops, which are jumps that go backwards.
+'''

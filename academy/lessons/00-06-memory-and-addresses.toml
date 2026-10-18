@@ -1,0 +1,344 @@
+id = "l0-memory"
+level = 0
+order = 6
+title = "Memory and addresses"
+summary = "Addresses, pointers and references, struct and Vec layout, the stack and the heap."
+goals = [
+    "explain what an address and a pointer are",
+    "calculate where a struct field or an array element is in memory",
+    "describe how a Vec or String is laid out in memory",
+    "tell the stack, the heap and the program's own data apart",
+]
+
+[[steps]]
+title = "Every byte has an address"
+goal = "Calculate the addresses that a multi-byte value occupies."
+text = '''
+In lesson 2 you saw that memory is a long row of bytes, each with a number: its **address**. Real addresses are big, so they are written in hex, like `0x7FF6_1234_5000`.
+
+A value that is bigger than one byte takes several bytes **next to each other**. Its address is the address of its **first** byte.
+
+**Worked example.** A `u32` (4 bytes) with the value `0x12345678` is stored at address `0x1000`. Remember little-endian from the last lesson:
+
+| address | `0x1000` | `0x1001` | `0x1002` | `0x1003` |
+|---|---|---|---|---|
+| byte | `78` | `56` | `34` | `12` |
+
+The value occupies the addresses `0x1000` to `0x1003`. The next free byte after it is at `0x1004`.
+
+In general: a value of n bytes at address A covers A, A+1, ..., A+n-1, and the next value can start at **A + n**. You will do this kind of address arithmetic in hex all the time. It is the same as decimal arithmetic, only with 16 digits: `0x1008` + 8 = `0x1010`, because 8 + 8 = 16 = `0x10`.
+
+A `u64` is stored at address `0x2000`. At which address does the next value after it start?
+'''
+instructions = [
+    "Find the size of a `u64` in bytes (lesson 4).",
+    "Add that size to `0x2000`. Type the result in hex with `0x` and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x2008"], number = true }
+hints = [
+    "A u64 is 8 bytes.",
+    "0x2000 + 8 = ?",
+]
+success = '''
+`0x2008`. The `u64` covers `0x2000` to `0x2007`.
+'''
+
+[[steps]]
+title = "Pointers"
+goal = "Know that a pointer is a number that holds an address."
+text = '''
+A **pointer** is a value that holds an address. It does not contain the data itself; it says *where* the data is. A pointer is only a number, and on a 64-bit computer it is **8 bytes** big, the size of `usize`.
+
+Rust has pointers too. The `&` operator gives you a **reference**, and a reference is a pointer underneath. You can print the address with `{:p}`:
+
+```rust
+let x: u32 = 42;
+let r: &u32 = &x;
+println!("{:p}", r);              // something like 0x7ffd5c1a2b4c
+let address = r as *const u32 as usize;
+println!("{address:#x}");         // the same number
+```
+
+`*const u32` is a **raw pointer**: a pointer without Rust's safety rules. You rarely need it in Rust, but it shows the truth: an address is only a number.
+
+In Rust, references are safe because the *compiler* checks them: a reference is never null and never points to freed memory. Those checks happen while compiling. In the finished machine code, a `&u32`, a `&mut u32`, a `Box<u32>` and a `*const u32` are all the same thing: an 8-byte address.
+
+On a 64-bit computer, how many bytes does a `&u8` take?
+'''
+instructions = [
+    "Think about what a reference really is in the machine code: an address.",
+    "Type the size of an address on a 64-bit computer, in bytes, and press **Check**.",
+]
+check = { kind = "answer", answers = ["8"], number = true }
+hints = [
+    "It does not matter that it points to a u8. What size is the address itself?",
+    "Addresses on 64-bit computers are 64 bits.",
+]
+success = '''
+8 bytes. Every pointer is 8 bytes on a 64-bit computer, whether it points to a `u8` or to a huge struct: `std::mem::size_of::<&u8>()` is 8.
+'''
+
+[[steps]]
+title = "Following a pointer"
+goal = "Read a pointer from memory and follow it."
+text = '''
+Reading the value that a pointer points to is called **dereferencing**. In Rust you write `*r`:
+
+```rust
+let x: u32 = 42;
+let r = &x;
+assert_eq!(*r, 42);   // go to the address in r, and read a u32 there
+```
+
+Pointers are themselves stored in memory, as 8 bytes, little-endian. Reversers follow pointers through memory by hand all the time. Here is a piece of memory:
+
+```text
+address   bytes
+0x3000    00 20 00 00 00 00 00 00
+...
+0x2000    2A 00 00 00
+```
+
+**Worked example.** Suppose the 4 bytes at `0x2000` are a `u32`. Little-endian: reverse `2A 00 00 00` to `00 00 00 2A`, so the value is `0x2A` = 42.
+
+Now suppose the 8 bytes at `0x3000` are a **pointer**. Reverse them: `00 00 00 00 00 00 20 00`, which is `0x2000`. So the pointer at `0x3000` points to address `0x2000`, where the 42 is. In Rust you could imagine `0x3000` holding a `&u32` that refers to the 42.
+
+Here is another one. At address `0x5000` you find the 8 bytes of a pointer: `10 40 00 00 00 00 00 00`. Which address does it point to?
+'''
+instructions = [
+    "Reverse the order of the 8 bytes (little-endian).",
+    "Drop the leading zeros, and type the address in hex with `0x`. Press **Check**.",
+]
+check = { kind = "answer", answers = ["0x4010"], number = true }
+hints = [
+    "Reversed: 00 00 00 00 00 00 40 10.",
+    "Without the leading zeros: 0x4010.",
+]
+success = '''
+`0x4010`. Two values in one: the 8 bytes are a number, and that number is an address. Whether 8 bytes are "just a number" or a pointer depends, again, on how the program uses them.
+'''
+
+[[steps]]
+title = "Structs in memory"
+goal = "Calculate where a struct field is stored."
+text = '''
+A struct is stored as its fields, side by side in memory. Each field sits at a fixed distance from the start of the struct, called its **offset**.
+
+```rust
+#[repr(C)]            // keep the fields in this order
+struct Player {
+    health: u32,      // offset 0, 4 bytes
+    score: u32,       // offset 4, 4 bytes
+    level: u32,       // offset 8, 4 bytes
+}
+```
+
+If a `Player` is stored at address `0x8000`, then `health` is at `0x8000`, `score` at `0x8004` and `level` at `0x8008`.
+
+This is how machine code accesses fields: it takes the address of the struct and **adds the offset**. When you later see an instruction that reads memory at "address + 8", it is probably reading the third `u32` field of some struct. Rebuilding structs from these offsets is a big part of reversing.
+
+Two details:
+
+- Without `#[repr(C)]`, Rust may reorder the fields to save space, so the order in memory can differ from the source.
+- The compiler may add unused **padding** bytes so that every field starts at an address that is a multiple of its size. A `u8` followed by a `u32` usually takes 8 bytes, not 5.
+
+Here is a struct:
+
+```rust
+#[repr(C)]
+struct Item {
+    id: u64,        // 8 bytes
+    price: u32,     // 4 bytes
+    stock: u32,     // 4 bytes
+}
+```
+
+An `Item` is stored at `0x6000`. At which address is `stock`?
+'''
+instructions = [
+    "Add up the sizes of the fields that come before `stock`: that is its offset.",
+    "Add the offset to `0x6000`, type the address in hex with `0x` and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x600C"], number = true }
+hints = [
+    "id is 8 bytes and price is 4 bytes, so stock is at offset 12.",
+    "12 in hex is 0xC. 0x6000 + 0xC = ?",
+]
+success = '''
+`0x600C`: offset 8 + 4 = 12 = `0xC`. Notice how fast hex gets natural: 12 is C.
+'''
+
+[[steps]]
+title = "Arrays in memory"
+goal = "Calculate the address of an array element."
+text = '''
+An array stores its elements directly after each other, with no gaps. So element number `i` is at:
+
+```text
+address of element i = address of the array + i x size of one element
+```
+
+That is also why indexes start at 0: element 0 is at the start of the array itself.
+
+```rust
+let numbers: [u32; 4] = [10, 20, 30, 40];
+// if numbers starts at 0x1000:
+//   numbers[0] at 0x1000
+//   numbers[1] at 0x1004
+//   numbers[2] at 0x1008
+//   numbers[3] at 0x100C
+```
+
+In machine code you will see exactly this calculation: an index multiplied by 1, 2, 4 or 8, added to an address. When the multiplier is 4, the elements are probably `u32` or `i32`; when it is 8, maybe `u64` or pointers.
+
+Rust also checks that the index is inside the array (the *bounds check*), and panics if it is not. In the machine code that check is a comparison of the index with the length, just before the access. Level 1 shows you what it looks like.
+
+A `[u16; 10]` array starts at address `0x1000`. What is the address of element 3, `array[3]`?
+'''
+instructions = [
+    "Find the size of one `u16` element in bytes.",
+    "Multiply it by the index 3, add the result to `0x1000`, type the address in hex with `0x` and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x1006"], number = true }
+hints = [
+    "A u16 is 2 bytes.",
+    "3 x 2 = 6, so 0x1000 + 6.",
+]
+
+[[steps]]
+title = "Vec and String in memory"
+goal = "Know the layout of a Vec, a String and a &str."
+text = '''
+A `Vec` can grow, so its elements cannot live inside the `Vec` value itself. Instead, a `Vec` is a small fixed-size value with **three numbers**, each 8 bytes:
+
+- a **pointer** to the elements, which live in a separate block of memory;
+- the **capacity**: how many elements fit in that block before it must grow;
+- the **length**: how many elements are actually used.
+
+A `String` is a `Vec<u8>` with the rule that the bytes are UTF-8, so it has the same three numbers. A `&str` (and every slice, like `&[u8]`) has only two: the pointer and the length. A pointer that carries a length with it is often called a **fat pointer**.
+
+```rust
+use std::mem::size_of;
+assert_eq!(size_of::<Vec<u8>>(), 24);   // pointer + capacity + length
+assert_eq!(size_of::<&str>(), 16);      // pointer + length
+
+let mut s = String::with_capacity(10);
+s.push_str("hi");
+assert_eq!(s.len(), 2);
+assert!(s.capacity() >= 10);
+```
+
+The order of the three numbers inside a `Vec` is chosen by the compiler and is not guaranteed, so in a real program you have to work it out. A good clue: the pointer is a big number that looks like an address, and the length is never more than the capacity.
+
+How many bytes does a `String` value itself take on a 64-bit computer (not counting the text it points to)?
+'''
+instructions = [
+    "Count the numbers a `String` stores: pointer, capacity and length.",
+    "Each of them is 8 bytes. Type the total and press **Check**.",
+]
+check = { kind = "answer", answers = ["24"], number = true }
+hints = [
+    "A String is laid out like a Vec<u8>.",
+    "3 x 8 = ?",
+]
+success = '''
+24 bytes, always, whether the text is empty or a whole book. The text itself lives elsewhere, on the heap, which is the topic of the next step.
+'''
+
+[[steps]]
+title = "The stack and the heap"
+goal = "Know the two main places where a program keeps its data."
+text = '''
+A running program keeps its data in two main areas of memory.
+
+**The stack** holds the local variables of functions. When a function starts, it gets a fresh block of stack memory for its variables; when it returns, that block is given back automatically. This is very fast, but the size of everything on the stack must be known when the program is compiled.
+
+**The heap** is a large pool for data whose size is only known while the program runs, or that must live longer than the function that created it. The program asks for a block of heap memory (this is called *allocating*), and gives it back later (*freeing*). In Rust, `Box`, `Vec` and `String` allocate on the heap, and free their memory automatically when they are dropped.
+
+```rust
+fn example() {
+    let n: u32 = 5;                      // on the stack
+    let v: Vec<u32> = vec![1, 2, 3];     // the 24-byte Vec value: on the stack
+                                         // the elements 1, 2, 3: on the heap
+    let b = Box::new(7u64);              // the pointer: stack; the 7: heap
+}   // here the stack block is given back, and the Vec and Box free their heap memory
+```
+
+So a `Vec` is split in two: its pointer, capacity and length are a local variable on the stack, and its elements are on the heap.
+
+Level 1 looks at the stack in detail, because the CPU has special instructions for it. For now, remember: stack for local variables, heap for data that grows or lives long.
+
+Where are the bytes of the text `"hello"` in `let s = String::from("hello");` while the program runs?
+'''
+check = { kind = "choice", options = [
+    "On the stack, inside the String value",
+    "On the heap; the String value on the stack points to them",
+    "Inside the CPU",
+    "Nowhere: they are only in the source code",
+], correct = 1, explain = [
+    "The String value on the stack holds only the pointer, capacity and length: 24 bytes, no text.",
+    "Correct: String::from copies the text into a heap block, and the String points to it.",
+    "The CPU holds only a few values at a time; the text is in memory.",
+    "The program needs the text while it runs, so it must be in memory.",
+] }
+hints = ["A String is like a Vec<u8>. Where does a Vec keep its elements?"]
+
+[[steps]]
+title = "The memory of a process"
+goal = "Know which areas a process's memory consists of."
+text = '''
+When the operating system starts a program, it sets up the memory of the new process. Besides the stack and the heap, there are areas that come directly from the program file:
+
+- **Code**: the machine code of all functions. The CPU fetches its instructions from here.
+- **Read-only data**: constants and the bytes of **string literals**, such as the text `"Wrong password"` in `println!("Wrong password")`. A `&'static str` points here.
+- **Writable data**: **global variables**, such as a `static mut COUNTER: u32`.
+- **The heap** and **the stack**, which the program fills while it runs.
+
+Each area has **permissions**: whether its bytes may be *read*, *written* or *executed* (run as code). Code may be read and executed, but not written. Data may be read (and sometimes written), but not executed. Then, if an attacker manages to put their own bytes into a data area, the CPU refuses to run them as code.
+
+```rust
+static GREETING: &str = "Hello";       // the text: read-only data
+static mut COUNTER: u32 = 0;           // writable data
+fn main() {                            // the machine code: the code area
+    let local = 5;                     // the stack
+    let v = vec![local];               // the elements: the heap
+}
+```
+
+Lesson 8 shows where these areas are described in the program file.
+
+Where is the text `"Wrong password"` of `println!("Wrong password")` stored while the program runs?
+'''
+check = { kind = "choice", options = [
+    "On the stack",
+    "On the heap",
+    "In the read-only data that was loaded from the program file",
+    "In the code area, as instructions",
+], correct = 2, explain = [
+    "The stack holds local variables, and is reused all the time. A literal must exist for the whole run.",
+    "Literals do not need to be allocated: they are already in the program file.",
+    "Correct: string literals are part of the file and are loaded as read-only data.",
+    "The code area holds instructions. Text is data, so it is kept in a data area.",
+] }
+hints = ["A string literal is written in the source code, so the compiler can store it in the program file itself."]
+success = '''
+That is why the **Strings** view finds `"Wrong password"` without running the program: string literals sit in the file's read-only data.
+'''
+
+[[steps]]
+title = "Every process has its own addresses"
+goal = "Know what virtual memory and ASLR mean for addresses."
+text = '''
+One last idea about addresses. If two processes both use address `0x1000`, do they overwrite each other's data? No. Every process gets its own **virtual memory**: its own private range of addresses. The operating system and the CPU translate each process's addresses to real places in the RAM chips behind the scenes. Address `0x1000` in one process and `0x1000` in another are different bytes.
+
+For you as a reverser this means: an address only has a meaning *inside one process*.
+
+There is one more twist. For security, the operating system loads programs at a **random** place in that address range every time they start. This is called **ASLR** (address space layout randomization). It makes attacks harder, because an attacker cannot know in advance where code or data will be.
+
+So addresses change from run to run, but the *distances* inside the program stay the same. The program file says at which address it would *like* to be loaded, its **image base**; on 64-bit Windows this is usually `0x140000000`. ORRESS shows all addresses as if the program were loaded there, so they match what you see in other tools and do not change between runs.
+
+You now know how memory is organized. Next lesson: how the compiler turns your Rust code into machine code, and what it throws away on the way.
+'''
+deep_dive = '''
+Virtual memory is divided into **pages**, usually 4096 bytes (`0x1000`) each. The permissions you saw in the previous step (read, write, execute) are set per page. That is why many sizes and addresses in program files are multiples of `0x1000`: the program's areas must start at the beginning of a page.
+'''

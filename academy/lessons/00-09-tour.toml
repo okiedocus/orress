@@ -1,0 +1,335 @@
+id = "l0-tour"
+level = 0
+order = 9
+title = "A tour of ORRESS"
+summary = "Open a real practice program and find its format, entry point, bytes, strings and main function."
+badge = "Explorer"
+goals = [
+    "find your way around the ORRESS window: menus, docks, tabs and the status bar",
+    "run any command from the command palette",
+    "open a practice program and read its Info view",
+    "use the Project panel to switch between the Hex, Strings, Functions and Disassembly views",
+    "jump to main and see a function as a graph",
+]
+
+[[steps]]
+title = "The ORRESS window"
+goal = "Know the names of the parts of the window."
+text = '''
+Before you open a program, learn the names of the parts of the ORRESS window. The lessons use these names in every instruction.
+
+- **The menu bar**, at the very top: **File**, **Edit**, **View**, **Go**, **Debug**, **Tools**, **Learn** and **Help**. **Learn** opens the Academy.
+- **The center area**: the big space in the middle. Files you open appear here as **tabs**, one tab per view, like tabs in a web browser. Click a tab to bring it to the front.
+- **The left dock**: the **Project** panel. It lists the open files and, for each file, the views you can open.
+- **The right dock**: the **Explain** and **Inspector** panels, and this **Lesson**. Each is a tab at the top of the dock; click a tab to switch.
+- **The bottom dock**: tools such as **Cross-references**, **Terminal** and **Output**. It may be hidden; **Ctrl+J** shows or hides it.
+- **The status bar**, at the very bottom: the focused tab on the left; on the right the **Explain: on** switch you used in the first lesson, the zoom level, and a key cap with **Ctrl+Shift+P**.
+
+You can hide and show the left and right docks with **Ctrl+B** and **Ctrl+Alt+B**, and drag tabs to arrange them as you like. **View > Reset Layout** puts everything back where it started.
+
+If the text is too small or too large, use **Ctrl+=** and **Ctrl+-** to zoom, and **Ctrl+0** to reset.
+
+Look around the window and find each part. Then press **Next**.
+'''
+spotlight = "dock.left"
+
+[[steps]]
+title = "The command palette"
+goal = "Open and close the command palette."
+text = '''
+ORRESS has many commands, and you do not have to know where each button is. The **command palette** is a search box for every command: open it, type a few letters of what you want, and pick the command.
+
+Open it with **Ctrl+Shift+P**: hold **Ctrl** and **Shift** together, and press **P**. You can also click the key cap **Ctrl+Shift+P** in the status bar at the bottom right.
+
+The palette appears near the top of the window. As you type, the list shows the matching commands with their keyboard shortcut, and under the list a short explanation of the highlighted command. To run a command, click it, or move to it with the arrow keys and press **Enter**. To close the palette without running anything, press **Esc**.
+
+The palette is the fastest way to do anything in ORRESS. Whenever a lesson names a command, you can also find it there.
+'''
+instructions = [
+    "Press **Ctrl+Shift+P**, or click the key cap **Ctrl+Shift+P** at the bottom right of the window (it is highlighted).",
+    "In the box that appears, type `dock` and look at the list of commands and the explanation below it.",
+    "Press **Esc** to close the palette again.",
+]
+spotlight = "palette"
+check = { kind = "action", id = "command_palette::Toggle" }
+hints = [
+    "Hold Ctrl and Shift down, then press P once.",
+    "Or click the small key cap at the bottom right of the window, in the status bar.",
+]
+success = '''
+That is the command palette. It also remembers the commands you used recently and shows them at the top.
+'''
+
+[[steps]]
+title = "Open a practice program"
+goal = "Open the Academy's second crackme."
+text = '''
+The Academy comes with small practice programs called **crackmes**: programs that ask for a password and are made to be reversed. They are real Windows programs for x86-64, written in Rust and stripped, like real challenges.
+
+In this tour you open the **second** crackme. You will crack it in Level 1; today you only look around, so do not worry about the password yet. (Opening a program in ORRESS never runs it: ORRESS only reads the file. That is static analysis.)
+
+Normally you open files with **File > Open File...** (**Ctrl+O**) or by dragging a file onto the window. Practice programs are built into ORRESS, so a lesson can open them for you with a button.
+
+When the program opens, ORRESS does two things:
+
+- it adds the file to the **Project** panel on the left;
+- it opens two tabs in the center area: **Hex** and **Info**, with **Info** in front.
+
+ORRESS also starts analyzing the program in the background. For a small program this takes a moment; while it runs, the Project panel shows *analyzing...*.
+'''
+instructions = [
+    "Click the button **Open crackme02** below.",
+    "Wait until the **Project** panel on the left shows `crackme02.exe` with a list of views under it.",
+]
+check = { kind = "open_crackme", name = "crackme02" }
+hints = ["The button is below the Do this box, next to Your task."]
+success = '''
+`crackme02.exe` is open. Under its name in the **Project** panel you see the format and architecture, and the list of views for this file.
+'''
+
+[[steps]]
+title = "The Project panel"
+goal = "Use the Project panel to find how many sections the program has."
+text = '''
+The **Project** panel in the left dock is your map of the open file. Under the file name it shows a short description, here `PE (Windows executable) · x86-64`: a Windows program for the x86-64 architecture, as you learned in lesson 8.
+
+Below that is the list of **views**. Each one shows the same file in a different way:
+
+- **Info**: what is this file? An overview with tips.
+- **Functions**: every function ORRESS found.
+- **Disassembly**: the machine code as assembly instructions.
+- **Graph**: one function drawn as a flow chart.
+- **Strings**: the readable text in the file.
+- **Imports**: the operating system functions the program uses.
+- **Sections**: the section table.
+- **Hex**: the raw bytes.
+
+Some entries show a number in brackets, for example **Strings (...)**: how many items that view lists. Click an entry to open that view in the center area (or bring its tab to the front). Hover over an entry for an explanation.
+
+How many sections does `crackme02.exe` have?
+'''
+instructions = [
+    "In the **Project** panel on the left, under `crackme02.exe`, find the entry **Sections** (it is highlighted).",
+    "Read the number in brackets after it.",
+    "Optional: click **Sections** to see the section table, and compare it with lesson 8.",
+    "Type the number in the answer box and press **Check**.",
+]
+spotlight = "tree.Sections"
+check = { kind = "answer", answers = ["5"], number = true }
+hints = [
+    "The entry looks like Sections (N).",
+    "Lesson 8 showed this program's sections: .text, .rdata, .data, .pdata, .reloc.",
+]
+success = '''
+5 sections: `.text`, `.rdata`, `.data`, `.pdata` and `.reloc`, exactly as in lesson 8. If you opened the Sections view, you saw their offsets, addresses, sizes and permissions.
+'''
+
+[[steps]]
+title = "What is this file?"
+goal = "Read the entry point in the Info view."
+text = '''
+The **Info** view answers the first question of every analysis: *what is this file?* It reads the headers for you and explains them. At the top are buttons that open other views, including **Go to main**. Below are cards:
+
+- **What is this file?**: the format, size, kind (program or library), **Architecture** (with the byte order, little-endian), **Image base**, **Entry point**, the number of imports and exports, and the overall entropy (how random the bytes look).
+- **Observations and tips**: things ORRESS noticed, with advice on where to start. Read them: they are written for learners.
+- **Detected**: the language and compiler. For this program ORRESS detects **Rust**, from traces the Rust compiler leaves in every program.
+- **Protections**: security features such as ASLR and DEP (lesson 6 and 8), and whether the file is **stripped**.
+
+Hover over any row name for an explanation (Explain Mode).
+
+Find the **Entry point** in the first card. It is shown as a 64-bit address with all 16 hex digits, so it starts with a row of zeros: `0x00000001...`. Leading zeros do not change a number, so you may leave them out.
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Info** (or click the **Info** tab in the center area).",
+    "In the card **What is this file?**, find the row **Entry point**.",
+    "Type the address in the answer box, with `0x` in front (leading zeros may be left out), and press **Check**.",
+]
+spotlight = "tree.Info"
+check = { kind = "answer", answers = ["0x140016400"], number = true }
+hints = [
+    "The row is in the first card, below Image base.",
+    "It starts with 0x0000000140016...",
+]
+success = '''
+`0x140016400`. This is where the operating system starts the program: the start-up code, not `main` (lesson 7). Notice it is a bit above the image base `0x140000000`: the entry point lies inside the `.text` section.
+'''
+
+[[steps]]
+title = "Raw bytes and the Inspector"
+goal = "See the magic bytes and read them as a number."
+text = '''
+The **Hex** view shows the file exactly as it is stored, byte by byte. Each row has three parts:
+
+- on the left, the **offset** of the first byte in the row, in hex;
+- in the middle, 16 bytes as pairs of hex digits;
+- on the right, the same 16 bytes as characters. Bytes that are not printable are shown as a dot.
+
+The first row starts with `4D 5A`: the magic bytes `MZ` of a PE file (lesson 8). You see `MZ` in the text column on the right.
+
+When you click a byte, the **Inspector** panel in the right dock shows the bytes starting at that position read in every common way: in binary, as `u8 / i8`, as a character, as `u16 / i16`, `u32 / i32`, `u64 / i64`, as a pointer, and as text. It reads numbers **little-endian** by default, as x86-64 does.
+
+The Inspector is a tab in the same dock as this lesson, so the lesson is hidden while you look at it. Click the **Lesson** tab to come back.
+
+Click the first byte of the file. What number does the Inspector show in the row **u32 / i32**? (Think about lesson 5 first: which four bytes does it read, and in which order?)
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Hex**.",
+    "In the Hex view, click the very first byte, `4D`, at the top left (offset 0).",
+    "In the right dock, click the **Inspector** tab. Read the row **u32 / i32**: it shows the number twice (unsigned and signed), and then once more in hex.",
+    "Click the **Lesson** tab in the right dock to come back here. Type the number and press **Check**.",
+]
+spotlight = "tree.Hex"
+check = { kind = "answer", answers = ["0x905A4D"], number = true }
+hints = [
+    "The row shows the number in decimal twice, separated by a slash, and in hex in brackets. Type one of them once.",
+    "The first four bytes are 4D 5A 90 00. Little-endian, reversed: 00 90 5A 4D.",
+    "The value is 0x00905A4D, which is 9460301.",
+]
+success = '''
+9460301, which is `0x00905A4D`: the four bytes `4D 5A 90 00` read lowest byte first. The Inspector also showed `'M'` in the **char** row and `01001101` in the **binary** row. From now on you never need to reverse bytes by hand.
+'''
+
+[[steps]]
+title = "Strings, through the palette"
+goal = "Open the Strings view with the command palette and find where a string is stored."
+text = '''
+The **Strings** view lists all readable text that ORRESS found in the file. For each string it shows:
+
+- **Offset**: where it is in the file;
+- **Address**: where it is in memory when the program runs;
+- **Section**: which section it is in;
+- **Type**: ASCII (one byte per character) or UTF-16;
+- **Refs**: how many instructions use it;
+- **Text**: the string itself.
+
+Above the table is a filter box: type part of a text, and only matching strings are shown. Upper and lower case do not matter.
+
+This time, open the view with the **command palette** instead of the Project panel. Every view has a command: the Strings view is **File: Strings**.
+
+Then find the title the program prints when it starts: `=== ORRESS Academy - Crackme #2 ===`. In which section is it stored?
+'''
+instructions = [
+    "Press **Ctrl+Shift+P** to open the command palette, and type `strings`.",
+    "Click **File: Strings** in the list (or select it with the arrow keys and press **Enter**).",
+    "In the Strings view, click into the filter box at the top and type `Academy`.",
+    "Read the **Section** column of the string `=== ORRESS Academy - Crackme #2 ===`, then come back to this lesson.",
+    "Type the section name, including the dot, and press **Check**.",
+]
+check = { kind = "answer", answers = [".rdata", "rdata"] }
+hints = [
+    "The palette command is called File: Strings.",
+    "String literals are read-only data (lesson 6 and 8).",
+    "The section for read-only data in a Windows program is .rdata.",
+]
+success = '''
+`.rdata`, the read-only data. Look at the other columns too: the **Offset** is `0x17A90` and the **Address** is `0x140019490`, exactly the conversion you did in lesson 8. Scroll through the list a little: you also find `Password: Wrong password. Try again!`, the two strings stored back to back from lesson 5.
+'''
+
+[[steps]]
+title = "The Functions view"
+goal = "See the functions ORRESS found."
+text = '''
+The **Functions** view lists every function ORRESS found, with its address, name, size and number of callers. ORRESS finds functions by starting at the entry point and following every call, like following links on a website.
+
+Remember lesson 7: this program is stripped, and the standard library was linked into it. So you see about 420 functions, almost all named `sub_` plus their address. Only a few have names:
+
+- **main**, which ORRESS found by recognizing the start-up code that calls it;
+- a few others that ORRESS recognized, such as `rust_runtime_main`, part of Rust's start-up code.
+
+The filter box at the top works like the one in the Strings view. Next to it is a **Go to main** button.
+
+Open the view and filter for `main`.
+'''
+instructions = [
+    "In the **Project** panel on the left, click **Functions**.",
+    "In the box **Filter by name...** at the top of the Functions view, type `main`.",
+    "Look at the functions that remain, and their addresses.",
+]
+spotlight = "tree.Functions"
+check = { kind = "view", view = "Functions" }
+hints = ["The Functions entry is the second one under crackme02.exe in the Project panel."]
+success = '''
+The list now shows the functions whose name contains `main`. Every other function has a made-up `sub_` name, because the program is stripped.
+'''
+
+[[steps]]
+title = "Jump to main"
+goal = "Use Go to main and read main's address."
+text = '''
+The program's own code begins in `main`. To get there in one step, use **Go to main**: it is in the **Go** menu of the menu bar, its shortcut is **Ctrl+Shift+M**, and it is in the command palette too.
+
+ORRESS then opens the **Disassembly** view at the start of `main`. Each line of the Disassembly view is one instruction:
+
+- on the left, the **address** of the instruction, in hex without `0x`, with all 16 digits (`00000001400012f0` is `0x1400012F0`);
+- then the instruction in assembly, such as `push rsi` or `lea rcx, [...]`;
+- on the right, after a `;`, a comment that ORRESS adds, for example the text of a string that the instruction uses.
+
+Above the first instruction of a function, ORRESS shows its name: here `main`.
+
+You do not need to understand the instructions yet: that is Level 1. Today, find the address of the **first instruction** of `main`. The status bar at the bottom shows it too: after **address** it shows where the cursor is, and then `main+0x0`, which means "0 bytes after the start of main".
+'''
+instructions = [
+    "In the menu bar at the top, click **Go**, then **Go to main** (or press **Ctrl+Shift+M**).",
+    "In the Disassembly view, find the first instruction under the name `main`, and read its address on the left.",
+]
+check = { kind = "action", id = "nav::GoToMain" }
+hints = [
+    "The Go menu is the fourth menu in the menu bar.",
+    "Or open the command palette and type: main",
+]
+success = '''
+You are in `main`. Its first instruction is at address `0x1400012F0`. Look at the comments on the right: the first `lea` lines use the strings `=== ORRESS Academy - Crackme #2 ===` and `Password: ` that the program prints. ORRESS shows only `Password: ` there, because it read the length from the next instruction (lesson 5).
+'''
+
+[[steps]]
+title = "The graph view"
+goal = "See a function as a flow chart."
+text = '''
+In the Disassembly view, the instructions are one long list. The **Graph** view shows the same function as a **flow chart**:
+
+- every box is a **block**: instructions that always run together, one after another;
+- arrows show where the program can continue after a block. When the program makes a decision (an `if`), two arrows leave the block: a **green** one for "the condition was true" and a **red** one for "false". **Blue** arrows are always taken.
+
+This makes the structure of a function visible at a glance. An `if` looks like a fork, a loop like an arrow that goes back up.
+
+To switch between the two views, press **Space**. The Disassembly view only reacts to keys when it has the keyboard focus, so click on one of its lines first.
+
+You can scroll the graph by dragging it, and zoom with Ctrl and the mouse wheel. Press **Space** again to go back to the Disassembly view.
+'''
+instructions = [
+    "Click on any line in the Disassembly view, so it has the keyboard focus.",
+    "Press **Space**. The Graph view opens.",
+    "Look at the boxes and the colors of the arrows. To go back to the list, click into the graph and press **Space** again, if you like.",
+]
+check = { kind = "view", view = "Graph" }
+hints = [
+    "If Space does nothing, click a line of the disassembly first.",
+    "You can also click Graph in the Project panel.",
+]
+success = '''
+That is `main` as a graph. In Level 1 you will learn to read the instructions inside the boxes, and the decisions the arrows stand for.
+'''
+
+[[steps]]
+title = "End of the tour"
+goal = "Know where to go next."
+text = '''
+Congratulations: you have finished Level 0. Look at what you can do now:
+
+- read and write numbers in binary and hexadecimal, signed and unsigned, of every size;
+- read text from bytes in ASCII, UTF-8 and UTF-16, and numbers in little-endian order;
+- follow pointers and calculate the addresses of struct fields and array elements;
+- explain what a compiler and linker produce, and what is lost;
+- describe the structure of an executable file;
+- use ORRESS: the command palette, the Project panel, and the Info, Hex, Strings, Functions, Disassembly and Graph views, with the Inspector and Explain Mode to help.
+
+A few things that help from now on:
+
+- **Go > Go Back** (**Alt+Left**) returns to where you were before a jump, like the back button of a web browser. In the Disassembly and Graph views, **Esc** does the same.
+- **Learn > Keyboard Shortcuts** (**F1**) lists every command with its shortcut.
+- **Learn > Open Academy** brings you back to the lesson overview at any time, and **Learn > Academy: Current Lesson** to the lesson you are working on.
+
+**Level 1** starts with the CPU itself: registers, the instructions you saw in the Disassembly view, and the stack. You will write tiny programs in the Academy's **CPU simulator** and watch them run step by step. At the end of Level 1 you crack your first two crackmes, including the one you just looked at.
+
+Press **Finish lesson** to collect your badge.
+'''

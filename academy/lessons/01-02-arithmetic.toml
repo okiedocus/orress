@@ -1,0 +1,406 @@
+id = "l1-instructions"
+level = 1
+order = 2
+title = "Moving and calculating"
+summary = "mov, add, sub, inc, dec, neg and imul: turn Rust arithmetic into assembly and back."
+goals = [
+    "copy values between registers with `mov`",
+    "calculate with `add`, `sub`, `inc`, `dec`, `neg` and `imul`",
+    "translate a few lines of Rust arithmetic into assembly",
+    "understand what happens when a number becomes too big for its register",
+]
+
+[[steps]]
+title = "mov: copying values"
+goal = "Know every form of `mov` you will use in this level."
+text = '''
+`mov` is by far the most common instruction in any program. It **copies** a value into its first operand. The name says "move", but the source keeps its value: it is a copy, like `let b = a;` with a `Copy` type in Rust.
+
+The source can be:
+
+| Assembly | Rust | What it does |
+|---|---|---|
+| `mov rax, 42` | `rax = 42;` | a number (an immediate value) |
+| `mov rax, 0x2a` | `rax = 0x2a;` | the same number, written in hex |
+| `mov rax, 'A'` | `rax = 'A' as u64;` | a character code (65); the simulator accepts this |
+| `mov rax, -1` | `rax = -1i64 as u64;` | a negative number, stored in two's complement |
+| `mov rbx, rax` | `rbx = rax;` | another register |
+
+Later lessons add a third kind of source and destination: memory, written in square brackets like `[rsp+8]`.
+
+Two things `mov` can **not** do:
+
+- The destination cannot be a number. `mov 5, rax` makes no sense, just like `5 = rax;` in Rust.
+- `mov` does not calculate. `mov rax, rbx + 1` does not exist; you need a `mov` and then an `add`.
+
+`mov` also never changes the status flags (Lesson 4). It only copies.
+'''
+
+[[steps]]
+title = "Exercise: swap two registers"
+goal = "Use `mov` with three registers to swap two values."
+text = '''
+In Rust, swapping two variables needs a temporary variable:
+
+```rust
+let tmp = a;
+a = b;
+b = tmp;
+```
+
+Assembly works the same way. You have three registers to play with. The simulator loaded a program that sets `rax` to 3 and `rbx` to 8. Add instructions below it so that at the end **`rax` is 8 and `rbx` is 3**. Use `rcx` as your temporary.
+
+Before you type, say each line out loud in Rust form: "rcx = rax", and so on. That habit makes assembly much easier to read.
+
+Why does the order matter? If you start with `mov rax, rbx`, the 3 in `rax` is overwritten by 8 and lost forever: nothing remembers it. That is the whole reason for the temporary register. Step through your program afterwards and watch the yellow highlight: each line changes exactly one register, the destination.
+
+(Real x86-64 also has an instruction that swaps in one go, `xchg rax, rbx`. Compilers rarely use it for registers, and the simulator does not know it.)
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The editor shows `mov rax, 3` and `mov rbx, 8`.",
+    "Below those lines, type three `mov` instructions that copy rax into rcx, rbx into rax, and rcx into rbx.",
+    "Press **Run** and check the **Registers**: rax must be 8, rbx must be 3.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 3
+mov rbx, 8
+; swap rax and rbx, using rcx as a temporary
+'''
+check = { kind = "sim", expect = [["rax", 8], ["rbx", 3]], requires = ["mov"] }
+hints = [
+    "First save rax somewhere safe: `mov rcx, rax`.",
+    "Then `mov rax, rbx` (rax is now 8) and put the saved value into rbx.",
+    "The three lines are `mov rcx, rax`, `mov rax, rbx`, `mov rbx, rcx`.",
+]
+solution = '''
+mov rax, 3
+mov rbx, 8
+mov rcx, rax
+mov rax, rbx
+mov rbx, rcx
+'''
+success = '''
+Swapped. Compilers do this kind of shuffling often, especially right before a function call, when values must be in particular registers.
+'''
+
+[[steps]]
+title = "add and sub"
+goal = "Read `add` and `sub` as Rust's `+=` and `-=`."
+text = '''
+`add` and `sub` work exactly like Rust's `+=` and `-=`. The first operand is both an input and the place where the result goes:
+
+| Assembly | Rust |
+|---|---|
+| `add rax, 5` | `rax += 5;` |
+| `add rax, rbx` | `rax += rbx;` |
+| `sub rcx, 1` | `rcx -= 1;` |
+| `sub rax, rax` | `rax -= rax;` (always 0) |
+
+Here is a worked example. The Rust code:
+
+```rust
+let mut x: u64 = 10;
+x += 20;
+x -= 5;
+```
+
+becomes, with `x` kept in `rax`:
+
+```text
+mov rax, 10     ; let mut x = 10;
+add rax, 20     ; x += 20;     rax is now 30
+sub rax, 5      ; x -= 5;      rax is now 25
+```
+
+Line by line:
+
+1. `mov rax, 10` puts 10 into `rax`. From now on, `rax` *is* the variable `x`.
+2. `add rax, 20` reads `rax` (10), adds 20, and writes 30 back into `rax`.
+3. `sub rax, 5` reads `rax` (30), subtracts 5, and writes 25 back.
+
+The variable name `x` is gone in the compiled program. A reverse engineer sees only `rax` and gives the variable a name again, by understanding what it is for.
+
+Unlike `mov`, `add` and `sub` also update the status flags. You will see why that matters in Lesson 4.
+'''
+
+[[steps]]
+title = "Exercise: a small calculation"
+goal = "Write a calculation with `add` and `sub`."
+text = '''
+Translate this Rust code into assembly. Keep `total` in `rax` and `discount` in `rbx`:
+
+```rust
+let mut total: u64 = 50;
+let discount: u64 = 8;
+total += discount;   // yes, a strange discount
+total -= 3;
+```
+
+At the end, `rax` must hold **55**. The simulator already contains the first two lines; you write the last two. Use `add` with a register as source for `total += discount`.
+
+Notice how the variables have become registers. A compiler does the same: it chooses a register for each variable that is used a lot. The names `total` and `discount` disappear; only `rax` and `rbx` remain. When you read compiled code, your first job is to find out which register plays which variable, and to write that down.
+
+Work it out before you run it: 50 + 8 = 58, and 58 - 3 = 55. Then press **Step** instead of **Run** to see each value appear: `rax` turns yellow after each of your two lines.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Below the two `mov` lines, write an `add` that adds `rbx` to `rax`.",
+    "Below that, write a `sub` that subtracts 3 from `rax`.",
+    "Press **Run**. `rax` must be 55.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 50     ; let mut total = 50;
+mov rbx, 8      ; let discount = 8;
+; total += discount;
+; total -= 3;
+'''
+check = { kind = "sim", expect = [["rax", 55]], requires = ["add", "sub"] }
+hints = [
+    "`total += discount;` is `add rax, rbx`.",
+    "`total -= 3;` is `sub rax, 3`.",
+    "Add the lines `add rax, rbx` and `sub rax, 3`, then press Run.",
+]
+solution = '''
+mov rax, 50
+mov rbx, 8
+add rax, rbx
+sub rax, 3
+'''
+
+[[steps]]
+title = "inc, dec and neg"
+goal = "Use the one-operand instructions `inc`, `dec` and `neg`."
+text = '''
+Some instructions have only one operand, which is both input and output:
+
+| Assembly | Rust | Meaning |
+|---|---|---|
+| `inc rcx` | `rcx += 1;` | increment: add 1 |
+| `dec rcx` | `rcx -= 1;` | decrement: subtract 1 |
+| `neg rax` | `rax = -rax;` | negate: change the sign |
+
+`inc` and `dec` are shorter than `add rcx, 1` and are typical for loop counters (Lesson 5).
+
+`neg` turns 5 into -5 and -5 into 5. In two's complement (Level 0), -5 is stored as `0xfffffffffffffffb`. The simulator's Registers pane shows both: the hex column shows the bits, the decimal column shows the signed value -5.
+
+**Exercise.** The simulator starts with `rax = 10`. Using only `dec` and `neg`, make `rax` end as **-9**. Think first: which do you do first?
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line is `mov rax, 10`.",
+    "Below it, add one `dec` line and one `neg` line, in the right order.",
+    "Press **Run**. The decimal column of `rax` must show -9.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 10
+; make rax -9 using dec and neg
+'''
+check = { kind = "sim", expect = [["rax", -9]], requires = ["dec", "neg"] }
+hints = [
+    "-9 is the negative of 9. How do you get from 10 to 9?",
+    "First `dec rax` (10 becomes 9), then negate.",
+    "The two lines are `dec rax` and `neg rax`.",
+]
+solution = '''
+mov rax, 10
+dec rax
+neg rax
+'''
+success = '''
+Order matters: `neg` first would give -10, and `dec` would then make it -11. Look at the hex column: -9 is `0xfffffffffffffff7`. You will see numbers like this often in disassembly; they are small negative numbers.
+'''
+
+[[steps]]
+title = "imul: multiplication"
+goal = "Multiply with `imul`, and recognise multiplication done with other instructions."
+text = '''
+`imul` multiplies (the `i` stands for "integer"). The two-operand form works like `*=`:
+
+```text
+imul rax, rbx    ; rax *= rbx;
+imul rax, 4      ; rax *= 4;
+```
+
+Real programs also use a three-operand form, `imul rax, rbx, 4`, which means `rax = rbx * 4`. The simulator only knows the two-operand form.
+
+Multiplication is slower than addition, so compilers often avoid `imul` when they can. Do not be surprised if `x * 2` shows up as `add rax, rax`, and `x * 3` as an addition of `x` and `2 * x`. In Lesson 3 you will see that `x * 8` often becomes a shift.
+
+**Exercise.** Translate this function body. The argument `x` is already in `rax` (6). The result must end up in `rax`:
+
+```rust
+fn f(x: u64) -> u64 {
+    x * 4 + 1
+}
+```
+
+With x = 6 the answer is **25**.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line is `mov rax, 6`.",
+    "Add an `imul` that multiplies `rax` by 4.",
+    "Add one instruction that adds 1 (`inc` or `add`).",
+    "Press **Run**. `rax` must be 25.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 6      ; x = 6
+; rax = x * 4 + 1
+'''
+check = { kind = "sim", expect = [["rax", 25]], requires = ["imul"] }
+hints = [
+    "First the multiplication: `imul rax, 4`.",
+    "Then add 1: `inc rax` or `add rax, 1`.",
+    "The lines are `imul rax, 4` and `inc rax`.",
+]
+solution = '''
+mov rax, 6
+imul rax, 4
+inc rax
+'''
+
+[[steps]]
+title = "Exercise: three variables"
+goal = "Translate several lines of Rust with more than one variable."
+text = '''
+Now a slightly bigger translation. Use `rax` for `x`, `rbx` for `y` and `rcx` for `z`:
+
+```rust
+let x: u64 = 12;
+let y = x * 3;
+let z = y - x + 2;
+```
+
+The tricky line is `let y = x * 3;`: `x` must keep its value, because line 3 still needs it. So you cannot multiply `rax` itself. First copy `x` into `rbx`, then multiply `rbx`:
+
+```text
+mov rbx, rax    ; y = x;
+imul rbx, 3     ; y *= 3;     together: y = x * 3
+```
+
+This pattern, **copy first, then calculate on the copy**, is everywhere in compiled code. When you see `mov` followed by an arithmetic instruction on the same register, read the pair as one Rust expression.
+
+At the end `rcx` (`z`) must be **26**: 12 * 3 = 36, 36 - 12 = 24, 24 + 2 = 26.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line sets `rax` (x) to 12.",
+    "Compute y: copy rax into rbx with `mov`, then `imul rbx, 3`.",
+    "Compute z: copy rbx into rcx, subtract rax from rcx, then add 2 to rcx.",
+    "Press **Run**. `rcx` must be 26 and `rax` must still be 12.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 12     ; let x = 12;
+; let y = x * 3;      (y in rbx)
+; let z = y - x + 2;  (z in rcx)
+'''
+check = { kind = "sim", expect = [["rax", 12], ["rbx", 36], ["rcx", 26]], requires = ["imul", "sub"] }
+hints = [
+    "y: `mov rbx, rax` then `imul rbx, 3`. rbx is now 36.",
+    "z starts as a copy of y: `mov rcx, rbx`. Then `sub rcx, rax`.",
+    "Finish with `add rcx, 2`.",
+]
+solution = '''
+mov rax, 12
+mov rbx, rax
+imul rbx, 3
+mov rcx, rbx
+sub rcx, rax
+add rcx, 2
+'''
+
+[[steps]]
+title = "When a number does not fit"
+goal = "Know that register arithmetic wraps around."
+text = '''
+A register has 64 bits, so the biggest unsigned value is `0xffffffffffffffff` (`u64::MAX`). What happens if you add 1 to it?
+
+The result would need 65 bits. The CPU keeps only the lowest 64, so the result **wraps around** to 0. It is like a car's odometer going from 999999 to 000000. The CPU does not stop or complain; it only notes the event in a flag called CF (the carry flag, Lesson 4).
+
+Rust behaves differently depending on how it was built:
+
+```rust
+let x: u64 = u64::MAX;
+let y = x + 1;          // debug build: panic "attempt to add with overflow"
+                        // release build: wraps to 0, like the CPU
+let z = x.wrapping_add(1); // always wraps: 0
+```
+
+In a debug build, the compiler adds an extra check after the `add` that jumps to a panic if the flag says "it overflowed". In a release build (and in the crackmes) that check is not there. If you ever see a panic about overflow in a program, now you know where it comes from.
+
+The same happens with subtraction: `0 - 1` as a `u64` wraps to `0xffffffffffffffff`, which as a signed number is -1.
+
+Here is a program:
+
+```text
+mov rax, -1     ; 0xffffffffffffffff
+add rax, 2
+```
+
+What is in `rax` at the end? You can try it in the simulator.
+'''
+check = { kind = "choice", options = [
+    "0x10000000000000001 (a 65-bit number)",
+    "1",
+    "0xffffffffffffffff (it stays at the maximum)",
+    "The program crashes",
+], correct = 1, explain = [
+    "A register cannot hold 65 bits. The extra top bit is lost.",
+    "The sum wraps around: max + 1 is 0, and one more is 1. In signed terms: -1 + 2 = 1. Both views agree.",
+    "The CPU does not clamp (stop at the maximum). Rust's `saturating_add` does that, but `add` wraps.",
+    "The CPU never stops on an overflow. It only sets the carry flag.",
+] }
+hints = [
+    "Treat the bits as a signed number: -1.",
+    "-1 + 2 = ?",
+]
+
+[[steps]]
+title = "Reading compiled arithmetic"
+goal = "Turn a short piece of assembly back into one Rust expression."
+text = '''
+So far you translated Rust into assembly. Reverse engineering goes the other way. Take this piece of a compiled function. On Windows, the first argument of a function arrives in `rcx` (Lesson 9 explains why), and the result is returned in `rax`:
+
+```text
+mov rax, rcx     ; rax = x
+add rax, rax     ; rax = x + x        = 2 * x
+add rax, rcx     ; rax = 2 * x + x    = 3 * x
+sub rax, 7       ; rax = 3 * x - 7
+```
+
+Read it the way you just practised: write each line as Rust, then combine the lines into one expression. A comment column like the one above, which you write yourself, is how reverse engineers keep track.
+
+The function this came from was:
+
+```rust
+fn f(x: u64) -> u64 { x * 3 - 7 }
+```
+
+The compiler chose two additions instead of `imul`, because additions are faster. The result is the same. This is very typical: the assembly rarely looks like the Rust *literally*, but it always computes the same thing.
+
+Which Rust expression does the following compute? (x arrives in `rcx`.)
+
+```text
+mov rax, rcx
+imul rax, rcx
+add rax, 1
+```
+'''
+check = { kind = "choice", options = [
+    "x * 2 + 1",
+    "x * x + 1",
+    "(x + 1) * x",
+    "x + x + 1",
+], correct = 1, explain = [
+    "`imul rax, rcx` multiplies by x, not by 2. `add rax, rax` would be times 2.",
+    "rax starts as x, `imul rax, rcx` makes it x * x, and `add rax, 1` adds 1.",
+    "The 1 is added after the multiplication, not before.",
+    "`imul` is multiplication, not addition.",
+] }
+hints = [
+    "Write each line as Rust: rax = x; rax *= x; rax += 1;",
+]
+success = '''
+You can now read and write arithmetic in assembly. Next lesson: working with single bits, which is where XOR (the reverse engineer's favourite instruction) lives.
+'''

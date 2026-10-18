@@ -1,0 +1,270 @@
+id = "l4-ctf-reversing"
+level = 4
+order = 23
+title = "CTF reversing in practice"
+summary = "What a CTF is, what a flag looks like, and the step-by-step plan that solves most reversing challenges."
+goals = [
+    "explain what a CTF is and what a flag looks like",
+    "follow a fixed plan to attack any reversing challenge",
+    "tell encoding, encryption and hashing apart",
+    "pick the right tool for the kind of check you find",
+]
+badge = "Flag Hunter"
+
+[[steps]]
+title = "Welcome to Intermediate CTF"
+goal = "Know what a CTF is and why it is the best practice for reverse engineering."
+text = '''
+You can now read assembly, use the decompiler, run a program under the debugger, patch it and emulate a single function. That is a full toolbox. This level teaches you to use it on **CTF** challenges, the way people practise reverse engineering all over the world.
+
+**CTF** stands for **Capture The Flag**. It is a competition (or a practice website) with many small puzzles called *challenges*. Each challenge hides a secret text, the **flag**. When you find the flag, you type it into the website and you get points.
+
+Challenges come in categories. The ones in this course belong to the **reversing** category (often called "rev" or "RE"): you get a program, and the flag is hidden inside it. Usually the program asks for a password or a key, and the flag is that password, or the program prints the flag once you give the right input.
+
+Other categories you will meet on CTF websites:
+
+- **crypto**: break a cipher (you will learn to *recognise* ciphers in this level),
+- **pwn**: find a bug in a program and use it to take control,
+- **web**: attack a web site,
+- **forensics**: find data hidden in files, disk images or network captures.
+
+Reversing skills help in all of them, because every category ends with "understand what this code does".
+
+Many CTF websites keep their challenges online all year, so you can practise any time. This level gives you the skills for intermediate challenges: decoding hidden text, recognising cryptography, letting a solver find a password for you, and reading programs that are not machine code at all.
+'''
+success = "Let's look at what a flag looks like, so you recognise one the moment you see it."
+
+[[steps]]
+title = "What a flag looks like"
+goal = "Recognise the usual flag formats."
+text = '''
+Most CTFs use a fixed **flag format**: a short prefix, curly braces, and a secret inside. For example:
+
+```text
+flag{x0r_is_not_encrypti0n}
+CTF{this_one_is_from_a_big_event}
+picoCTF{some_letters_and_digits}
+```
+
+The prefix tells you which event the flag belongs to. The part between the braces is usually lowercase letters, digits and underscores, with letters often swapped for digits that look alike: `0` for `o`, `1` for `i` or `l`, `3` for `e`, `4` for `a`. That style is called "leetspeak". It makes flags hard to guess but easy to read once you have them.
+
+Why does the format matter to a reverse engineer?
+
+1. **It tells you when you are done.** Text that starts with `flag{` and ends with `}` is almost certainly the answer.
+2. **It is a known piece of the secret.** If a program hides the flag, you already know its first five characters: `f`, `l`, `a`, `g`, `{`. In the next lesson you will use exactly this to break an XOR key.
+3. **Tools can search for it.** ORRESS's Strings view and Workbench mark text that looks like a flag.
+
+Some challenges do not use a format at all: the flag is just "the password the program accepts". The practice programs in this Academy are like that. Their passwords are the flags.
+'''
+check = { kind = "choice", options = [
+    "flag{w3_l0v3_r3v3rs1ng}",
+    "Wrong password. Try again!",
+    "kernel32.dll",
+    "0x140001100",
+], correct = 0, explain = [
+    "Right. Prefix, curly braces, leetspeak inside: a textbook flag.",
+    "That is a message the program prints. It helps you find the check, but it is not the secret.",
+    "That is the name of a Windows library the program uses (an import), not a flag.",
+    "That is an address: a place in memory. Addresses help you navigate, but they are not flags.",
+] }
+hints = [
+    "Look for the format from the text: a prefix and curly braces.",
+    "Only one option has the shape prefix{...}.",
+]
+success = "You will see that shape many times in this level. When it appears, you have won."
+
+[[steps]]
+title = "The plan that solves most challenges"
+goal = "Learn a fixed order of work, so you never wonder what to do next."
+text = '''
+Experienced players do not start by reading every instruction. They follow the same plan every time:
+
+1. **Look around.** Open the program and read the **Info** view (what kind of file is it?), the **Strings** view (messages, URLs, suspicious text) and the **Imports** (which library functions does it use?). Ten minutes here often saves hours.
+2. **Find the check.** Search the strings for the success and failure messages ("Correct!", "Wrong"), jump to the code that uses them, and find the `if` that decides between them. The function that computes that condition is the **check function**.
+3. **Understand the transformation.** Read the check function in the decompiler. What does it do to your input before it compares? Nothing (a plain compare)? An XOR? Arithmetic? A real cipher?
+4. **Choose your attack.** The answer to step 3 picks the tool:
+   - a plain compare: read the expected value (Level 1);
+   - a reversible transformation such as XOR: undo it by hand or write a keygen (Level 2);
+   - a check you cannot read easily: run it in the emulator or debugger and watch (Level 3);
+   - many tangled conditions: let a **solver** compute the input (this level);
+   - a byte-by-byte compare with an early exit: a **side channel** (this level);
+   - a known cipher: find the key and decrypt (this level).
+5. **Verify.** Give your answer to the real program. It must say "Correct!".
+
+Notice step 3. Most of this level is about recognising *what kind* of transformation you are looking at, because that decides everything after it.
+'''
+success = "Keep this plan in mind. Every practice program in this level follows it."
+
+[[steps]]
+title = "Pick the attack"
+goal = "Match a check to the right tool."
+text = '''
+Here is a check function, as the decompiler might show it in Rust syntax:
+
+```rust
+fn check(input: &[u8]) -> bool {
+    if input.len() != 6 {
+        return false;
+    }
+    let key = [0x10, 0x20, 0x30, 0x10, 0x20, 0x30];
+    let expected = [0x63, 0x13, 0x53, 0x62, 0x13, 0x44];
+    for i in 0..6 {
+        if input[i] ^ key[i] != expected[i] {
+            return false;
+        }
+    }
+    true
+}
+```
+
+Each input byte is XORed with a key byte and compared with an expected byte. You learned in Level 2 that XOR undoes itself: if `a ^ k == e`, then `a == e ^ k`. So every byte of the password can be computed directly from two numbers you can see.
+'''
+check = { kind = "choice", options = [
+    "Undo the XOR: compute expected[i] ^ key[i] for every position",
+    "Patch the program so it always says Correct",
+    "Try every possible 6-character password",
+    "Give up: XOR is encryption and cannot be undone without the key",
+], correct = 0, explain = [
+    "Right. Both the key and the expected bytes are in plain sight, and XOR is its own inverse. For example 0x63 ^ 0x10 = 0x73, which is the character 's'.",
+    "Patching makes the program print Correct, but it does not give you the password, which is the flag. In a CTF you need the flag itself.",
+    "With 95 printable characters that is 95^6, about 735 billion tries. Far too slow when the answer can be computed in a minute.",
+    "The key is right there in the code. XOR with a visible key hides nothing from a reverse engineer.",
+] }
+hints = [
+    "What did Level 2 teach about undoing XOR?",
+    "a ^ k == e means a == e ^ k.",
+]
+success = "Read the transformation, then invert it. In the next step you finish the job."
+
+[[steps]]
+title = "Finish it: compute the password"
+goal = "Invert an XOR check by hand."
+text = '''
+Use the same check function as in the previous step:
+
+```rust
+let key = [0x10, 0x20, 0x30, 0x10, 0x20, 0x30];
+let expected = [0x63, 0x13, 0x53, 0x62, 0x13, 0x44];
+// accepted when input[i] ^ key[i] == expected[i] for every i
+```
+
+Because XOR undoes itself, `input[i] = expected[i] ^ key[i]`. Here is the first character worked out completely:
+
+- `expected[0]` is `0x63`, `key[0]` is `0x10`.
+- In binary: `0110 0011` XOR `0001 0000`. XOR gives 1 where the bits differ: `0111 0011`.
+- `0111 0011` is `0x73`, which is 115 in decimal: the ASCII code of `s`.
+
+So the password starts with `s`. Now do the other five positions the same way. The **Number converter** below shows a number in hex, decimal and binary, and the **ASCII table** in Level 0 maps codes to characters (`0x30` to `0x39` are the digits `0` to `9`, `0x61` to `0x7a` are the lowercase letters `a` to `z`).
+'''
+instructions = [
+    "Compute `expected[i] ^ key[i]` for i = 1 to 5. Tip: XOR with `0x10`, `0x20` or `0x30` only flips one or two bits of the upper hex digit.",
+    "Turn each result into a character with an ASCII table.",
+    "Type the six characters into the answer box and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["s3cr3t"], case_sensitive = true }
+hints = [
+    "0x13 ^ 0x20 = 0x33. Which character has code 0x33?",
+    "0x33 is the digit 3, 0x63 is c, 0x72 is r, 0x74 is t.",
+    "The positions give s, 3, c, r, 3, t.",
+]
+success = "`s3cr3t`. You inverted a check without running anything: read the transformation, apply its inverse. This is the cheapest attack there is, so always try it first."
+
+[[steps]]
+title = "Disguised data: three different things"
+goal = "Tell encoding, encryption and hashing apart."
+text = '''
+Programs that hide a flag transform it. There are three very different kinds of transformation, and beginners mix them up all the time:
+
+| | What it does | Needs a secret key? | Can you get the original back? |
+|---|---|---|---|
+| **Encoding** | Writes the same data in another form, e.g. as hex digits or base64 text | No | Yes, always |
+| **Encryption** | Scrambles data with a **key**, so only someone with the key can read it | Yes | Yes, *with the key* |
+| **Hashing** | Computes a short fingerprint of the data | No | No, never |
+
+Think of them in Rust terms:
+
+- **Encoding** is like `format!("{:02x}", byte)`: a different way to write the same value. Anyone who knows the format can read it back. Base64, hex and URL encoding are encodings. They hide *nothing*; they only make data look unreadable at first sight.
+- **Encryption** is like a lock: `encrypt(data, key)` gives scrambled bytes, and only `decrypt(scrambled, key)` gives the data back. AES, RC4 and TEA are encryption algorithms. In a program the key must be *somewhere*, so a reverse engineer can often find it.
+- **Hashing** is like a fingerprint: `sha256(data)` always gives the same 32 bytes for the same input, but you cannot turn those 32 bytes back into the input. MD5 and SHA-256 are hash functions. A program that hashes your password and compares the result never needs to store the password itself.
+
+So the first question about any strange-looking data is: *which of the three is this?* The next two lessons teach you to answer it.
+'''
+deep_dive = '''
+Simple "ciphers" like ROT13 (shift every letter 13 places) or XOR with a fixed byte sit between encoding and encryption. Technically they use a key (the shift, the XOR byte), but the key is so small that you can try every possible one in a fraction of a second. CTF players treat them like encodings: something to peel off, not something to break.
+'''
+check = { kind = "choice", options = [
+    "Encoding (for example base64): anyone can decode it, no key needed",
+    "Encryption (for example AES): you need the key",
+    "Hashing (for example SHA-256): it cannot be reversed",
+], correct = 0, explain = [
+    "Right. A flag that was only base64-encoded is hidden from a quick glance, but anyone can decode it in a second. That is why encoding is not protection.",
+    "Encryption does need a key. But the question asks which one needs no key at all to undo.",
+    "Hashing cannot be undone at all, with or without a key, so it is not the answer either.",
+] }
+hints = [
+    "Which row of the table says 'No' for the key and 'Yes, always' for getting the data back?",
+]
+success = "Encoding needs no key. When you meet data that looks random, try decoding it before you think about breaking anything."
+
+[[steps]]
+title = "Hash or encryption?"
+goal = "Use the properties of each kind to pick an attack."
+text = '''
+Two challenges, side by side.
+
+**Challenge A** contains this Rust logic (as the decompiler shows it):
+
+```rust
+let digest = sha256(input);
+if digest == [0x5e, 0x88, 0x48, 0x98, /* ... 28 more bytes ... */] {
+    println!("Correct!");
+}
+```
+
+**Challenge B** contains this:
+
+```rust
+let plain = aes_decrypt(STORED_BYTES, KEY);
+if input == plain {
+    println!("Correct!");
+}
+```
+
+In challenge B, the program itself decrypts the secret with a key it carries. Everything needed to read the flag is inside the program: the stored bytes and the key. You can find both and decrypt them yourself, or stop the program in the debugger right after `aes_decrypt` and read `plain` from memory.
+
+In challenge A, the program only keeps a fingerprint. Nobody can turn a SHA-256 fingerprint back into the input. Your only way in is to *guess* inputs, hash each guess and compare. That works when the password is short or is a common word (a list of common passwords is called a dictionary), and it is hopeless for a long random flag.
+
+Which challenge can you solve without guessing?
+'''
+check = { kind = "choice", options = [
+    "Challenge B: the key and the encrypted data are both inside the program",
+    "Challenge A: a hash is easier to undo than encryption",
+    "Both are impossible without the source code",
+], correct = 0, explain = [
+    "Right. A program that can decrypt its own secret carries everything you need. Find the key, find the data, decrypt.",
+    "It is the other way round: a hash cannot be undone at all. You can only guess and compare.",
+    "You do not need source code. The program contains the data and the code that uses it, and that is enough.",
+] }
+hints = [
+    "Which one stores something that can be turned back into the secret?",
+    "Encryption can be undone with the key. Hashing cannot be undone.",
+]
+success = "This is the core idea of the crypto lessons ahead: a program that must check a secret has to carry what it needs, and you can find it."
+
+[[steps]]
+title = "Your road through this level"
+goal = "See what comes next and why."
+text = '''
+The rest of this level follows the plan from step 3:
+
+1. **Encodings and the Workbench.** You decode base64, ROT13 and XOR in ORRESS's **Workbench**, and let its **Magic** button find a chain of decodings for you.
+2. **Recognising crypto.** Real ciphers carry fixed numbers, *magic constants*, that give them away. You learn the important ones and find one in a practice program.
+3. **Practice: decrypt the flag.** You find the key and the encrypted flag in crackme13 and decrypt it.
+4. **Symbolic execution.** When the conditions on the input are tangled, ORRESS's solver computes the password for you. You use it on crackme14.
+5. **Side channels.** A check that stops at the first wrong character leaks how many characters were right. You recover crackme03's password one character at a time.
+6. **Managed code.** Programs written in C#, Java, Python or for the web are not machine code but *bytecode*, and reversing them is a different (often easier) game.
+
+Each lesson explains first and then lets you do it. Take your time, and use the glossary: every new word in a step is listed under "Words in this step".
+'''
+success = "Ready. The next lesson starts with the most common disguise of all: encoding."

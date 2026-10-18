@@ -1,0 +1,375 @@
+id = "l4-encodings"
+level = 4
+order = 24
+title = "Encodings and the Workbench"
+summary = "Hex, base64, ROT13 and XOR: how they work, how to spot them, and how to peel them off in ORRESS's Workbench."
+goals = [
+    "explain how hex and base64 turn bytes into text",
+    "recognise base64, ROT13 and XOR-scrambled data",
+    "decode data with a Workbench recipe",
+    "recover an XOR key from a known start such as flag{",
+    "let Magic find a chain of decodings for you",
+]
+badge = "Decoder Ring"
+
+[[steps]]
+title = "Why programs disguise text"
+goal = "Understand why a flag is rarely stored as plain text."
+text = '''
+In Level 1 you found passwords with the **Strings** view: the password was stored as plain text, so it showed up in the list. Challenge authors know that too. So they disguise the flag before they put it in the program, and the program undoes the disguise at run time (or disguises your input the same way and compares).
+
+The cheapest disguise is an **encoding**: the same bytes written in a different form. Here is the idea in Rust:
+
+```rust
+let secret = "flag{hi}";
+let disguised = to_base64(secret);   // "ZmxhZ3toaX0="
+// The program stores only "ZmxhZ3toaX0=".
+// At run time it calls from_base64 and compares with your input.
+```
+
+In the Strings view you would now see `ZmxhZ3toaX0=`, which does not look like a flag at all. But anyone who recognises base64 can decode it in a second. Encodings are not protection, they only stop a quick glance.
+
+In this lesson you learn the four disguises you will meet most often in CTFs:
+
+1. **hex**: every byte written as two hex digits,
+2. **base64**: bytes written with 64 safe characters,
+3. **ROT13**: every letter shifted 13 places in the alphabet,
+4. **XOR** with a short key.
+
+For each one you learn how it works, how to recognise it, and how to undo it in ORRESS's **Workbench**, a tool that chains decoding steps together.
+'''
+success = "Let's start with the one you already know from Level 0: hex."
+
+[[steps]]
+title = "Hex as text"
+goal = "Decode hex digits back into characters."
+text = '''
+You know hexadecimal from Level 0: one byte is two hex digits, from `00` to `ff`. When a program writes bytes as hex **text**, each byte becomes two characters. The byte `0x66` becomes the two characters `6` and `6`.
+
+So the 4-byte text `flag` becomes the 8-character text `666c6167`:
+
+| character | `f` | `l` | `a` | `g` |
+|---|---|---|---|---|
+| ASCII code (hex) | `66` | `6c` | `61` | `67` |
+
+**How to recognise hex text:** it uses only the digits `0`-`9` and the letters `a`-`f` (or `A`-`F`), its length is even, and it is often split into pairs by spaces. A long string like `0c0b5df889a72f01` is almost certainly hex.
+
+**How to decode it:** split it into pairs, turn each pair into a byte, and read the bytes as ASCII. Try it on this one:
+
+```text
+72 33 76
+```
+'''
+instructions = [
+    "Look up each pair in the ASCII table below: `72`, then `33`, then `76`.",
+    "Type the three characters into the answer box and press **Check**.",
+]
+widget = "ascii_table"
+check = { kind = "answer", answers = ["r3v"], case_sensitive = true }
+hints = [
+    "0x30 to 0x39 are the digits 0 to 9, so 0x33 is a digit.",
+    "0x72 is r and 0x76 is v.",
+    "The answer is r3v.",
+]
+success = "`r3v`. Hex text doubles the size of the data and uses only 16 different characters. Those two facts give it away."
+
+[[steps]]
+title = "How base64 works"
+goal = "Understand why base64 text looks the way it does."
+text = '''
+Hex is wasteful: two characters per byte. **Base64** packs data more tightly. It uses 64 different characters, the **alphabet**:
+
+```text
+A-Z  (values 0-25)   a-z  (26-51)   0-9  (52-61)   +  (62)   /  (63)
+```
+
+64 is 2 to the power 6, so each character carries exactly **6 bits**. Base64 takes the input **3 bytes at a time** (3 x 8 = 24 bits) and cuts those 24 bits into **4 pieces of 6 bits**. Each piece is a number from 0 to 63, which picks one character.
+
+Worked example: the text `Man`.
+
+1. The bytes: `M` = `0x4d`, `a` = `0x61`, `n` = `0x6e`.
+2. In bits: `01001101 01100001 01101110`.
+3. Cut into four 6-bit groups: `010011 010110 000101 101110`.
+4. As numbers: 19, 22, 5, 46.
+5. Look them up: 19 = `T`, 22 = `W`, 5 = `F`, 46 = `u`.
+
+So `Man` becomes `TWFu`. Every 3 bytes become 4 characters.
+
+When the input length is not a multiple of 3, the last group is padded and the output ends with one or two `=` signs. That is why base64 text so often ends in `=` or `==`.
+
+**How to recognise base64:** only the characters `A-Z a-z 0-9 + /`, a length that is a multiple of 4, and maybe `=` at the end. Text starting with `Zmxh` is a gift: it is base64 for `fla`, the start of `flag{`.
+'''
+deep_dive = '''
+In Rust you would write the core of a base64 encoder like this:
+
+```rust
+const ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn encode3(b: [u8; 3]) -> [u8; 4] {
+    let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+    [
+        ALPHABET[(n >> 18 & 63) as usize],
+        ALPHABET[(n >> 12 & 63) as usize],
+        ALPHABET[(n >> 6 & 63) as usize],
+        ALPHABET[(n & 63) as usize],
+    ]
+}
+```
+
+When you see a 64-byte table like `ALPHABET` in a program's data, the program contains its own base64 code. Some challenges use a *shuffled* alphabet so that normal decoders fail. The Workbench's **From base64** step has an `alphabet` field for exactly that case: copy the program's table into it.
+'''
+success = "Three bytes in, four characters out. Keep that ratio in mind for the next question."
+
+[[steps]]
+title = "Base64 by the numbers"
+goal = "Use the 3-to-4 rule."
+text = '''
+Base64 turns every group of **3 bytes** into **4 characters**. When the input fills whole groups exactly, there is no `=` padding at the end.
+
+A program stores a 24-byte flag as base64 text. 24 bytes is exactly 8 groups of 3 bytes.
+
+How many characters long is the base64 text?
+'''
+instructions = [
+    "Count the groups: 24 bytes divided by 3 bytes per group.",
+    "Multiply the number of groups by 4 characters per group.",
+    "Type the result and press **Check**.",
+]
+check = { kind = "answer", answers = ["32"], number = true }
+hints = [
+    "24 / 3 = 8 groups.",
+    "8 groups x 4 characters = ?",
+]
+success = "32 characters. You can also go the other way: base64 text of length L holds about L x 3 / 4 bytes. That is how you estimate what is hidden inside before you decode it."
+
+[[steps]]
+title = "Open the Workbench"
+goal = "Find the Workbench and learn its three columns."
+text = '''
+ORRESS's **Workbench** decodes, decrypts and decompresses data. It works with a **recipe**: a list of steps, where each step works on the output of the step before it. For example, "first From base64, then ROT13".
+
+The Workbench has three columns:
+
+1. **Operations** (left): every step you can add, grouped into categories such as *Encoding*, *Text*, *Bitwise*, *Crypto* and *Hashes*. A search box at the top filters the list. Click an operation to add it to the end of the recipe. Hover over it to read what it does.
+2. **Recipe** (middle): the steps, top to bottom. Each step has a tick box (untick it to skip the step), `^` and `v` to move it, `x` to remove it, and fields for its settings, such as a key. Below the steps, **As text** shows the same recipe as one line, for example `from_base64 | rot13`, and the **Clear** button removes all steps.
+3. **Input and Output** (right): type or paste the data into the **Input** box. The **text / hex** switch says whether you type characters or hex bytes. The **Output** box shows the result after all steps, and says **This looks like a flag!** when it finds one. The **Magic** button at the bottom tries to find a recipe for you.
+
+Open it now.
+'''
+instructions = [
+    "Click the **Tools** menu at the top of the window.",
+    "Click **Workbench**. (The shortcut is `Ctrl+Shift+W`; you can also type `Workbench` in the command palette, `Ctrl+Shift+P`.)",
+]
+check = { kind = "action", id = "workbench::Open" }
+hints = [
+    "The Workbench is under the Tools menu, not under View.",
+    "Tools, then Workbench. Or press Ctrl+Shift+W.",
+]
+success = "The Workbench opened as a tab in the middle. You can drag the tab next to this lesson so you see both."
+
+[[steps]]
+title = "Decode base64"
+goal = "Build your first recipe."
+text = '''
+Here is a disguised flag. It uses only letters and digits and starts with `Zmxh`, so it is base64:
+
+```text
+ZmxhZ3tiNHMzXzY0X2lzX24wdF9jcnlwdDB9
+```
+
+To copy it, click the small copy icon in the top-right corner of the grey box above. (You can also select the text with the mouse and press `Ctrl+C`.)
+
+Now decode it in the Workbench. You start with an empty recipe, add one step, and paste the data.
+'''
+instructions = [
+    "In the Workbench, in the middle column, click **Clear** to remove any old steps.",
+    "In the left column, type `base64` in the search box, then click **From base64**. It appears as the first step in the middle column.",
+    "In the right column, make sure **text** is selected next to **Input**.",
+    "Click into the **Input** box, press `Ctrl+A` to select what is there, and press `Ctrl+V` to paste the string from this step.",
+    "Read the **Output** box. Copy the flag (or type it) into the answer box here and press **Check**.",
+]
+check = { kind = "secret", sha256 = "320c47ab1b0e493c0fb120d6a3c4bcda50a759d392182fdff17aed27f8820f71" }
+hints = [
+    "If the output shows an error, check that the input contains only the string, with no spaces before or after it.",
+    "The output should start with flag{ and end with }. The Output box also says 'This looks like a flag!'.",
+    "The flag says that base64 is not crypto, in leetspeak.",
+]
+success = "You decoded it. Notice the text under the step in the recipe: it shows how many bytes came out. 36 characters of base64 gave 27 bytes, which is 36 x 3 / 4."
+
+[[steps]]
+title = "ROT13: shifting letters"
+goal = "Undo a letter-shift cipher."
+text = '''
+**ROT13** ("rotate by 13") replaces every letter with the letter 13 places further in the alphabet, wrapping around from `z` to `a`. Digits, punctuation and braces stay as they are.
+
+```text
+a b c d e f g h i j k l m      (letters 0-12)
+n o p q r s t u v w x y z      (letters 13-25)
+```
+
+So `a` becomes `n`, `f` becomes `s`, and `n` becomes `a` again. The alphabet has 26 letters, so shifting by 13 twice brings every letter back: **ROT13 undoes itself**. In Rust:
+
+```rust
+fn rot13(c: char) -> char {
+    match c {
+        'a'..='z' => (((c as u8 - b'a' + 13) % 26) + b'a') as char,
+        'A'..='Z' => (((c as u8 - b'A' + 13) % 26) + b'A') as char,
+        _ => c,
+    }
+}
+```
+
+**How to recognise ROT13:** the text keeps the shape of the original (same length, braces and underscores in the same places), but the words are nonsense. `flag{` becomes `synt{`. When you see `synt{`, think ROT13.
+
+ROT13 is a special case of the **Caesar cipher**, which shifts by any amount. The Workbench has both: **ROT13** and **Caesar shift** (with a `shift` setting), in the *Text* category.
+
+Decode this one:
+
+```text
+synt{ebg13_vf_whfg_n_fuvsg}
+```
+'''
+instructions = [
+    "Copy the string above with the copy icon of its grey box.",
+    "In the Workbench, click **Clear** in the middle column.",
+    "In the left column, search for `rot` and click **ROT13**.",
+    "Click into the **Input** box, press `Ctrl+A`, then `Ctrl+V`.",
+    "Type the flag from the **Output** box into the answer box and press **Check**.",
+]
+check = { kind = "secret", sha256 = "cb4a012c5138f0733609e8e69811c04a6401dd04264b517c365cf41140cbfbca" }
+hints = [
+    "The output should start with flag{.",
+    "If the output still says synt{, the recipe is empty or the step is unticked.",
+    "The flag says that ROT13 is just a shift.",
+]
+success = "ROT13 hides text from a human reader for about two seconds. Like base64 it needs no key: knowing the method is enough."
+
+[[steps]]
+title = "XOR and the known start"
+goal = "Recover an XOR key from the text you know the flag starts with."
+text = '''
+You met XOR in Level 2: `a ^ k` flips the bits of `a` where `k` has a 1, and XOR with the same `k` again gives `a` back. Programs often XOR a flag with a short **repeating key**: byte 0 with key byte 0, byte 1 with key byte 1, and so on, starting over when the key runs out.
+
+```rust
+fn xor(data: &[u8], key: &[u8]) -> Vec<u8> {
+    data.iter().enumerate().map(|(i, b)| b ^ key[i % key.len()]).collect()
+}
+```
+
+If you know the key, decoding is the same function again. But what if you do not know the key?
+
+Here is the trick. You know the flag starts with `flag{`. XOR has a third useful property: `plain ^ key == cipher` means `cipher ^ plain == key`. So XOR the first scrambled bytes with `f`, `l`, `a`, `g`, `{` and the key falls out.
+
+Worked example with the first byte below: `0x25 ^ 0x66` (the code of `f`) = `0x43`, which is the character `C`. That is the first key byte.
+
+This kind of attack is called a **known-plaintext attack**: knowing part of the original text reveals the key. The Workbench automates it with the operation **XOR key from known text**. It tries every key length up to the length of the known text, finds the key, decrypts, and prints the key on the first output line.
+
+Here is a flag XORed with a short key, written as hex:
+
+```text
+25 38 27 24 2f 2d 2d 64 31 2d 0b 36 2f 60 77 2d 20 75 3b 20 19 34 65 28 30 29
+```
+
+What is the key?
+'''
+instructions = [
+    "Copy the hex bytes above with the copy icon of their grey box.",
+    "In the Workbench, click **Clear**, then add **From hex** (search `hex`) and then **XOR key from known text** (search `known`). The order matters: first From hex, then XOR.",
+    "Check that the `known` field of the XOR step says `flag{` (that is the default).",
+    "Paste the hex into the **Input** box (with **text** selected, `Ctrl+A`, `Ctrl+V`).",
+    "The first output line says `key: 0x... (\"...\")`. Type the key text shown between the quotes and press **Check**.",
+]
+check = { kind = "answer", answers = ["CTF"], case_sensitive = true }
+hints = [
+    "Read only the first line of the output: key: 0x435446 (...).",
+    "0x43 0x54 0x46 are three ASCII characters.",
+    "The key is CTF, in capitals.",
+]
+success = "The key is `CTF` and the second output line is the flag. One known word was enough to break the key. This is why XOR with a short key is not real encryption: real ciphers are built so that knowing part of the text does not reveal the key."
+
+[[steps]]
+title = "Read the decrypted flag"
+goal = "Confirm the XOR decryption."
+text = '''
+Look at the Output box again. Below the `key:` line is the decrypted text.
+
+When you know the key, you can also decrypt with the plain **XOR** operation and its `key` field. The `key` field accepts three forms:
+
+- text, such as `CTF`,
+- hex with `0x` in front, such as `0x435446`,
+- hex bytes with `hex:` in front, such as `hex:43 54 46`.
+
+All three mean the same three bytes. The plain XOR step is what you use when the program shows you the key directly, for example in the decompiler.
+'''
+instructions = [
+    "Read the second line of the Workbench **Output** box.",
+    "Type that flag into the answer box and press **Check**.",
+]
+check = { kind = "secret", sha256 = "f17e01a7fab0f64c62132b89e683d3753237ba4415ee0947f5f39948cbd5d00b" }
+hints = [
+    "It is the line below key: 0x435446 (\"CTF\").",
+    "It starts with flag{kn0wn.",
+]
+success = "Known plaintext wins. Remember the trick for every XOR challenge: what do you know about the start of the hidden text?"
+
+[[steps]]
+title = "Chains and Magic"
+goal = "Let the Workbench find a recipe for you."
+text = '''
+Challenge authors like to stack disguises: ROT13 first, then base64 on top, or XOR, then hex. You undo them in **reverse order**: the last disguise added is the first one you remove. In Rust terms:
+
+```rust
+let stored = to_base64(rot13(flag));   // ROT13 first, base64 on top
+let flag   = rot13(from_base64(stored)); // undo base64 first, then ROT13
+```
+
+You could try combinations by hand, but the Workbench has a button for it: **Magic**. Magic tries the common decodings (hex, base64, base32, URL, zlib, gzip, XOR with one byte, ROT13, UTF-16 and more) in chains of up to 3 steps. It scores each result by how readable it is and lists the best ones, each with its recipe, a preview, and the reason it was chosen ("looks like a flag!", "readable text"). Click **Use** next to a result to load its recipe.
+
+Magic does not know the program. It only looks at the data, so it is a starting point: always check that the result makes sense.
+
+Try it on this stacked disguise:
+
+```text
+c3ludHt6NHQxcF9zMWFxZl9ndTNfcHU0MWF9
+```
+'''
+instructions = [
+    "Copy the string above with the copy icon of its grey box.",
+    "In the Workbench, click **Clear** in the middle column.",
+    "Paste the string into the **Input** box (`Ctrl+A`, `Ctrl+V`).",
+    "Click **Magic** at the bottom of the right column.",
+    "Click **Use** next to the first suggestion. Its recipe appears in the middle column.",
+    "Type the flag from the **Output** box into the answer box and press **Check**.",
+]
+check = { kind = "secret", sha256 = "e1ecd9386372f53dc2c7602f35d6256d08a68830788a9f00789ddc88e42c4a55" }
+hints = [
+    "The first suggestion should be marked (looks like a flag!).",
+    "Its recipe is from_base64 | rot13: base64 was added last, so it is removed first.",
+    "If Magic shows nothing, check that the input box contains only the string.",
+]
+success = "Magic found `from_base64 | rot13`. The string started with `c3lu`, which is base64 for `syn`: base64 on the outside, ROT13 (`synt{`) on the inside."
+
+[[steps]]
+title = "Recognising disguises: a summary"
+goal = "Have a checklist for strange-looking data."
+text = '''
+When a challenge gives you strange text, or the Strings view shows something odd, go through this list:
+
+| You see | It is probably | Undo it with |
+|---|---|---|
+| only `0-9 a-f`, even length, maybe pairs with spaces | hex | **From hex** |
+| `A-Z a-z 0-9 + /`, length a multiple of 4, maybe `=` at the end; starts with `Zmxh` | base64 | **From base64** |
+| uppercase and `2-7` only, `=` padding | base32 | **From base32** |
+| `%41%42` | URL encoding | **URL decode** |
+| `synt{`, words of the right length but nonsense | ROT13 | **ROT13** |
+| random-looking bytes, and you know how the text starts | XOR with a short key | **XOR key from known text** |
+| random-looking bytes, one-byte key suspected | XOR with one byte | **XOR brute force** |
+| bytes starting `78 9c` or `1f 8b` | zlib or gzip compression | **Zlib decompress**, **Gzip decompress** |
+| none of the above | maybe real encryption | the next lesson |
+
+You can also run every recipe outside the app. The **Copy as command** button under the recipe copies a command for `orress-cli`, ORRESS's command-line tool, for example `orress-cli recipe "from_base64 | rot13" FILE`, and `orress-cli magic FILE` runs Magic on a file. That is handy when you have many files to decode.
+
+And if Magic finds nothing readable, the data may be truly encrypted. Encrypted data looks random, and its **entropy** (a measure of randomness from 0 to 8, which the Workbench shows under the output) is close to 8. That is the topic of the next lesson.
+'''
+success = "You can now peel off every common encoding. Next: real ciphers, and how to recognise them inside a program."

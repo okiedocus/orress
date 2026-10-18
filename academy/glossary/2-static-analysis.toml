@@ -1,0 +1,653 @@
+# Level 2: static analysis. File formats, navigating a program, the graph view, the
+# decompiler, XOR encoding and keygens.
+
+[[term]]
+term = "static analysis"
+aliases = ["statically", "static analysis tools"]
+short = "Understanding a program by reading its file, without running it."
+text = '''
+Static analysis means you look at the bytes, the instructions and the data of a program,
+but you never start it. It is like reading the source code of a Rust project instead of
+running `cargo run` and watching what it prints.
+
+It is safe (nothing runs, so a harmful program cannot do anything), and it shows *every*
+path through the code, not only the one a single run takes. Its limit: values that only
+exist while the program runs (what you type, what a server answers) are not in the file.
+'''
+see = ["decompiler", "cross-reference"]
+
+[[term]]
+term = "executable format"
+aliases = ["executable formats", "binary format", "file formats"]
+short = "The fixed layout an operating system expects a program file to have: PE, ELF or Mach-O."
+text = '''
+A program file is not a shapeless pile of machine code. It follows a format that the
+operating system knows: a header first, then a table of sections, then the sections
+themselves. Windows uses **PE**, Linux and Android use **ELF**, macOS and iOS use
+**Mach-O**. The ideas are the same in all three; only the names and the exact byte layout
+differ.
+'''
+see = ["PE", "ELF", "Mach-O"]
+
+[[term]]
+term = "PE"
+aliases = ["Portable Executable", "PE file", "PE files", "PE format"]
+short = "Portable Executable: the file format of Windows programs (.exe), libraries (.dll) and drivers (.sys)."
+text = '''
+A PE file starts with a small **DOS header** (the letters `MZ`), which points to the
+**PE header** (the letters `PE` followed by two zero bytes). After it come the optional
+header (image base, entry point, data directories) and the section table. Every program
+the Academy gives you is a PE file.
+'''
+see = ["DOS header", "PE header", "optional header", "section table"]
+
+[[term]]
+term = "ELF"
+aliases = ["ELF file", "ELF files", "Executable and Linkable Format"]
+short = "The executable format of Linux, Android and most other Unix systems."
+text = '''
+An ELF file starts with the four bytes `7F 45 4C 46` (`\x7fELF`). It has the same ideas as
+PE with other names: code is in `.text`, constants in `.rodata`, and library functions are
+reached through small stubs in `.plt` and addresses in `.got`. ELF files also have
+**segments** (also called program headers): the parts the loader actually maps into memory.
+'''
+see = ["PE", "import stub"]
+
+[[term]]
+term = "Mach-O"
+aliases = ["Mach-O file", "MachO"]
+short = "The executable format of macOS and iOS."
+text = '''
+Mach-O files start with a "magic" number such as `CF FA ED FE` (64-bit). Sections live inside
+segments, and their names look different: `__TEXT,__text` for code, `__DATA,__data` for
+data, `__cstring` for text. A "universal" (fat) Mach-O holds versions for several CPUs at once.
+'''
+see = ["PE", "ELF"]
+
+[[term]]
+term = "DOS header"
+aliases = ["MZ header", "DOS stub"]
+short = "The first 64 bytes of every PE file, starting with `MZ`; today it mainly points to the PE header."
+text = '''
+In the 1980s Windows programs had to say something sensible when started under MS-DOS, so
+every PE file still starts with a tiny DOS program: the letters `MZ`, some old fields, and a
+"stub" that prints *This program cannot be run in DOS mode.* The one field that still
+matters is **e_lfanew** at offset `0x3C`: the file offset of the real PE header.
+'''
+see = ["e_lfanew", "PE header"]
+
+[[term]]
+term = "e_lfanew"
+short = "The 4-byte number at file offset 0x3C of a PE file: where the PE header starts."
+text = '''
+To find the PE header, Windows reads the 4 bytes at offset `0x3C` as a little-endian
+number. In the Academy's crackmes they are `E8 00 00 00`, so the PE header starts at
+offset `0xE8`. In Rust terms:
+`let pe = u32::from_le_bytes(file[0x3C..0x40].try_into().unwrap());`
+'''
+see = ["DOS header", "PE header"]
+
+[[term]]
+term = "PE header"
+aliases = ["PE signature", "COFF header", "file header", "NT headers"]
+short = "The part of a PE file that starts with `PE\\0\\0` and says which CPU the program is for and how many sections it has."
+text = '''
+After the four signature bytes `50 45 00 00` ("PE" and two zeros) come 20 bytes called the
+COFF file header: the machine type (`64 86` = 0x8664 = x86-64), the number of sections, a
+time stamp and the size of the optional header that follows.
+'''
+see = ["optional header", "section table"]
+
+[[term]]
+term = "optional header"
+short = "The large PE header part (not optional at all for programs) that holds the image base, the entry point and the data directories."
+text = '''
+Despite its name every program has one. The fields a reverser cares about most:
+`AddressOfEntryPoint` (the RVA where execution starts), `ImageBase` (the preferred load
+address), `Subsystem` (console or GUI program) and the data directories (where the import
+table, export table and other tables are).
+'''
+see = ["image base", "RVA", "data directory"]
+
+[[term]]
+term = "data directory"
+aliases = ["data directories"]
+short = "A list in the PE optional header that says where tables like the imports and exports are."
+text = '''
+Each entry is an RVA and a size. Entry 1 is the import table, entry 0 the export table,
+entry 12 the Import Address Table. Tools such as ORRESS read these entries to fill the
+Imports view.
+'''
+see = ["import", "IAT"]
+
+[[term]]
+term = "section table"
+aliases = ["section headers", "section header"]
+short = "The list of sections in a program file: for each one its name, size, file offset, address and permissions."
+text = '''
+Every row of the Sections view is one entry of this table. It is the "map" that tells the
+loader which bytes of the file go to which addresses in memory, and it is what lets you
+convert between a file offset and an address.
+'''
+see = ["file offset", "virtual address", "section permissions"]
+
+[[term]]
+term = ".text"
+aliases = ["text section", "code section"]
+short = "The section that holds the program's machine code."
+text = '''
+The name is an old Unix word for code. It is readable and executable (R-X) but not
+writable. On macOS the code section is called `__text`.
+'''
+see = [".rdata", "section permissions"]
+
+[[term]]
+term = ".rdata"
+aliases = [".rodata", "read-only data"]
+short = "The section with constants: string literals, tables and other read-only data."
+text = '''
+Windows calls it `.rdata`, Linux `.rodata`. Every `"text"` literal in your Rust code ends up
+here, which is why the Strings view finds most messages in this section. On Windows the
+import tables usually live at its start too.
+'''
+see = [".text", ".data"]
+
+[[term]]
+term = ".data"
+aliases = ["data section"]
+short = "The section with global variables that have a starting value and can be changed."
+text = '''
+A Rust `static mut COUNTER: u32 = 5;` lives here. It is readable and writable (RW-), but
+not executable.
+'''
+see = [".bss", ".rdata"]
+
+[[term]]
+term = ".bss"
+short = "Global variables that start as zero; the section takes space in memory but not in the file."
+text = '''
+There is no point in storing a million zero bytes in the file, so the section table only
+says "reserve this much memory and fill it with zeros". That is why a `.bss` section has a
+memory size but a file size of 0.
+'''
+see = [".data"]
+
+[[term]]
+term = ".pdata"
+short = "A 64-bit Windows section that lists where every function starts and ends, for exception handling."
+text = '''
+Windows needs it to unwind the stack when a panic or crash happens. For a reverser it is a
+gift: it is a list of function start addresses, even in a stripped program.
+'''
+see = [".text"]
+
+[[term]]
+term = ".reloc"
+aliases = ["relocations", "relocation", "relocation table"]
+short = "The list of places in a program that must be fixed when it is loaded at another address than the image base."
+text = '''
+Some instructions and data contain full addresses. If Windows loads the program somewhere
+else (which ASLR does on purpose), it adds the difference to every place listed here.
+'''
+see = ["image base", "ASLR"]
+
+[[term]]
+term = "section permissions"
+aliases = ["permissions column", "R-X", "RW-", "RWX"]
+short = "Whether a section may be read (R), written (W) and executed (X) when the program runs."
+text = '''
+Code is `R-X`, constants `R--`, variables `RW-`. A section that is both writable and
+executable (`RWX`) is rare in normal programs: it often means the program writes new code
+into memory while it runs, as packers and some malware do.
+'''
+see = [".text", "DEP"]
+
+[[term]]
+term = "image base"
+aliases = ["ImageBase", "base address"]
+short = "The memory address a program prefers to be loaded at; every other address is image base + RVA."
+text = '''
+For 64-bit Windows programs it is usually `0x140000000`. The disassembly shows addresses as
+if the program is loaded there, so `0x140001100` means "RVA `0x1100` from the start of the
+loaded program".
+'''
+see = ["RVA", "virtual address"]
+
+[[term]]
+term = "virtual address"
+aliases = ["virtual addresses", "VA", "memory address", "load address"]
+short = "Where a byte is in memory when the program runs; the addresses the disassembly shows."
+text = '''
+"Virtual" because every process has its own private address space (Level 0). A virtual
+address = image base + RVA. Do not confuse it with the file offset: the same byte is at
+different numbers in the file and in memory.
+'''
+see = ["image base", "RVA", "file offset"]
+
+[[term]]
+term = "RVA"
+aliases = ["relative virtual address", "RVAs"]
+short = "Relative virtual address: an address counted from the image base, so it stays valid wherever the program is loaded."
+text = '''
+PE headers store almost every address as an RVA. Convert with plain additions:
+
+```rust
+let va = image_base + rva;            // 0x140000000 + 0x1100 = 0x140001100
+let rva = va - image_base;
+```
+'''
+see = ["image base", "virtual address", "file offset"]
+
+[[term]]
+term = "file offset"
+aliases = ["file offsets", "raw offset", "offset in the file"]
+short = "The position of a byte in the file on disk, counted from 0; what the Hex view shows on the left."
+text = '''
+Sections are placed differently in the file than in memory, so a file offset and an RVA of
+the same byte differ. The section table gives the conversion:
+
+```rust
+// for the section that contains the byte:
+let offset = rva - section.rva + section.file_offset;
+// .text: RVA 0x1000 is at file offset 0x400, so RVA 0x1100 is at 0x500
+```
+'''
+see = ["RVA", "section table", "virtual address"]
+
+[[term]]
+term = "import"
+aliases = ["imports", "imported function", "imported functions", "import table"]
+short = "A function from another file (a DLL or shared library) that a program uses; listed by name in the program."
+text = '''
+Your Rust program calls `println!`, which in the end calls Windows' `WriteConsoleW` in
+`KERNEL32.dll`. That code is not in your `.exe`; the file only lists "I need WriteConsoleW
+from KERNEL32.dll". The list of imports shows what a program can do before you read any
+code: `ReadConsoleW` reads input, `memcmp` compares memory, `socket` means networking.
+'''
+see = ["DLL", "IAT", "export"]
+
+[[term]]
+term = "export"
+aliases = ["exports", "exported function", "export table"]
+short = "A function a file offers to other programs, listed by name; DLLs export, normal programs usually do not."
+text = '''
+The other side of an import: `KERNEL32.dll` exports `WriteConsoleW`, your program imports
+it. A Rust library built as a `cdylib` exports its `#[no_mangle] pub extern "C" fn`s.
+'''
+see = ["import", "DLL"]
+
+[[term]]
+term = "DLL"
+aliases = ["DLLs", "dynamic-link library", "shared library", "shared libraries"]
+short = "A library file (.dll on Windows, .so on Linux, .dylib on macOS) whose functions programs use while they run."
+text = '''
+Instead of copying the code of `WriteConsoleW` into every program, Windows keeps it in one
+file, `KERNEL32.dll`, and loads it next to every program that imports it.
+'''
+see = ["import", "export"]
+
+[[term]]
+term = "IAT"
+aliases = ["Import Address Table", "import slot", "import slots"]
+short = "Import Address Table: a list of pointers that Windows fills with the real addresses of imported functions at load time."
+text = '''
+The program does not know where `WriteConsoleW` will be in memory, so it calls *through* a
+pointer: `call [0x140018xxx]`. When the program starts, the loader writes the real address
+of each imported function into its slot in the IAT. ORRESS shows such a call with the
+import's name, e.g. `call WakeByAddressSingle`.
+'''
+see = ["import", "import stub"]
+
+[[term]]
+term = "import stub"
+aliases = ["import stubs", "thunk", "thunks", "PLT", "PLT stub"]
+short = "A tiny function whose only job is to jump to an imported function."
+text = '''
+On Linux every call to a library function goes through a stub in `.plt` (`puts@plt`); on
+Windows some compilers add thunks like `jmp [IAT slot]`. They all look the same, so the
+Functions view hides them unless you tick **Show import stubs**.
+'''
+see = ["IAT", "import"]
+
+[[term]]
+term = "Rich header"
+short = "Hidden Microsoft linker data in many PE files that lists the tools (compiler versions) used to build the file."
+text = '''
+It sits between the DOS stub and the PE header. It is not documented by Microsoft, but it
+reliably tells you the program was linked with Microsoft's linker, which is how ORRESS
+detects "Microsoft Visual C++" even in a Rust program.
+'''
+see = ["DOS header"]
+
+[[term]]
+term = "subsystem"
+aliases = ["console subsystem", "GUI subsystem"]
+short = "A PE header field that says whether a program is a console program (text window) or a GUI program (its own windows)."
+see = ["optional header"]
+
+[[term]]
+term = "TLS callback"
+aliases = ["TLS callbacks", "TLS directory"]
+short = "A function a PE file asks Windows to run before the entry point, for thread-local storage set-up."
+text = '''
+Rust and the C runtime use them for normal reasons. Because they run before the entry
+point, crackmes and malware sometimes hide checks in them; that is why ORRESS shows a tip
+when a file has them.
+'''
+see = ["optional header"]
+
+[[term]]
+term = "ASLR"
+aliases = ["address space layout randomization"]
+short = "Address Space Layout Randomization: Windows loads the program at a random address each run, to make attacks harder."
+text = '''
+For static analysis it changes nothing: ORRESS shows addresses as if the program is loaded
+at its image base. In a debugger the real addresses differ from run to run, but the RVA
+(address minus base) stays the same.
+'''
+see = ["image base", "RVA", ".reloc"]
+
+[[term]]
+term = "DEP"
+aliases = ["NX", "DEP / NX", "data execution prevention", "non-executable"]
+short = "Data Execution Prevention: memory that holds data (stack, heap) may not be run as code."
+text = '''
+It stops attacks that write machine code into a buffer and jump to it. For you as a
+reverser it mostly means that code lives in sections marked X, and data in sections without X.
+'''
+see = ["section permissions", "ASLR"]
+
+[[term]]
+term = "Control Flow Guard"
+aliases = ["CF Guard", "GUARD_CF"]
+short = "A Windows protection that checks the target of every indirect call before jumping there."
+text = '''
+When it is on, indirect calls go through a small check function first. It makes the
+disassembly a little noisier, but it does not hide anything from you.
+'''
+see = ["ASLR", "DEP"]
+
+[[term]]
+term = "code signature"
+aliases = ["digital signature", "code signing", "Authenticode"]
+short = "A certificate stored in a file that proves who published it and that it was not changed since."
+text = '''
+Windows system files and most commercial software are signed; crackmes and most malware
+are not. After you patch a signed file, its signature is no longer valid.
+'''
+
+[[term]]
+term = "entropy"
+aliases = ["Shannon entropy"]
+short = "A number from 0 to 8 that says how random the bytes of a file or section look."
+text = '''
+Text and padding are low (0-4), machine code is in the middle (5-6.5), and compressed or
+encrypted data is close to 8. A section near 8 means "you cannot read this yet: it must be
+unpacked or decrypted first".
+'''
+
+[[term]]
+term = "lang_start"
+aliases = ["rust_runtime_main", "std::rt::lang_start", "lang_start_internal"]
+short = "The Rust standard library function that sets up a Rust program and then calls your `main`."
+text = '''
+When you write `fn main()`, the compiler also writes a small hidden function that passes a
+pointer to your `main` to `std::rt::lang_start`. It sets up the panic handler and
+`std::env::args`, calls your `main`, and turns its result into an exit code. ORRESS finds
+this hidden function, names it `rust_runtime_main`, and follows the pointer
+(`lea rax,[main]`) to find your `main`, even in a stripped program.
+'''
+see = ["generated name"]
+
+[[term]]
+term = "generated name"
+aliases = ["generated names", "sub_ name", "sub_ names", "loc_ label", "loc_ labels", "auto-generated name"]
+short = "A name ORRESS invents when the file has none: `sub_` + address for functions, `loc_` + address for jump targets."
+text = '''
+`sub_1400012c0` means "a subroutine (function) that starts at address 0x1400012c0".
+`loc_1400012d0` is a location inside a function that some jump goes to. The decompiler
+names unknown variables in a similar way: `local_28` is a variable on the stack at offset
+0x28, `a1` is the first argument. Replace these names with your own (N) as soon as you know
+what something does.
+'''
+see = ["annotation"]
+
+[[term]]
+term = "annotation"
+aliases = ["annotations", "rename", "renamed", "renaming"]
+short = "Something you add to a program while analysing it: a name for a function or address, or a comment."
+text = '''
+Annotations never change the program file. ORRESS keeps them next to your analysis and
+shows them everywhere: in the disassembly, the graph, the decompiler and the Functions
+view. Press **N** to rename and **;** to comment.
+'''
+see = ["generated name"]
+
+[[term]]
+term = "cross-reference"
+aliases = ["cross-references", "xref", "xrefs"]
+short = "A place in the code that uses an address: a call to a function, a jump to a label, or an instruction that reads a string."
+text = '''
+Cross-references answer "who uses this?". For a function they are its callers; for a string
+they are the instructions that load it. Following them is how you get from a message like
+*Invalid licence code.* to the code that decides whether to print it. Press **X** in the
+disassembly to see them.
+'''
+see = ["static analysis"]
+
+[[term]]
+term = "navigation history"
+aliases = ["Go Back", "Go Forward"]
+short = "The list of places you jumped to, so you can go back (Alt+Left or Esc) and forward (Alt+Right) like in a web browser."
+see = ["cross-reference"]
+
+[[term]]
+term = "basic block"
+aliases = ["basic blocks"]
+short = "A run of instructions that always executes from top to bottom: one way in at the top, one way out at the bottom."
+text = '''
+A block ends at every jump, and a new block starts at every place a jump can land. Inside a
+block nothing can branch, so you can read it as one small step. In Rust terms, the body of
+an `if` without any further `if`s or loops inside it is roughly one basic block.
+'''
+see = ["control-flow graph", "graph edge"]
+
+[[term]]
+term = "control-flow graph"
+aliases = ["control flow graph", "CFG", "flow graph", "flow chart"]
+short = "A function drawn as boxes (basic blocks) joined by arrows (the jumps between them)."
+text = '''
+The graph view draws it. Shapes tell you the structure at a glance: a box that splits in two
+and joins again is an `if`/`else`; an arrow that goes back up to an earlier box is a loop;
+a long ladder of boxes that each can jump to the same exit is a chain of checks.
+'''
+see = ["basic block", "graph edge", "back edge"]
+
+[[term]]
+term = "graph edge"
+aliases = ["edges", "graph arrow", "graph arrows"]
+short = "An arrow in the graph view: a possible way from the end of one basic block to the start of another."
+text = '''
+ORRESS colours them: **green** when a conditional jump is taken (the condition is true),
+**red** when it is not taken and execution falls through, **blue** for unconditional jumps
+and plain fall-through.
+'''
+see = ["control-flow graph", "fall-through"]
+
+[[term]]
+term = "back edge"
+aliases = ["back edges", "back-edge"]
+short = "A graph arrow that goes back to an earlier block: the sign of a loop."
+see = ["control-flow graph", "graph edge"]
+
+[[term]]
+term = "fall-through"
+aliases = ["fall through", "falls through", "fallthrough"]
+short = "What happens when a conditional jump is not taken: the CPU continues with the next instruction below."
+see = ["graph edge"]
+
+[[term]]
+term = "decompiler"
+aliases = ["decompile", "decompiled", "decompiling", "decompilation"]
+short = "A tool that turns machine code back into readable code with `if`, loops, variables and calls."
+text = '''
+A compiler goes from Rust to machine code; a decompiler goes the other way. It cannot get
+the original source back, because names, comments and most types are thrown away during
+compiling. What it gives you is **pseudocode**: code that does the same thing, with guessed
+names and types. ORRESS's decompiler writes that pseudocode in Rust syntax.
+'''
+see = ["pseudocode", "Rust port"]
+
+[[term]]
+term = "pseudocode"
+aliases = ["pseudo-code"]
+short = "Code that reads like a programming language and shows what a function does, but is not meant to compile."
+see = ["decompiler"]
+
+[[term]]
+term = "Rust port"
+aliases = ["Rust port mode", "port mode"]
+short = "The decompiler mode that turns a function into compilable Rust, keeping instructions it cannot translate as inline assembly."
+text = '''
+Pseudocode is for reading; the Rust port is a starting point for re-writing a function in
+Rust (porting it). It adds a small helper prelude and wraps anything it cannot lift in
+`asm!` blocks, so the result can still be compiled and tested.
+'''
+see = ["decompiler", "pseudocode"]
+
+[[term]]
+term = "loop unrolling"
+aliases = ["unrolled", "unrolls", "unroll", "unrolling"]
+short = "A compiler optimisation that repeats the body of a short loop instead of jumping back, so no loop is left in the machine code."
+text = '''
+If a loop always runs 8 times, the compiler may write the body 8 times in a row, once for
+each value of `i`. You then see eight almost identical blocks instead of one loop. Read
+them as one loop again: the parts that change from copy to copy are the index and the
+constants for that index.
+'''
+see = ["basic block"]
+
+[[term]]
+term = "XOR cipher"
+aliases = ["XOR encryption", "XOR-encoded", "XOR encoding", "XOR-encrypted", "XOR'd"]
+short = "Hiding data by XORing every byte with a key; XORing again with the same key gives the original back."
+text = '''
+XOR has a special property: `(x ^ k) ^ k == x` for every `x` and `k`. So the same
+operation both hides and reveals:
+
+```rust
+let secret = b"hi";
+let key = 0x5A;
+let hidden: Vec<u8> = secret.iter().map(|b| b ^ key).collect();   // [0x32, 0x33]
+let back: Vec<u8> = hidden.iter().map(|b| b ^ key).collect();     // b"hi" again
+```
+
+It is not real encryption: anyone who finds the key (and it is always inside the program)
+can undo it. Programs use it to keep passwords and messages out of the Strings view.
+'''
+see = ["XOR key", "ciphertext", "plaintext", "repeating key"]
+
+[[term]]
+term = "XOR key"
+aliases = ["encryption key", "decryption key", "the key bytes"]
+short = "The bytes a value is XORed with to hide it, and XORed with again to recover it."
+see = ["XOR cipher", "repeating key"]
+
+[[term]]
+term = "repeating key"
+aliases = ["rolling key", "repeating-key XOR", "multi-byte key"]
+short = "A key of several bytes that is used over and over: byte i of the data is XORed with key byte i % key length."
+text = '''
+With the 4-byte key `[0x5A, 0x1C, 0x7E, 0x33]`, data byte 0 uses `0x5A`, byte 1 uses
+`0x1C`, ..., byte 4 uses `0x5A` again. In Rust: `data[i] ^ KEY[i % KEY.len()]`.
+'''
+see = ["XOR cipher", "XOR key"]
+
+[[term]]
+term = "plaintext"
+aliases = ["plain text", "cleartext"]
+short = "Data in its readable, original form, before it is encoded or encrypted."
+see = ["ciphertext", "XOR cipher"]
+
+[[term]]
+term = "ciphertext"
+aliases = ["cipher text", "encoded bytes", "encrypted bytes"]
+short = "Data after encoding or encryption: what the program stores instead of the readable plaintext."
+see = ["plaintext", "XOR cipher"]
+
+[[term]]
+term = "known-plaintext attack"
+aliases = ["known plaintext"]
+short = "Recovering a key because you know (part of) the plaintext: for XOR, key = ciphertext ^ plaintext."
+text = '''
+If you know a flag starts with `flag{`, XOR the first five ciphertext bytes with `flag{` and
+you have the first five key bytes. The Workbench operation **XOR key from known text** does
+exactly this.
+'''
+see = ["XOR cipher", "plaintext"]
+
+[[term]]
+term = "Workbench"
+aliases = ["Workbench recipe", "recipe"]
+short = "The ORRESS tool (Tools > Workbench, Ctrl+Shift+W) that decodes data with a chain of operations such as hex, base64 and XOR."
+text = '''
+You put bytes in **Input**, add operations from the **Operations** list to the **Recipe**,
+and read the result in **Output**. The same recipe also works on the command line:
+`orress-cli recipe "from_hex | xor key=0x5a1c7e33" file`.
+'''
+see = ["XOR cipher"]
+
+[[term]]
+term = "keygen"
+aliases = ["keygens", "key generator", "key generators"]
+short = "A small program that computes valid keys or serial numbers for a program, by doing what its check does."
+text = '''
+Instead of finding one password, you rebuild the program's check and turn it around, so
+that you can produce a valid key for any input (for example for any name). Writing one is
+the proof that you fully understood the algorithm.
+'''
+see = ["keygen-me", "serial number", "inverse operation"]
+
+[[term]]
+term = "keygen-me"
+aliases = ["keygenme", "keygen-mes"]
+short = "A crackme whose key is computed from something you type (often a name), so the goal is a keygen, not one password."
+see = ["keygen", "serial number"]
+
+[[term]]
+term = "serial number"
+aliases = ["serial", "serials", "licence key", "license key", "licence code", "license code"]
+short = "A code a program asks for to prove you may use it; its check is an algorithm you can read."
+see = ["keygen", "checksum"]
+
+[[term]]
+term = "checksum"
+aliases = ["checksums"]
+short = "A number computed from data (for example the sum of its bytes) to check that the data is right."
+text = '''
+The simplest checksum adds up all bytes: `data.iter().map(|&b| b as u32).sum::<u32>()`.
+Licence checks often require that a checksum of your code has one particular value.
+'''
+see = ["serial number"]
+
+[[term]]
+term = "inverse operation"
+aliases = ["inverse", "inverses"]
+short = "The operation that undoes another one: subtract undoes add, XOR with k undoes XOR with k."
+text = '''
+To turn a check like `transform(input) == target` into a generator, apply the inverse of
+every step to `target`, in reverse order. Some operations have no clean inverse (a sum
+throws information away, a hash is built to have none); then you search for an input
+instead, or build one that fits.
+'''
+see = ["keygen"]
+
+[[term]]
+term = "brute force"
+aliases = ["brute-force", "brute forcing", "brute-forcing"]
+short = "Finding a value by trying every possibility until one works."
+text = '''
+Fine for small spaces (a 1-byte XOR key has only 256 values; the Workbench tries them all
+with **XOR brute force**), hopeless for large ones (an 8-character password).
+'''
+see = ["XOR key"]

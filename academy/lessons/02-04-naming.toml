@@ -1,0 +1,316 @@
+id = "l2-naming"
+level = 2
+order = 4
+title = "Making code readable: names and comments"
+summary = "Rename functions as you understand them, leave comments, and why naming as you go is the core habit of reverse engineering."
+goals = [
+    "rename a function with N, and see the name appear in every view",
+    "work out what a small function does and give it a fitting name",
+    "add a comment with ; to record a fact you found",
+    "use names as hypotheses that you improve as you learn more",
+]
+badge = "Cartographer"
+
+[[steps]]
+title = "Code without names"
+goal = "Feel why generated names slow you down."
+text = '''
+Imagine reading this Rust code:
+
+```rust
+fn sub_1400012f0(a1: &[u8]) -> bool {
+    if a1.len() != 6 { return false; }
+    if a1[0] != b'K' { return false; }
+    sub_1400012c0(a1) == 500
+}
+```
+
+And now this:
+
+```rust
+fn is_valid(code: &[u8]) -> bool {
+    if code.len() != 6 { return false; }
+    if code[0] != b'K' { return false; }
+    checksum(code) == 500
+}
+```
+
+Same code, but the second one you understand at a glance. A stripped program is the first
+version, times four hundred functions. Every `sub_` name is a small puzzle your brain has
+to solve again each time it sees it.
+
+The fix is the single most important habit in reverse engineering: **as soon as you
+understand something, give it a name**. Once you rename `sub_1400012f0` to `is_valid`,
+every call to it, in every view, reads `is_valid`. You never solve the same puzzle twice,
+and the program slowly turns from machine code into something that reads like source.
+
+In this lesson you name the two functions you found in crackme #10 and leave a comment
+for your future self.
+'''
+
+[[steps]]
+title = "Open crackme #10"
+goal = "Have the practice program open."
+text = '''
+Names and comments belong to one file. ORRESS saves them for you automatically, in its
+own configuration folder, linked to the exact file (by its SHA-256 hash). The program file
+itself is never changed. Close ORRESS, open the same file next week, and your names are
+still there.
+
+Open crackme #10 with the button.
+'''
+instructions = ["Press the **Open crackme10** button below."]
+check = { kind = "open_crackme", name = "crackme10" }
+
+[[steps]]
+title = "Rename the licence check"
+goal = "Give the check function a real name."
+text = '''
+In the last lesson you found that `sub_1400012f0` decides between *Licence accepted* and
+*Invalid licence code.*, and that it checks the length first. That is enough to name it:
+**is_valid**.
+
+The key is **N** (for *name*) in the disassembly. What it renames depends on the line the
+cursor is on:
+
+- on a line with an address in it, such as `call sub_1400012f0`, it renames **that
+  address** (here: the function being called);
+- on a line without an address, such as `cmp rdx,6`, it renames **the function the line
+  is in**;
+- on a function's first line (`sub_1400012f0:`) or a label line (`loc_...:`), it renames
+  that function or label.
+
+A small window **Rename 0x...** opens with the current name. Type the new name and press
+**Enter** (or click **OK**). Names can use letters, digits (not at the start) and `_`.
+Leave the box empty to get the original name back.
+'''
+instructions = [
+    "Click inside the disassembly (press **Ctrl+D** first if it is not open).",
+    "Press **Ctrl+G**, type `1400012f0` and press **Enter**. The cursor is at the start of `sub_1400012f0`.",
+    "Press **N**. The window **Rename 0x1400012f0** opens.",
+    "Replace the text with `is_valid` and press **Enter**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "renamed" }
+hints = [
+    "The disassembly must have keyboard focus: click inside it before you press N.",
+    "Check the title of the rename window: it must say 0x1400012f0. If it shows another address, press Esc and move the cursor to the function's first line.",
+]
+success = '''
+The function header now reads `is_valid:`. Names you give are stored as **annotations**:
+notes about the program that live next to it, not in it.
+'''
+
+[[steps]]
+title = "Your name is everywhere"
+goal = "See that a rename changes every view at once."
+text = '''
+Go to `main` and look at the call before `test al,al`. It now says `call is_valid`. The
+same happens everywhere ORRESS shows that address:
+
+- in the **Disassembly**, on every call and on the function's first line;
+- in the **Functions** view, where your own names are shown in **bold**;
+- in the **Cross-references** panel, in the **In** column;
+- in the **Graph** view and in the **Decompiler** (the next two lessons).
+
+One rename, and the whole program got a little easier to read. Now imagine doing this for
+every function you understand during a long analysis. After an hour, the program reads
+almost like source code.
+
+Where does ORRESS show the new name `is_valid`?
+'''
+instructions = [
+    "Press **Ctrl+Shift+M** and scroll down to the call before `test al,al`. It reads `call is_valid`.",
+    "In the **Project** panel, click **Functions**, type `is` in the filter box and find `is_valid` in bold.",
+]
+check = { kind = "choice", options = [
+    "Everywhere the function appears: calls, the Functions view, cross-references, the graph and the decompiler",
+    "Only on the function's first line",
+    "Only after saving the file and opening it again",
+], correct = 0, explain = [
+    "Right. A name belongs to an address, and every view shows the name of an address.",
+    "Look at the call in main: it changed too.",
+    "Nothing has to be saved by hand: ORRESS stores the name at once and every view uses it immediately.",
+] }
+
+[[steps]]
+title = "Read the helper"
+goal = "Work out what sub_1400012c0 does from its instructions."
+text = '''
+`is_valid` calls one helper, `sub_1400012c0`. Before you can name it, you have to know
+what it does. Here is the whole function (you can also see it with **Ctrl+G** `1400012c0`):
+
+```text
+sub_1400012c0:
+  push  rax
+  xor   eax,eax            ; eax = 0            (the result)
+  test  rdx,rdx            ; is the length 0?
+  je    loc_1400012eb      ;   then return 0
+  lea   r8,[rsp+7]
+  xor   r9d,r9d            ; r9 = 0             (the index i)
+loc_1400012d0:
+  movzx r10d,byte ptr [rcx+r9]  ; r10 = code[i]
+  mov   [rsp+7],r10b       ; (a black_box detour through the stack)
+  movzx r10d,byte ptr [rsp+7]
+  add   eax,r10d           ; result += code[i]
+  inc   r9                 ; i += 1
+  cmp   rdx,r9             ; i == length?
+  jne   loc_1400012d0      ;   no: loop again
+loc_1400012eb:
+  pop   rcx
+  ret                      ; return result (in eax)
+```
+
+It gets a slice (pointer in `rcx`, length in `rdx`), starts a result at 0, and walks over
+every byte, adding it to the result. In Rust:
+
+```rust
+fn sub_1400012c0(code: &[u8]) -> u32 {
+    let mut sum = 0;
+    for &b in code { sum += b as u32; }
+    sum
+}
+```
+
+What does this function compute?
+'''
+check = { kind = "choice", options = [
+    "The sum of all byte values of the code: a checksum",
+    "The length of the code",
+    "Whether the code is equal to a stored password",
+], correct = 0, explain = [
+    "Right. It adds every byte to eax and returns it. A number computed from data like this is called a checksum.",
+    "The length is already in rdx when the function starts. The loop adds the bytes themselves (add eax, r10d).",
+    "There is no second string and no compare between bytes: only an add in a loop.",
+] }
+hints = [
+    "Look at what happens to eax inside the loop.",
+    "`add eax, r10d` with r10 = one byte of the code.",
+]
+
+[[steps]]
+title = "Name the helper"
+goal = "Rename sub_1400012c0 to checksum."
+text = '''
+A number computed from data to check it, like the sum of its bytes, is called a
+**checksum**. That is a good name for `sub_1400012c0`.
+
+This time rename it from a *call*: put the cursor on the line `call sub_1400012c0` inside
+`is_valid` and press **N**. Because that line contains an address, **N** renames the
+called function, without you having to go there.
+
+After the rename, look at `is_valid` again. It now reads like a sentence: `call checksum`,
+then `cmp eax,0x1f4`. The checksum must be 0x1F4. Convert that to decimal with the number
+converter below: it is the value every valid code must add up to.
+'''
+instructions = [
+    "Press **Ctrl+G** in the disassembly, type `is_valid` and press **Enter** (the Go to bar also accepts your own names).",
+    "Click the line `call sub_1400012c0`.",
+    "Press **N**, check that the window says **Rename 0x1400012c0**, type `checksum` and press **Enter**.",
+    "Type the decimal value of 0x1F4 in the answer box.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["500"], number = true }
+hints = [
+    "Type `0x1f4` in the number converter and read the decimal value.",
+    "0x1F4 = 1 * 256 + 15 * 16 + 4.",
+    "It is 500.",
+]
+success = '''
+500. With two names, `is_valid` says: "length 6, first byte compared with something,
+`checksum(code)` must be 500". You will meet the middle condition in the next lessons.
+'''
+
+[[steps]]
+title = "Leave a comment"
+goal = "Record a fact next to the instruction it is about."
+text = '''
+Some things are not names but facts: "this must be 500", "the bounds check, skip it",
+"input arrives here". For those you write a **comment**. Press **;** (the semicolon key)
+in the disassembly, and a window **Comment at 0x...** opens for the line the cursor is on.
+Your text then appears at the end of that line, after a `;`, in the disassembly and the
+graph view.
+
+Good comments say **why** or **what it means**, not what the instruction already says:
+
+| Weak comment | Good comment |
+|---|---|
+| `compare eax with 0x1f4` | `checksum must be 500` |
+| `jump if not equal` | `wrong length -> invalid` |
+
+Write a comment on the checksum comparison in `is_valid`.
+'''
+instructions = [
+    "In `is_valid`, click the line `cmp eax,0x1f4`.",
+    "Press **;**. The window **Comment at 0x140001321** opens.",
+    "Type `checksum must be 500` and press **Enter**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "commented" }
+hints = [
+    "The line is right after `call checksum`.",
+    "The disassembly needs keyboard focus: click the line first, then press the semicolon key.",
+]
+success = '''
+Your note now sits on the line, in grey after a `;`. Comments are saved like names. Leave
+the empty box and press Enter to remove a comment again.
+'''
+
+[[steps]]
+title = "Names are hypotheses"
+goal = "Learn how professionals name things they only partly understand."
+text = '''
+You will often see a function and only *guess* what it does. Name it anyway. A guess you
+write down is better than a guess you forget. Mark how sure you are:
+
+- `maybe_parse_number` or `parse_number?` for a guess (ORRESS allows `?` in names);
+- `check_password` when you are sure;
+- `unk_big_loop` (unknown) for "I looked, it is big, I did not understand it yet";
+- `std_memcpy`, `std_alloc` for library helpers you recognised: you know you can skip them.
+
+When you learn more, rename again. A name is not a promise; it is your current best
+understanding.
+
+Labels inside a function can have names too. Put the cursor on a label line such as
+`loc_140001297:` in `main` and press **N**: a name like `fail` turns every
+`je loc_140001297` into `je fail`. Try it if you like; it is not needed for this step.
+
+A last tip: work **from the known outward**. Start with what you are sure of (the strings,
+the imports, `main`), name it, and use those names to understand the code around them.
+Each name makes the next one easier.
+'''
+deep_dive = '''
+Names are not only for you. ORRESS can share them with your team in real time (the
+**Collaboration** panel, View > Open View > Collaboration), so a team at a CTF can split
+a big program and still see each other's names. The Assistant and scripts also see your
+names, which makes their answers better.
+'''
+
+[[steps]]
+title = "Your map, written into the program"
+goal = "Summarise the naming habit."
+text = '''
+The map you drew in the last lesson is now written into the program itself:
+
+```text
+main -> is_valid (length must be 6, ...) -> checksum (sum of all bytes, must be 500)
+```
+
+The keys:
+
+| Key (in the disassembly) | Does |
+|---|---|
+| **N** | rename the address on the line, or the function the line is in |
+| **;** | comment the line |
+| **Ctrl+G** | go to an address or a name, including your own names |
+
+The habit:
+
+1. Understand a little.
+2. Name it, or comment it, immediately.
+3. Use the new names to understand the next piece.
+
+In the next lesson you see the same functions as a picture, the **graph view**, with your
+names in it.
+'''
+success = "Lesson complete. Name as you go: it is the habit that makes big programs possible."

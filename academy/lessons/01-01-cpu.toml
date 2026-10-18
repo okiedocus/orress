@@ -1,0 +1,355 @@
+id = "l1-cpu"
+level = 1
+order = 1
+title = "The CPU and its registers"
+summary = "What an instruction is, the CPU's 16 registers, and your first program in the CPU simulator."
+goals = [
+    "explain what a register is and name the 16 general-purpose registers",
+    "read an instruction written as `mnemonic destination, source`",
+    "tell assembly language and machine code apart",
+    "write, run and step through a program in the CPU simulator",
+    "use the smaller parts of a register: eax, ax and al",
+]
+
+[[steps]]
+title = "A CPU follows a list of instructions"
+goal = "Picture what the CPU does all day."
+text = '''
+In Level 0 you saw that a compiled program is a long list of numbers in memory. Each small group of those numbers is one **instruction**: a tiny command such as "copy this number", "add these two numbers" or "continue somewhere else".
+
+The CPU does the same three things over and over, billions of times per second:
+
+1. **Fetch**: read the next instruction from memory.
+2. **Decode**: work out what that instruction asks for.
+3. **Execute**: do it, then move on to the next instruction.
+
+If you wrote the CPU in Rust, its heart would look like this:
+
+```rust
+loop {
+    let instruction = memory.read(rip);   // fetch
+    rip += instruction.len();             // point at the next one
+    execute(instruction);                 // decode and execute
+}
+```
+
+`rip` here is a special variable inside the CPU: it always holds the **address** of the next instruction. A jump instruction (Lesson 4) works by changing `rip`.
+
+Every instruction is very small. A single line of Rust such as `let total = price * count + 5;` becomes three or four instructions. That is why compiled programs look long and repetitive. Reverse engineering at this level means reading those instructions and rebuilding the bigger idea, the Rust code, in your head.
+
+In this lesson you meet the places where instructions keep their numbers while they work: the **registers**.
+'''
+
+[[steps]]
+title = "Registers: the CPU's own variables"
+goal = "Know what a register is and the names of the 16 general-purpose registers."
+text = '''
+Memory is big but, for the CPU, slow. So the CPU has a few storage slots of its own, built right into the chip: the **registers**. Almost every instruction reads or writes at least one register.
+
+An x86-64 CPU (the kind in almost every Windows PC) has 16 **general-purpose registers**. Each holds 64 bits, like a Rust `u64`. Think of them as 16 global variables:
+
+```rust
+let mut rax: u64 = 0;
+let mut rbx: u64 = 0;
+let mut rcx: u64 = 0;
+// ... and so on, 16 in total
+```
+
+| Register | Usual job (you will learn each one in this level) |
+|---|---|
+| `rax` | result of a calculation; the **return value** of a function |
+| `rbx` | free to use |
+| `rcx`, `rdx` | first and second **argument** of a function on Windows |
+| `rsi`, `rdi` | free to use on Windows (arguments on Linux) |
+| `rbp` | often the "base pointer" of a function's stack area |
+| `rsp` | the **stack pointer**: always points at the top of the stack |
+| `r8` to `r15` | eight more numbered registers; `r8` and `r9` are arguments 3 and 4 on Windows |
+
+The names look strange because they are history: `rax` was once the "accumulator", `rcx` the "counter". You do not need to remember that. Remember the two with a fixed job: `rsp` (stack pointer, never used for anything else) and `rax` (the result).
+
+There is a 17th register you met on the previous page: `rip`, the **instruction pointer**. You never write to it directly. It changes by itself after each instruction, and jumps and calls change it.
+'''
+deep_dive = '''
+Besides these, a modern CPU has many more registers: the flags register (Lesson 4), 16 or 32 wide `xmm`/`ymm`/`zmm` registers for floating point and vector maths, and control registers only the operating system may touch. When Rust code uses `f64` you will see `xmm0` and friends. For reading normal Rust programs the 16 general-purpose registers are what matter.
+'''
+
+[[steps]]
+title = "How an instruction is written"
+goal = "Read `mnemonic destination, source` and know which operand changes."
+text = '''
+Instructions are written in **assembly language**: one instruction per line, as short words that people can read. ORRESS, like most tools on Windows, uses **Intel syntax**:
+
+```text
+mov rax, 5
+add rax, rbx
+```
+
+Each line has two parts:
+
+- The **mnemonic**: the short name of the operation. `mov` means "copy" (from "move"), `add` means "add".
+- The **operands**: what the operation works on, separated by a comma. In Intel syntax the first operand is the **destination** (where the result goes), the second is the **source**.
+
+So read every instruction as `destination = destination (op) source`:
+
+| Assembly | Rust |
+|---|---|
+| `mov rax, 5` | `rax = 5;` |
+| `mov rbx, rax` | `rbx = rax;` |
+| `add rax, rbx` | `rax += rbx;` |
+| `sub rax, 1` | `rax -= 1;` |
+
+The `5` in `mov rax, 5` is an **immediate value**: a number written directly inside the instruction. Assembly numbers can be decimal (`16`), hexadecimal (`0x10`) or, in the simulator, a character (`'A'` = 65).
+
+Everything after a `;` on a line is a **comment**, like `//` in Rust.
+
+You may see a different style on Linux, called **AT&T syntax**, where it is the other way round: `mov $5, %rax`. ORRESS always shows Intel syntax, so you can ignore AT&T for now.
+'''
+check = { kind = "choice", options = [
+    "rax",
+    "rbx",
+    "Both rax and rbx",
+    "Neither: mov only reads",
+], correct = 1, explain = [
+    "rax is the source here: it is only read. In Intel syntax the destination comes first.",
+    "The first operand is the destination, so `mov rbx, rax` is `rbx = rax;`. rax keeps its value.",
+    "`mov` copies, it does not swap. Only the destination changes.",
+    "`mov` writes to its first operand. Only the source is read without change.",
+] }
+hints = [
+    "Intel syntax: destination first, source second.",
+    "Translate it to Rust: `rbx = rax;`. Which variable gets a new value?",
+]
+
+[[steps]]
+title = "Assembly and machine code"
+goal = "Understand that assembly is a readable spelling of the bytes the CPU runs."
+text = '''
+The CPU does not read text. It reads **machine code**: bytes. Assembly language is only a way for people to write those bytes down. Each assembly instruction has one exact byte pattern, and a tool can translate both ways:
+
+- an **assembler** turns assembly text into machine code bytes;
+- a **disassembler** turns machine code bytes back into assembly text. **Disassembly** is the text it produces. ORRESS's Disassembly view is a disassembler.
+
+Here are the first two instructions of the `main` function of crackme #1, which you will crack at the end of this level. On the left are the real bytes in the file, on the right what ORRESS shows:
+
+```text
+56              push rsi
+48 83 EC 60     sub  rsp, 0x60
+```
+
+The first part of each pattern says which operation it is (that part is called the **opcode**): `56` alone means "push rsi". The other bytes say which registers and numbers are used: the last byte `60` of the second instruction is the number `0x60`. Instructions have different lengths, from 1 byte up to 15.
+
+You never have to translate bytes by hand: ORRESS does that. But knowing that every line is "only some bytes" helps later, when you change a program by changing its bytes (patching, Level 3). In the **Disassembly** view you can tick **Bytes** in the toolbar to see the bytes next to each instruction.
+'''
+deep_dive = '''
+Because instructions have different lengths, a disassembler has to know where an instruction starts. Start reading one byte too late and you get different, wrong instructions. Disassemblers solve this by following the program's flow from known starting points (the entry point, `main`, call targets). Some protected programs abuse this on purpose; that comes in Level 5.
+'''
+
+[[steps]]
+title = "Open the CPU simulator"
+goal = "Open the practice CPU that runs assembly you type."
+text = '''
+Reading about instructions only goes so far. The Academy has a **CPU simulator**: a small pretend x86-64 CPU that runs assembly text you type, one instruction at a time, and shows you every register while it works. You will use it in almost every lesson of this level.
+
+The simulator understands a subset of real x86-64: the instructions this level teaches (`mov`, `add`, `sub`, `cmp`, jumps, `push`, `call` and more), the 64-bit registers and their 32-bit halves. It does not run real programs; it exists to let you experiment safely. If you type something it does not know, it tells you which line is wrong and often suggests the right spelling.
+
+The simulator opens as a tab in the middle of the window. This lesson stays open on the right, so you can read and try things at the same time.
+'''
+instructions = [
+    "In the menu bar at the top of the ORRESS window, click **Learn**.",
+    "Click **Academy: CPU Simulator**. A tab called **CPU Simulator** opens in the middle of the window.",
+]
+check = { kind = "action", id = "academy::OpenSimulator" }
+hints = [
+    "The **Learn** menu is in the menu bar, next to **Help**.",
+    "You can also open the command palette with Ctrl+Shift+P, type `simulator` and press Enter.",
+]
+success = '''
+The simulator is open. If you ever close it, the same menu entry (or the **Open CPU simulator** button that simulator steps show) brings it back.
+'''
+
+[[steps]]
+title = "A tour of the simulator"
+goal = "Know every part of the simulator window."
+text = '''
+Look at the **CPU Simulator** tab from top to bottom:
+
+- **The buttons.** **Step** runs one instruction. **Run** runs until the program ends. **Step back** undoes the last step. **Reset** starts again from the first line with all registers at 0. Next to them a counter shows how many steps have run.
+- **A status line** below the buttons tells you why the program stopped, for example *Reached the end of the program.*, or what went wrong.
+- **Program** (left): the text editor where you type assembly, one instruction per line. While a program is running the editor is locked and shows a `>` at the line that runs next. Press **Reset** to edit again.
+- **Registers** (right): the first 8 registers, `rax` to `rsp`. Each row shows the value in hexadecimal and as a signed decimal number. A value that the last step changed turns yellow. (The simulator also has `r8` to `r15`, but has no room to show them.)
+- **Flags** (right, below the registers): four single bits called ZF, SF, CF and OF. Lesson 4 explains them.
+- **Stack** (right, at the bottom): a piece of memory. Lesson 7 explains it. For now: the line `rsp > 7ffffff8: 0xdead0000 (end of program)` is how the simulator knows when your program is finished.
+
+Notice that `rsp` is not 0 even before you run anything: it already points at that stack line. Every other register starts at 0.
+
+Hover over any button, register name or flag to get a short explanation.
+'''
+spotlight = "sim.registers"
+
+[[steps]]
+title = "Your first program"
+goal = "Write two `mov` instructions and run them."
+text = '''
+Time to write assembly. Your program must put the number **5 in `rax`** and **7 in `rbx`**.
+
+You know the instruction for that: `mov destination, source` copies the source into the destination. With a number as the source, it sets a register to that number:
+
+```text
+mov rax, 5      ; rax = 5;
+```
+
+Write one instruction per line. Upper or lower case does not matter for the mnemonic, but write registers in lower case, the way ORRESS shows them. Spaces around the comma are optional.
+
+When you press **Run**, the simulator runs every line from top to bottom and stops at the end. The lesson then checks the registers. If the check passes, the simulator says *Lesson: The program does what was asked. Well done!* in green, and this step is done.
+
+If something is wrong, read the message under the editor: it names the line and the problem. For example, `mvo rax, 5` gives *`mvo` is not an instruction this simulator knows. Did you mean `mov`?*
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. (If you closed it, click **Open CPU simulator** below.)",
+    "Click into the **Program** editor on the left. Below the two comment lines, type `mov rax, 5`, press Enter, and type `mov rbx, 7`.",
+    "Click **Run** above the editor.",
+    "Look at the **Registers**: `rax` shows `0x0000000000000005` and `5`, `rbx` shows 7.",
+]
+spotlight = "sim.code"
+sim_code = '''
+; Put 5 in rax and 7 in rbx.
+; One instruction per line, for example:  mov rcx, 1
+'''
+check = { kind = "sim", expect = [["rax", 5], ["rbx", 7]], requires = ["mov"] }
+hints = [
+    "You need two lines, one `mov` for each register.",
+    "The first line is `mov rax, 5`.",
+    "Type `mov rax, 5` and `mov rbx, 7` on two lines, then press Run.",
+]
+solution = '''
+mov rax, 5
+mov rbx, 7
+'''
+success = '''
+You wrote and ran your first assembly program. Notice the hexadecimal column: registers are usually shown in hex, because that is what you will see in ORRESS's Disassembly view.
+'''
+
+[[steps]]
+title = "Step by step"
+goal = "Follow a program one instruction at a time and predict each result."
+text = '''
+Pressing **Run** shows only the end result. Reverse engineers usually want to see each instruction's effect, one at a time. That is called **stepping**, and debuggers (Level 3) do the same on real programs.
+
+This step loaded a new program into the simulator:
+
+```text
+mov rax, 10     ; rax = 10
+mov rbx, rax    ; rbx = rax         (copy: rbx is now 10, rax stays 10)
+add rbx, 5      ; rbx = rbx + 5
+mov rcx, rbx    ; rcx = rbx
+sub rcx, rax    ; rcx = rcx - rax
+```
+
+Before you press anything, work it out on paper: what is in `rcx` at the end? Then check yourself with **Step**. After every press, the `>` in the editor moves to the next line, and the register that just changed turns yellow. If you step too far, press **Step back**.
+
+If you changed the program and want the original back, press **Back** at the bottom of this lesson and then **Next**: entering the step loads its program again.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The editor shows the five lines above.",
+    "Press **Reset** once, so the program starts from the first line.",
+    "Press **Step** five times. After each press, look at which register turned yellow and check it against your own prediction.",
+    "Type the final value of `rcx` in the answer box below and press **Check**.",
+]
+spotlight = "sim.step"
+sim_code = '''
+mov rax, 10     ; rax = 10
+mov rbx, rax    ; rbx = rax
+add rbx, 5      ; rbx = rbx + 5
+mov rcx, rbx    ; rcx = rbx
+sub rcx, rax    ; rcx = rcx - rax
+'''
+check = { kind = "answer", answers = ["5"], number = true }
+hints = [
+    "After line 3, rbx is 15. rax is still 10.",
+    "rcx becomes 15 on line 4, and line 5 subtracts rax (10) from it.",
+    "15 - 10 = 5.",
+]
+success = '''
+`rcx` is 5. Stepping and predicting is the best way to learn assembly: guess what an instruction does, then let the machine tell you if you were right.
+'''
+
+[[steps]]
+title = "Smaller parts of a register"
+goal = "Know eax, ax and al, and which Rust types live in them."
+text = '''
+A register holds 64 bits, but Rust code often uses smaller types: a `u32`, a `u8`, a `bool`. For those the CPU lets you use only the **low part** of a register, under a different name:
+
+| Name | Size | Which bits of `rax` | Typical Rust type |
+|---|---|---|---|
+| `rax` | 64 bits (8 bytes) | all | `u64`, `i64`, `usize`, pointers |
+| `eax` | 32 bits (4 bytes) | the lower half | `u32`, `i32`, `char` |
+| `ax` | 16 bits (2 bytes) | the lowest 2 bytes | `u16`, `i16` |
+| `al` | 8 bits (1 byte) | the lowest byte | `u8`, `i8`, `bool` |
+
+These are not extra registers: `al` *is* the lowest byte of `rax`. It is like reading `rax as u8` in Rust.
+
+The same pattern exists for the others: `ebx`/`bx`/`bl`, `ecx`/`cx`/`cl`, `edx`/`dx`/`dl`, `esi`, `edi`, `ebp`, `esp`. The numbered registers use a letter at the end instead: `r8d` (32 bits), `r8w` (16), `r8b` (8). There is also `ah`, the *second-lowest* byte of `rax`; you will rarely meet it.
+
+Example: if `rax` is `0x1122334455667788`, then `eax` is `0x55667788` (the last 8 hex digits) and `ax` is `0x7788`. Remember that every two hex digits are one byte.
+
+In the crackmes you will see `al` constantly: a function that returns a `bool` puts it in `al`.
+
+Use the number converter below if it helps. If `rax` is `0x1122334455667788`, what is in **`al`**?
+'''
+instructions = [
+    "Find the lowest byte of `0x1122334455667788`: the last two hex digits.",
+    "Type it in the answer box (for example as `0x..`) and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["0x88"], number = true }
+hints = [
+    "al is 8 bits, which is one byte, which is two hex digits.",
+    "The lowest byte is on the right of the number.",
+    "The last two hex digits of 0x1122334455667788 are 88, so the answer is 0x88.",
+]
+success = '''
+`al` is `0x88`. When you see `al`, `eax` or `ax` in disassembly, read it as "the same register, but only the small part", and guess the Rust type from the size.
+'''
+
+[[steps]]
+title = "Writing eax clears the top half"
+goal = "Remember the one surprise of 32-bit registers."
+text = '''
+There is one rule that surprises everyone, so it gets its own step:
+
+**Writing to a 32-bit register (`eax`, `ebx`, ...) sets the upper 32 bits of the full register to 0.**
+
+Writing to `ax` or `al` does not do this: they leave the other bits alone. Only the 32-bit names clear the top half. CPU designers chose this to make 32-bit code fast.
+
+Compilers use this all the time. You will often see `mov eax, 1` where you might expect `mov rax, 1`: the result is the same (the whole of `rax` becomes 1), but the instruction is one byte shorter.
+
+This step loaded a program that tests the rule:
+
+```text
+mov rax, -1     ; all 64 bits set: 0xffffffffffffffff
+mov eax, 1      ; write only the 32-bit part
+```
+
+The first line fills `rax` with ones (Level 0: -1 in two's complement is all bits set). The second line writes 1 into `eax`. What is in `rax` at the end? Think about it first, then run it.
+
+The simulator knows the 64-bit names and the 32-bit names `eax` to `esp`. It does not know `ax`, `al` or `r8d`; you will meet those only in real disassembly.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** once and look at `rax`: all `f`s, which is -1.",
+    "Press **Step** again and look at `rax` once more.",
+    "Type the value of `rax` in the answer box below and press **Check**.",
+]
+sim_code = '''
+mov rax, -1     ; all 64 bits set
+mov eax, 1      ; write only the 32-bit part
+'''
+check = { kind = "answer", answers = ["1"], number = true }
+hints = [
+    "The upper 32 bits are cleared, so they become 0.",
+    "The lower 32 bits become 1, the upper 32 bits become 0.",
+    "rax = 0x0000000000000001, which is 1.",
+]
+success = '''
+`rax` is 1, not `0xffffffff00000001`. Remember: a 32-bit write clears the top half; 8-bit and 16-bit writes do not. You now know what registers are, how instructions are written, and how to test them in the simulator. Next: calculating.
+'''

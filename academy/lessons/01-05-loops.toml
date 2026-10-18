@@ -1,0 +1,377 @@
+id = "l1-loops"
+level = 1
+order = 5
+title = "Loops"
+summary = "loop, while and for in assembly: a comparison and a jump that goes backwards."
+goals = [
+    "recognise a loop as a jump back to an earlier line",
+    "write counting loops that go up and down in the simulator",
+    "translate a `while` loop with its check at the top",
+    "find out why a loop never ends",
+    "spot loops, `break` and `continue` in compiled code",
+]
+
+[[steps]]
+title = "A loop is a jump backwards"
+goal = "See the shape every loop has in assembly."
+text = '''
+In Lesson 4 every jump went forward, to skip code. A **loop** is a jump that goes **backwards**, to an earlier line, so that the same instructions run again.
+
+The simplest Rust loop:
+
+```rust
+let mut count = 0;
+loop {
+    count += 1;
+    if count == 3 { break; }
+}
+```
+
+becomes:
+
+```text
+    xor eax, eax      ; count = 0
+again:
+    inc rax           ; count += 1
+    cmp rax, 3
+    jne again         ; if count != 3, go back to "again"
+                      ; here the loop is over (the break)
+```
+
+Line by line:
+
+1. `xor eax, eax` sets `rax` to 0 (Lesson 3).
+2. `again:` is a label at the start of the loop body.
+3. `inc rax` is the body.
+4. `cmp rax, 3` compares the counter with 3.
+5. `jne again` jumps back up as long as the counter is not 3. When it is 3, the jump is not taken and the CPU continues below: the loop has ended.
+
+Every loop in compiled code has this skeleton: a label, a body, a comparison, and a conditional jump back to the label. Compilers usually put the check at the **bottom** of the loop, like here, even when the Rust code has it at the top. You will see why on the `while` page.
+
+The variable that counts how often the loop has run is called the **loop counter**. Compilers like to keep it in `rcx` or `ecx`, but any register can be used.
+'''
+
+[[steps]]
+title = "Worked example: adding 1 to 5"
+goal = "Follow a counting loop step by step."
+text = '''
+This Rust code adds up the numbers 1 to 5:
+
+```rust
+let mut sum = 0;
+let mut i = 1;
+while i != 6 {
+    sum += i;
+    i += 1;
+}
+```
+
+The simulator loaded the assembly for it:
+
+```text
+    xor rax, rax      ; sum = 0
+    mov rcx, 1        ; i = 1
+again:
+    add rax, rcx      ; sum += i
+    inc rcx           ; i += 1
+    cmp rcx, 6
+    jne again         ; repeat until i == 6
+```
+
+Step through it and keep a small table on paper with one row per round of the loop:
+
+| round | rcx before `add` | rax after `add` |
+|---|---|---|
+| 1 | 1 | 1 |
+| 2 | 2 | 3 |
+| 3 | ... | ... |
+
+Watch the `>` marker jump from `jne again` back up to `add rax, rcx`. In the last round, `inc rcx` makes `rcx` equal to 6, the `cmp` sets ZF, and `jne` does not jump any more. The program then reaches its end.
+
+When the program has finished, what is the value in **`rcx`**? (Not `rax`: the loop counter.)
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** again and again. Fill in your table after each `add`.",
+    "When the status line says *Reached the end of the program.*, read the value of `rcx`.",
+    "Type that value in the answer box below and press **Check**.",
+]
+spotlight = "sim.step"
+sim_code = '''
+    xor rax, rax      ; sum = 0
+    mov rcx, 1        ; i = 1
+again:
+    add rax, rcx      ; sum += i
+    inc rcx           ; i += 1
+    cmp rcx, 6
+    jne again         ; repeat until i == 6
+'''
+check = { kind = "answer", answers = ["6"], number = true }
+hints = [
+    "The loop stops as soon as the comparison says rcx equals ...",
+    "The loop ends when rcx == 6.",
+]
+success = '''
+`rcx` is 6: the loop stops the moment the counter reaches the limit, and the counter keeps that value. `rax` is 15 = 1 + 2 + 3 + 4 + 5. Knowing the counter's final value often tells you how many times a loop ran, here 5 times.
+'''
+
+[[steps]]
+title = "Exercise: add 1 to 10"
+goal = "Write a counting loop yourself."
+text = '''
+Now write a loop yourself. Put the sum **1 + 2 + ... + 10 = 55** in `rax`:
+
+```rust
+let mut sum = 0;
+for i in 1..=10 {
+    sum += i;
+}
+```
+
+You can start from the worked example on the previous page. The only thing to change is the limit: the loop must run while `i` is 1, 2, ..., 10, and stop when `i` becomes 11.
+
+The simulator gives you an empty program with comments, so that you type the whole loop yourself. Typing it once is worth more than reading it ten times. Remember:
+
+- a label is a name followed by a colon, on its own line or before an instruction;
+- the label must be *above* the body, so that the jump goes back.
+
+(Yes, `mov rax, 55` would also give 55. The lesson checks that you used a comparison, and you would only cheat yourself.)
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Type the loop: set rax to 0 and rcx to 1, then a label, `add rax, rcx`, `inc rcx`, `cmp rcx, 11` and `jne` back to the label.",
+    "Press **Run**. `rax` must be 55.",
+]
+spotlight = "sim.code"
+sim_code = '''
+; rax = 1 + 2 + ... + 10, with a loop
+; 1. sum = 0, i = 1
+; 2. a label
+; 3. sum += i; i += 1
+; 4. compare i with the limit, jump back if not done
+'''
+check = { kind = "sim", expect = [["rax", 55]], requires = ["cmp", "inc"] }
+hints = [
+    "Take the worked example and change `cmp rcx, 6` to the new limit.",
+    "The loop must stop when rcx becomes 11.",
+    "The program: `xor rax, rax`, `mov rcx, 1`, `again:`, `add rax, rcx`, `inc rcx`, `cmp rcx, 11`, `jne again`.",
+]
+solution = '''
+xor rax, rax
+mov rcx, 1
+again:
+add rax, rcx
+inc rcx
+cmp rcx, 11
+jne again
+'''
+
+[[steps]]
+title = "Counting down"
+goal = "Use `dec` and `jnz` for a loop that counts down to zero."
+text = '''
+Compilers often count **down** instead of up, because it saves an instruction: `dec` already sets the zero flag when the counter reaches 0, so no `cmp` is needed.
+
+```text
+    mov rcx, 5        ; repeat 5 times
+again:
+    ; ... the loop body ...
+    dec rcx           ; rcx -= 1, and ZF = 1 when rcx becomes 0
+    jnz again         ; jump if not zero (the same instruction as jne)
+```
+
+`jnz` is another name for `jne`. Both mean "jump if ZF = 0". After `cmp` the word "not equal" fits better; after `dec` or `sub` the word "not zero" does.
+
+So when you see `dec` followed by `jnz` (or `sub ecx, 1` followed by `jne`), you know: this loop runs a fixed number of times, and the register is the number of rounds left.
+
+**Exercise.** Compute **5! = 5 * 4 * 3 * 2 * 1 = 120** (five factorial) in `rax`, counting down:
+
+```rust
+let mut result = 1;
+let mut n = 5;
+while n != 0 {
+    result *= n;
+    n -= 1;
+}
+```
+
+Use `rcx` for `n`. The body is one `imul`.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The program already sets `rax` to 1 and `rcx` to 5.",
+    "Below that, add a label, then `imul rax, rcx`, then `dec rcx`, then `jnz` back to the label.",
+    "Press **Run**. `rax` must be 120 and `rcx` must be 0.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 1      ; result = 1
+mov rcx, 5      ; n = 5
+; loop: result *= n; n -= 1; until n == 0
+'''
+check = { kind = "sim", expect = [["rax", 120], ["rcx", 0]], requires = ["imul", "dec"] }
+hints = [
+    "The label goes right after the two mov lines.",
+    "The body is `imul rax, rcx`, then `dec rcx`, then `jnz` with your label.",
+    "The four lines are `again:`, `imul rax, rcx`, `dec rcx`, `jnz again`.",
+]
+solution = '''
+mov rax, 1
+mov rcx, 5
+again:
+imul rax, rcx
+dec rcx
+jnz again
+'''
+
+[[steps]]
+title = "while: check first"
+goal = "Write a loop whose condition is checked before the body."
+text = '''
+A Rust `while` checks its condition **before** each round, so the body may run zero times. The direct translation puts the check at the top and a `jmp` at the bottom:
+
+```rust
+let mut x: u64 = 1;
+while x < 1000 {
+    x *= 2;
+}
+```
+
+```text
+top:
+    cmp rax, 1000
+    jae done          ; x >= 1000 (unsigned): leave the loop
+    shl rax, 1        ; x *= 2
+    jmp top           ; back to the check
+done:
+```
+
+Notice again the inverted condition: Rust says "continue while `x < 1000`", the assembly says "leave if `x >= 1000`" (`jae`, jump if above or equal, unsigned because `x` is a `u64`).
+
+This shape needs two jumps per round. Optimising compilers therefore often rewrite it: one check before the loop (to skip it entirely if needed) and the check repeated at the bottom. That is why most loops in compiled code end with a conditional jump back up, as on the first page.
+
+**Exercise.** Type this `while` loop into the simulator. `rax` starts at 1. When the loop ends, `rax` must be **1024**, the first power of two that is not below 1000.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab. The first line sets `rax` to 1.",
+    "Type the five lines and two labels of the `while` shape above.",
+    "Press **Run**. `rax` must be 1024.",
+]
+spotlight = "sim.code"
+sim_code = '''
+mov rax, 1
+; while rax < 1000 { rax *= 2 }
+'''
+check = { kind = "sim", expect = [["rax", 1024]], requires = ["cmp", "jmp"] }
+hints = [
+    "The check is at the top: `top:`, `cmp rax, 1000`, `jae done`.",
+    "The body doubles rax (`shl rax, 1` or `add rax, rax`) and `jmp top` goes back.",
+    "Do not forget the `done:` label after the `jmp top` line.",
+]
+solution = '''
+mov rax, 1
+top:
+cmp rax, 1000
+jae done
+shl rax, 1
+jmp top
+done:
+'''
+
+[[steps]]
+title = "A loop that never ends"
+goal = "Find the bug in a loop that runs forever."
+text = '''
+If the condition of a loop never changes, the loop never ends. A real CPU would run it forever (the program "hangs"). The simulator protects you: after 10 000 steps it stops and says *Stopped after 10000 steps. Is there a loop that never ends?*
+
+The simulator loaded this program. It is supposed to add 1 to `rax` ten times:
+
+```text
+    mov rcx, 0
+again:
+    add rax, 1
+    cmp rcx, 10
+    jne again
+```
+
+Press **Run** and read the status line. Then find the bug: read each line and ask "which register changes, and does the comparison ever become equal?"
+
+Reverse engineers meet loops like this on purpose, too: some programs wait in an endless loop until something happens (a key press, a network message), and malware sometimes uses a huge loop to waste time and outlast an analysis tool.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Run**.",
+    "Read the message under the buttons.",
+    "Look at the loop and pick the explanation below.",
+]
+sim_code = '''
+    mov rcx, 0
+again:
+    add rax, 1
+    cmp rcx, 10
+    jne again
+'''
+check = { kind = "choice", options = [
+    "`add rax, 1` should be `add rax, 10`",
+    "`rcx` never changes, so `cmp rcx, 10` is never equal",
+    "The label must be below the jump",
+    "`jne` should be `jmp`",
+], correct = 1, explain = [
+    "That changes how fast rax grows, but the loop is controlled by rcx, not rax.",
+    "The counter is compared but never increased. An `inc rcx` in the body fixes it.",
+    "A label above the jump is exactly what makes a loop. Below it, the jump would go forward.",
+    "`jmp` would always jump back: the loop would still never end.",
+] }
+hints = [
+    "Which register does the cmp look at? Which instruction changes it?",
+]
+
+[[steps]]
+title = "Loops in compiled code"
+goal = "Count rounds, and recognise `for`, `break` and `continue`."
+text = '''
+In ORRESS's **Graph** view a loop is easy to see: an arrow that goes **back up** to an earlier box. In the Disassembly view, look for a conditional jump to a `loc_...` label with a *smaller* address than the jump itself.
+
+A Rust `for` over a range, `for i in 0..n`, compiles to a counter that starts at 0, is compared with `n`, and goes up by 1. Because `i` and `n` are `usize`, the comparison uses an unsigned jump such as `jb` (below) or `jae`.
+
+Two more Rust keywords are only jumps:
+
+- `break` is a jump to the first line **after** the loop.
+- `continue` is a jump to the loop's **check** (or to the counter increment just before it).
+
+Here is a loop. How many times does its body run?
+
+```text
+    xor ecx, ecx       ; i = 0
+body:
+    ; ... loop body ...
+    add ecx, 2         ; i += 2
+    cmp ecx, 10
+    jb body            ; while i < 10 (unsigned)
+```
+
+It is the same as:
+
+```rust
+let mut i: u32 = 0;
+loop {
+    /* body */
+    i += 2;
+    if !(i < 10) { break; }
+}
+```
+
+Count the values `i` has when the body starts.
+'''
+instructions = [
+    "Write down the value of `ecx` at the start of each round: 0, then 2, then ...",
+    "Stop when the `jb` would no longer jump.",
+    "Type the number of rounds in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["5"], number = true }
+hints = [
+    "The body runs with i = 0, 2, 4, ...",
+    "After the round with i = 8, i becomes 10 and `jb` does not jump.",
+    "i = 0, 2, 4, 6, 8: five rounds.",
+]
+success = '''
+Five rounds (i = 0, 2, 4, 6, 8). You can now recognise every kind of loop. In the next lesson you leave the registers behind and start using memory.
+'''

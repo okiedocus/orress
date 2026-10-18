@@ -1,0 +1,228 @@
+id = "l7-automating-orress"
+level = 7
+order = 4
+title = "Automating ORRESS"
+summary = "Stop clicking, start scripting: drive ORRESS's analysis from a small Rhai script, and meet the MCP server and extensions."
+goals = [
+    "explain why you automate repeated analysis, and what an analysis pass is",
+    "run a Rhai script in the Scripting console and read its output",
+    "write a script that searches every function for a pattern",
+    "write a small keygen as a script that reads the program's own data",
+    "name the other ways ORRESS can be automated: the MCP server and extensions",
+]
+badge = "Toolsmith"
+
+[[steps]]
+title = "Doing it a thousand times"
+goal = "See when automation beats clicking."
+text = '''
+You now know how to triage a file, pull its strings, find its functions, diff two builds and solve a check. By hand, on one file, that is fine. But reverse engineers often face the same job on **many** files:
+
+- a feed of hundreds of new malware samples every day,
+- every build of your own product, to catch an unexpected change,
+- a firmware image that unpacks into dozens of small programs.
+
+Clicking through the same views for each one does not scale, and it is easy to make mistakes when you are bored. The answer is to write the routine down once, as a program, and run it over everything. A reusable, automated analysis routine is called an **analysis pass**.
+
+ORRESS is built to be driven this way. Its analysis (functions, strings, bytes, disassembly) is not locked inside the window; you can reach it from a small script. In this lesson you write a few, using crackmes you already know.
+'''
+
+[[steps]]
+title = "The Scripting console"
+goal = "Open the Scripting console and run the example."
+text = '''
+ORRESS has a **Scripting** tab. It runs scripts in **Rhai**, a small, Rust-like scripting language. You do not need to learn Rhai in depth: it has `let`, `if`, `for`, functions, numbers, strings and arrays, and reads much like Rust without types.
+
+The console runs your script against the **open binary** and shows whatever the script printed. The script cannot change the file or touch your disk or network: it only **reads** the analysis, and it is stopped automatically if it runs too long. So you can experiment freely.
+
+When you open the tab it is already filled with an example script. Open crackme03 (the XOR crackme from the keygen lesson), then open Scripting and run the example.
+'''
+instructions = [
+    "Click the **Open crackme03** button below this text.",
+    "Open the menu **View > Open View** and click **Scripting console**.",
+    "Click the **Run** button under the script box.",
+]
+spotlight = "view.Script"
+check = { kind = "open_crackme", name = "crackme03" }
+hints = [
+    "First the Open crackme03 button, then the Scripting tab from View > Open View.",
+    "The lesson continues once crackme03 is open; the example output appears under the Run button.",
+]
+success = '''The example printed the number of functions and strings and disassembled the first function. The output shows under the box. That is the whole loop: write, Run, read.'''
+
+[[steps]]
+title = "The script API"
+goal = "Learn the functions a script can call."
+text = '''
+A script talks to the analysis through a small set of built-in functions:
+
+| Call | Returns |
+|---|---|
+| `function_count()` | how many functions were found |
+| `functions()` | an array of function addresses |
+| `func_name(addr)` | the name of the function at `addr` |
+| `func_blocks(addr)` | how many basic blocks it has |
+| `name(addr)` | the name ORRESS gave to any address |
+| `strings()` | an array of the readable strings |
+| `string_count()` | how many strings there are |
+| `read(addr, len)` | `len` bytes at `addr`, as an array of numbers 0-255 |
+| `disasm(addr, n)` | `n` instructions at `addr`, as text (one per line) |
+
+Addresses are plain integers. A handy trick: `addr.to_hex()` turns a number into a hex string for printing, and `"0x1000".parse_int(16)` parses hex back to a number if you need it.
+
+Try one call. Replace the script with a single line that prints how many functions crackme03 has.
+'''
+instructions = [
+    "In the **Scripting** tab, select all the text in the script box and delete it.",
+    "Type exactly: `print(\"functions: \" + function_count());`",
+    "Click **Run**.",
+    "Read the number in the output and type it in the answer box, then press **Check**.",
+]
+check = { kind = "answer", answers = ["420"], number = true }
+hints = [
+    "`function_count()` returns the count; `print(...)` shows it.",
+    "For crackme03 the count is 420 (it includes all the Rust library functions).",
+]
+success = "You called the analysis from a script and got the same number the Functions view shows. Everything else is combining calls like this."
+
+[[steps]]
+title = "A pass over every function"
+goal = "Write a script that searches all functions for a pattern."
+text = '''
+Now a real pass: find the function that does the XOR check. In crackme03 the check XORs each input byte with a constant, so its code is full of instructions like `xor al,0x5a`. You can find it by disassembling every function and counting lines that contain both `xor` and `,0x`.
+
+Here is the script. `disasm(f, 60)` gives up to 60 instructions of the function at address `f` as one text; `.split("\n")` turns that into an array of lines; `.contains(...)` tests a line.
+
+```rhai
+// Find functions that XOR bytes with constant keys.
+for f in functions() {
+    let hits = 0;
+    for line in disasm(f, 60).split("\n") {
+        if line.contains("xor") && line.contains(",0x") {
+            hits += 1;
+        }
+        if line.contains("ret") { break; }   // stop at the end of the function
+    }
+    if hits >= 4 {
+        print(func_name(f) + " at 0x" + f.to_hex() + ": " + hits + " xor-constant lines");
+    }
+}
+```
+
+Type (or paste) it into the console and run it. Exactly one function is reported.
+'''
+instructions = [
+    "In the **Scripting** tab, clear the script box.",
+    "Type or paste the script from the text above.",
+    "Click **Run**.",
+    "The output names one function and its address. Type that address (with `0x`) in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001100"], number = true }
+hints = [
+    "The output looks like `sub_140001100 at 0x140001100: 8 xor-constant lines`.",
+    "Type the address after `0x`, including the `0x`: `0x140001100`.",
+]
+success = '''One function, `sub_140001100`, stands out with eight XOR-with-constant instructions: that is `check_password`. You just wrote a pass that would find the check in a hundred similar crackmes without opening any of them by hand.'''
+
+[[steps]]
+title = "A keygen as a script"
+goal = "Read the program's own data and compute the password."
+text = '''
+A script can read the program's bytes, so it can do real work. In the keygen lesson you learned that crackme03 XORs each input byte with a 4-byte key and compares with a fixed ciphertext. XOR is its own inverse, so `password[i] = cipher[i] ^ key[i % 4]`.
+
+Rather than read the key and ciphertext off the screen, pull them straight from the instructions. In `check_password`, the key bytes are the numbers after `xor al,` and the expected bytes are the numbers after `cmp byte ptr [rsp+7],`. This script collects both and recovers the password:
+
+```rhai
+// Keygen for crackme03: recover the password from check_password.
+fn num(t) {                      // "0x5a" or "9" -> a number
+    if t.starts_with("0x") { t.sub_string(2).parse_int(16) } else { t.parse_int() }
+}
+let keys = [];
+let targets = [];
+for line in disasm(0x140001100, 60).split("\n") {
+    let parts = line.split(",");
+    let last = parts[parts.len() - 1];
+    if line.contains("xor al,") { keys.push(num(last)); }
+    if line.contains("cmp byte ptr [rsp+7],") { targets.push(num(last)); }
+    if line.contains("ret") { break; }
+}
+let charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+let password = "";
+for i in 0..targets.len() {
+    let code = keys[i] ^ targets[i];
+    for c in charset { if c.to_int() == code { password += c; } }
+}
+print("password: " + password);
+```
+
+Run it. The password it prints is the one that unlocks crackme03.
+'''
+instructions = [
+    "In the **Scripting** tab, clear the box and paste the keygen script above.",
+    "Click **Run**.",
+    "Read the password in the output and type it in the answer box (case matters), then press **Check**.",
+]
+check = { kind = "secret", sha256 = "b1cdf3807031964dd3d9f5702f4912a34cc28faf18d67a6f98af96d96142af88" }
+hints = [
+    "The output line is `password: ` followed by eight characters.",
+    "It mixes capital letters and digits. Type it exactly as printed.",
+]
+success = '''Your script read the key and ciphertext out of the program's own code and computed the password, with no guessing. That is an analysis pass that produces a result, not just a report. (The characters needing single quotes in Rhai are avoided here by looking each byte up in a charset string.)'''
+
+[[steps]]
+title = "Scripts from the command line"
+goal = "Know that the same scripts run outside the window."
+text = '''
+The same scripts run without the window, from ORRESS's command-line tool, so you can put them in a pipeline:
+
+```text
+orress-cli script crackme03.exe keygen.rhai
+orress-cli script crackme03.exe -e "print(function_count())"
+```
+
+`script` takes the binary and a `.rhai` file, or `-e` followed by a line of code. The output goes to the terminal, so you can loop over a folder of files in a shell script or a batch file and collect the results. The console in the window is for writing and testing a script; the command line is for running it over many files.
+'''
+
+[[steps]]
+title = "The MCP server and the AI Assistant"
+goal = "Meet the other ways ORRESS is automated."
+text = '''
+Scripting is one of three ways to drive ORRESS. The other two share one engine.
+
+ORRESS ships a second program, `orress-mcp`, that speaks the **Model Context Protocol (MCP)**: a simple request-and-answer protocol over text, designed so that AI agents and other tools can call a program's features in a uniform way. `orress-mcp` offers these tools, each taking one or two file paths and returning structured results:
+
+- `triage` - the full static triage report,
+- `strings` - extract strings,
+- `disassemble` - disassemble a managed or bytecode file,
+- `detect_vm` - find VM-based obfuscation,
+- `binary_diff` - the two-binary diff from the previous lesson,
+- `deobfuscate_js` - unroll obfuscated JavaScript,
+- `archive_list` - list an archive's contents.
+
+On top of that sits the **AI Assistant** tab inside ORRESS. You can ask it about the open binary in plain language, and it uses the same engine to answer. It is built to respect your privacy: it runs on **your own Claude plan through the Claude Code tool** (no API key to manage), it has an **offline, static-only mode**, and **sending the binary's context to the model is opt-in**, controlled by a consent box. You decide what, if anything, leaves your machine.
+
+Open the AI Assistant to see it.
+'''
+instructions = [
+    "Open the menu **View > Open View** and click **Open AI Assistant**.",
+]
+spotlight = "view.Assistant"
+check = { kind = "action", id = "view::Assistant" }
+hints = ["View > Open View > Open AI Assistant."]
+success = "Three roads to the same engine: the Scripting console for your own Rhai passes, the MCP server for agents and pipelines, and the AI Assistant for plain-language questions."
+
+[[steps]]
+title = "Extending ORRESS"
+goal = "Know that ORRESS itself can be extended, and sum up."
+text = '''
+There is one more level of automation: **extensions**. ORRESS has an extension host (manage it from **View > Open View > Manage Extensions**) that can load add-ons, including ones built for the Zed editor: colour themes, syntax grammars and language-server adapters. The host runs extension code in a sandbox, confined to its own folder, so a bad or hostile extension cannot reach the rest of your system. This is how ORRESS grows new abilities without a new release.
+
+So, the ways to make ORRESS do more for you, from quickest to deepest:
+
+1. **A Rhai script** in the Scripting console, for a one-off question or a pass over many files.
+2. **The `orress-mcp` server**, to let an AI agent or a pipeline call the analyses.
+3. **The AI Assistant**, to ask in plain language, on your own terms.
+4. **An extension**, to add a whole new capability.
+
+You have gone from clicking one view at a time to programming the tool itself. The last lesson brings everything together on one final crackme.
+'''

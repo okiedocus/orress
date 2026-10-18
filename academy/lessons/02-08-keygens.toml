@@ -1,0 +1,393 @@
+id = "l2-keygens"
+level = 2
+order = 8
+title = "Writing a keygen"
+summary = "A serial number computed from a name: read the algorithm, turn it around, and write a Rust program that produces a valid serial for any name."
+goals = [
+    "explain the difference between a fixed password and a key computed from a name",
+    "read a serial-number algorithm from decompiled code",
+    "invert a check to compute valid input directly",
+    "write a small keygen in Rust and verify it against the real program",
+]
+badge = "Keymaker"
+reveal_source = "crackme09"
+
+[[steps]]
+title = "A key for every name"
+goal = "Understand what a keygen is and why it is the best proof of understanding."
+text = '''
+The crackmes so far had one secret: one password that works for everyone. Real software
+licences usually work differently. You type your **name** and a **serial number**, and
+the program checks whether the serial belongs to that name. Every name has its own
+serial. Such a crackme is called a **keygen-me**.
+
+You cannot "find the password" in a keygen-me, because there is none. The serial for
+`alice` is not stored anywhere; the program *computes* what it should be and compares.
+To beat it properly, you write a **keygen** (key generator): a small program that does
+the same computation and prints a valid serial for any name.
+
+There is also a lazy way: **patching**, changing the program's `je` into a `jmp` so it
+accepts anything (Level 3 teaches that). It only changes your copy, and it proves nothing
+about the algorithm. A keygen is the opposite: it works with the *original*, unchanged
+program, for every name, and it can only be written by someone who fully understood the
+check. That is why crackme authors consider a keygen the real solution.
+'''
+
+[[steps]]
+title = "Turning a check around"
+goal = "Learn the general idea: from check to generator."
+text = '''
+Most serial checks have this shape:
+
+```rust
+fn check(name: &str, serial: u32) -> bool {
+    f(name) == g(serial)     // something computed from each side
+}
+```
+
+Often `g` does nothing (`serial` is compared directly), and then the keygen is simply
+`f(name)`. If `g` does something, you need its **inverse operation**: the operation that
+undoes it. Some pairs you know:
+
+| Operation | Inverse |
+|---|---|
+| `x + 5` | `x - 5` |
+| `x ^ 0x5A` | `x ^ 0x5A` (XOR undoes itself) |
+| `x.rotate_left(3)` | `x.rotate_right(3)` |
+| reverse the bytes | reverse them again |
+
+So the plan for any keygen-me:
+
+1. **Find the check** and read it completely: every operation, every constant.
+2. **Separate the two sides**: what is computed from the name, what from the serial.
+3. **Invert** the serial side, so you get `serial = inverse_g(f(name))`.
+4. **Write it as code**, and **verify** it against the real program.
+
+You want a key that passes on an unchanged copy of the program. What do you write?
+'''
+check = { kind = "choice", options = [
+    "A keygen: the program's computation, turned around so it outputs a valid serial",
+    "A patch that turns the je into a jmp",
+    "A list of serials found by trying numbers until one works",
+], correct = 0, explain = [
+    "Right. A keygen works with the original program, for every name.",
+    "A patch changes the program. The task was a key for an unchanged copy, and a patch produces no key at all.",
+    "Trying numbers (brute force) can find one serial for one name, slowly. It does not show you understand the check, and it does not scale to every name.",
+] }
+hints = ["Which solution works on someone else's unchanged copy, for any name?"]
+
+[[steps]]
+title = "Meet crackme #9"
+goal = "Open the keygen-me."
+text = '''
+**Crackme #9** asks for a `Name:` and a `Serial number:`, then says *Correct! That
+serial belongs to ...* or *Wrong serial for this name. Try again!*.
+
+Do the first-look routine from lesson 1 when it opens. In the Strings view you will find
+one more message: *A serial number is a number, like 12345.* That tells you two things:
+the serial is a number, and you type it in **decimal**.
+'''
+instructions = ["Press the **Open crackme09** button below."]
+check = { kind = "open_crackme", name = "crackme09" }
+
+[[steps]]
+title = "Find and name the check"
+goal = "Locate the serial check in main and rename it."
+text = '''
+Go to `main`. You will recognise its structure:
+
+```text
+call  sub_1400016f0         ; read the name (a String)
+...
+call  sub_140001100         ; read the serial: parse the line as a number
+mov   rcx,[rsp+0x38]        ; arg 1: pointer to the name's bytes
+mov   rdx,[rsp+0x40]        ; arg 2: length of the name
+mov   r8d,eax               ; arg 3: the serial (returned by sub_140001100)
+call  sub_140001590         ; the check
+test  al,al
+je    ...                   ; "Wrong serial for this name. Try again!"
+```
+
+Remember the Windows calling convention: arguments go in `rcx`, `rdx`, `r8`, `r9`. A
+slice takes two of them (pointer and length), so `sub_140001590` gets the name as a
+slice and the serial number as a `u32` in `r8d`. That is the check. Name it.
+'''
+instructions = [
+    "Press **Ctrl+Shift+M** to go to `main` of crackme09.exe.",
+    "Find the line `call sub_140001590`, a few lines after `mov r8d,eax`.",
+    "Click that line (not the name) and press **N**. Check that the window says **Rename 0x140001590**.",
+    "Type `check_serial` and press **Enter**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "renamed" }
+hints = [
+    "It is the last call before `test al,al` and the *Wrong serial* message.",
+    "On a line with a call, N renames the called function.",
+]
+success = '''
+If you like, also rename `sub_140001100` to `read_serial` (it is the function that prints
+*A serial number is a number* when parsing fails). Names cost seconds and save minutes.
+'''
+
+[[steps]]
+title = "Read the algorithm"
+goal = "Understand exactly what check_serial computes."
+text = '''
+Go into `check_serial` (click its name) and press **F5**. The Decompiler shows:
+
+```rust
+fn check_serial(a1: &[u8], a3: u32) -> bool {
+    let mut r9: usize;
+    let mut rax_2: u32;
+
+    if a1.len() >= 3 {
+        rax_2 = 0x1000;
+        r9 = 0;
+        loop {
+            rax_2 += a1[r9] as u32;
+            r9 += 1;
+            if a1.len() == r9 {
+                break;
+            }
+        }
+        return rax_2 ^ a3 == 0xbeef;
+    }
+    return false;
+}
+```
+
+`a1` is the name (a slice: `rcx` and `rdx`), and `a3` is the serial: it arrived in `r8`,
+the third argument register. Read it step by step:
+
+1. Names shorter than 3 characters are always rejected.
+2. `rax_2` starts at **0x1000**.
+3. The loop adds every byte of the name to it. (You know this loop from crackme #10.)
+4. The result is XORed with the serial, and must equal **0xBEEF**.
+
+In your own words: `(0x1000 + sum of the name's bytes) ^ serial == 0xBEEF`.
+
+What does the loop compute?
+'''
+instructions = [
+    "In `main`, click the name `check_serial` in the call line.",
+    "Press **F5** and read the decompiled function (click the **Lesson** tab to come back).",
+]
+check = { kind = "choice", options = [
+    "0x1000 plus the sum of all character codes of the name",
+    "The length of the name",
+    "The name XORed with 0xBEEF",
+], correct = 0, explain = [
+    "Right. It starts at 0x1000 and adds every byte: a checksum of the name.",
+    "The length is a1.len(); the loop adds the bytes themselves.",
+    "The XOR with 0xBEEF comes after the loop, and it involves the serial.",
+] }
+hints = ["Look at what happens to `rax_2` inside `loop { ... }`."]
+
+[[steps]]
+title = "Solve for the serial"
+goal = "Rearrange the check so it computes the serial."
+text = '''
+The check is:
+
+```rust
+sum ^ serial == 0xBEEF          // sum = 0x1000 + bytes of the name
+```
+
+You want `serial` alone on one side. XOR undoes itself, so XOR both sides with `sum`:
+
+```rust
+sum ^ serial ^ sum == 0xBEEF ^ sum
+         serial    == 0xBEEF ^ sum
+```
+
+(On the left, `sum ^ sum` is 0, and `x ^ 0` is `x`.) So the keygen is:
+
+```rust
+serial = sum ^ 0xBEEF
+```
+
+Interesting detail: the source code of crackme #9 says `(sum ^ 0xBEEF) == serial`, but
+the decompiled code says `sum ^ serial == 0xBEEF`. The compiler rearranged it, because
+for XOR both are the same. Do not expect the decompiled code to have the exact shape of
+the source; expect it to mean the same.
+
+Which formula computes a valid serial?
+'''
+check = { kind = "choice", options = [
+    "serial = (0x1000 + sum of the name's bytes) ^ 0xBEEF",
+    "serial = 0xBEEF - (0x1000 + sum of the name's bytes)",
+    "serial = 0xBEEF",
+], correct = 0, explain = [
+    "Right. XOR both sides of the check with the sum, and the serial is left alone.",
+    "The check uses XOR, not addition. The inverse of XOR is XOR, not subtraction.",
+    "Then sum ^ 0xBEEF would have to be 0xBEEF, which only works when the sum is 0.",
+] }
+hints = ["What undoes `^ sum`? The same operation."]
+
+[[steps]]
+title = "Worked example: bob"
+goal = "Compute a serial by hand once, all the way."
+text = '''
+Compute the serial for the name `bob`, step by step.
+
+**1. The character codes** (ASCII table, Level 0):
+
+| char | `b` | `o` | `b` |
+|---|---|---|---|
+| hex | 0x62 | 0x6F | 0x62 |
+
+**2. The sum, starting at 0x1000:**
+
+```text
+0x1000 + 0x62 + 0x6F + 0x62 = 0x1000 + 0x133 = 0x1133
+```
+
+**3. XOR with 0xBEEF**, bit by bit:
+
+```text
+0x1133   0001 0001 0011 0011
+0xBEEF   1011 1110 1110 1111
+XOR      1010 1111 1101 1100   = 0xAFDC
+```
+
+**4. Convert to decimal**, because the program reads the serial as a decimal number:
+0xAFDC = 45020.
+
+So for the name `bob` the serial is **45020**. Running crackme #9 with `bob` and `45020`
+prints *Correct! That serial belongs to bob.*
+
+In the next step you do the same for another name.
+'''
+
+[[steps]]
+title = "Your turn: alice"
+goal = "Compute a valid serial for a given name."
+text = '''
+Compute the serial for the name **alice**, exactly like the worked example:
+
+1. Look up the character codes of `a`, `l`, `i`, `c`, `e` in the ASCII table below.
+2. Add them to 0x1000.
+3. XOR the result with 0xBEEF (write both in binary, or use a quick Rust program).
+4. Type the serial in the answer box. Decimal is what the program wants; the answer box
+   also accepts hex like `0x1234`.
+
+Tip: lower-case letters are 0x61 (`a`) to 0x7A (`z`).
+'''
+widget = "ascii_table"
+instructions = [
+    "Add the character codes of `alice` to 0x1000.",
+    "XOR the sum with 0xBEEF.",
+    "Type the result in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["44817"], number = true }
+hints = [
+    "a=0x61, l=0x6C, i=0x69, c=0x63, e=0x65. Their sum is 0x1FE.",
+    "0x1000 + 0x1FE = 0x11FE. 0x11FE ^ 0xBEEF = 0xAF11.",
+    "0xAF11 = 44817.",
+]
+success = '''
+44817 (0xAF11). You computed a serial that the original, unchanged program accepts, for
+a name the program has never seen. That is a keygen, done by hand.
+'''
+
+[[steps]]
+title = "Write the keygen"
+goal = "Turn the algorithm into a small Rust program."
+text = '''
+Computing by hand proves you understood the check. A program does it for every name.
+Rust is a good language for keygens, and the decompiled code already reads like Rust:
+
+```rust
+use std::io::{self, BufRead};
+
+fn serial_for(name: &str) -> u32 {
+    let mut sum: u32 = 0x1000;
+    for b in name.bytes() {
+        sum = sum.wrapping_add(b as u32);
+    }
+    sum ^ 0xBEEF
+}
+
+fn main() {
+    println!("Name:");
+    let mut name = String::new();
+    io::stdin().lock().read_line(&mut name).unwrap();
+    let name = name.trim_end_matches(['\r', '\n']);
+    if name.len() < 3 {
+        println!("The name needs at least 3 characters.");
+        return;
+    }
+    println!("Serial for {name}: {}", serial_for(name));
+}
+```
+
+Notice that the keygen copies **every** rule of the check, also the small ones: the
+minimum length of 3, the start value 0x1000, and `wrapping_add` (the machine's `add`
+wraps around, so the keygen must too). A keygen that forgets one rule produces serials
+that fail for some names.
+
+Build it with `cargo new keygen`, paste the code into `src/main.rs` and `cargo run`. Or
+write it inside ORRESS: **File > New File** (**Ctrl+Shift+N**) opens a code editor.
+Check that it prints 45020 for `bob` and 44817 for `alice`.
+'''
+
+[[steps]]
+title = "Verify against the real program"
+goal = "Know how to prove a keygen works."
+text = '''
+A keygen is only finished when the real program accepts its output. Test it:
+
+1. Open a terminal in ORRESS's configuration folder, in `academy/crackmes` (or use the
+   **Terminal** panel: **View > Open View > Open Terminal**).
+2. Run `crackme09.exe`, type a name, then the serial your keygen printed.
+3. It must say *Correct! That serial belongs to ...*.
+
+Test **several** names: short ones, long ones, names with capitals, digits or spaces. A
+keygen that works for `alice` but not for `Bob Smith` has missed a rule. Edge cases are
+where keygens fail: the minimum length, characters outside `a`-`z`, very long names
+whose sum overflows.
+
+When it cannot be inverted: here every step had a simple inverse. Some checks do not:
+a hash is designed to have no inverse. Then you **search** for an input that fits:
+**brute force** for small spaces, or the symbolic and side-channel solvers of Level 4,
+which let the computer work the answer out.
+
+Can your keygen also do the opposite: compute the name from a serial?
+'''
+check = { kind = "choice", options = [
+    "No: many different names have the same sum, so a serial does not tell you which name it belongs to",
+    "Yes: XOR the serial with 0xBEEF and you get the name",
+    "Yes, but only for names with exactly 3 characters",
+], correct = 0, explain = [
+    "Right. Adding throws information away: `bob` and `obb` have the same sum, so the same serial. That is fine for a keygen: it only needs the name-to-serial direction.",
+    "XOR with 0xBEEF gives back the sum, not the name. Many names share each sum.",
+    "Even 3-character names share sums: `abc`, `acb` and `bca` all add up to the same value.",
+] }
+hints = ["Do `bob` and `obb` get the same serial?"]
+
+[[steps]]
+title = "Level 2 complete"
+goal = "Look back at the whole static-analysis toolkit."
+text = '''
+This was the last lesson of Level 2. Look at what you can do now, without ever running a
+program:
+
+- **First look**: format, compiler, protections, strings and imports in five minutes.
+- **File formats**: headers, sections, the image base, RVAs and file offsets, imports and
+  the IAT.
+- **Navigation**: from the entry point to `main`, the Functions view, following calls,
+  going back, cross-references from a message to the code.
+- **Annotation**: names (N) and comments (;), written as you go.
+- **Graph view**: ifs, chains of checks and loops recognised by their shape.
+- **Decompiler**: reading Rust-like pseudocode fast, and checking its guesses.
+- **Encodings**: XOR, its repeating keys, and the Workbench.
+- **Keygens**: reading an algorithm, inverting it, and writing it in Rust.
+
+In Level 3 you finally **run** programs, under the control of a debugger: you stop them
+at any instruction, look at the registers and memory while they work, change their
+behaviour with patches, and beat programs that try to notice you watching.
+'''
+success = '''
+Level 2 complete. The source of crackme #9 is unlocked below: compare its
+`(sum ^ 0xBEEF) == serial` with what the decompiler showed you.
+'''

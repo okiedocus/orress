@@ -1,0 +1,368 @@
+id = "l0-numbers"
+level = 0
+order = 3
+title = "Binary and hexadecimal"
+summary = "Count like a computer: binary, hexadecimal, and converting between them and decimal."
+badge = "Hex Reader"
+goals = [
+    "read and write binary numbers",
+    "read and write hexadecimal numbers",
+    "convert between decimal, binary and hexadecimal",
+    "explain why two hex digits are exactly one byte",
+]
+
+[[steps]]
+title = "Why another way to count?"
+goal = "Understand place values in the number system you already know."
+text = '''
+Inside a computer, everything is stored as **bits**. A bit is a tiny switch that is either off or on, written **0** or **1**. Computers use two values because electronics can tell "no current" from "current" very reliably.
+
+So computers count with only two digits. Before we learn that, let us look closely at how *you* count, with ten digits (0 to 9). That system is called **decimal**, or base 10.
+
+In the number **345**, every position has a value, ten times bigger than the position to its right:
+
+| hundreds | tens | ones |
+|---|---|---|
+| 3 | 4 | 5 |
+
+So 345 means 3 x 100 + 4 x 10 + 5 x 1. The place values are 1, 10, 100, 1000: each is 10 times the previous one, because there are ten digits.
+
+Every number system works like this. Only the number of digits changes, and with it the place values:
+
+- **binary** (base 2) has 2 digits, 0 and 1. Place values: 1, 2, 4, 8, 16, ...
+- **hexadecimal** (base 16) has 16 digits. Place values: 1, 16, 256, 4096, ...
+
+Reversers use all three. Decimal for everyday numbers, binary when single bits matter, and hexadecimal almost everywhere else: addresses, bytes and machine code in ORRESS are all shown in hexadecimal.
+'''
+
+[[steps]]
+title = "Binary"
+goal = "Read a binary number by adding place values."
+text = '''
+In **binary**, each position is worth twice the position to its right:
+
+| 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|---|
+
+To read a binary number, add up the place values where there is a 1.
+
+**Worked example: `1011`.** Write it under the place values, starting from the right:
+
+| 8 | 4 | 2 | 1 |
+|---|---|---|---|
+| 1 | 0 | 1 | 1 |
+
+There are 1s under 8, 2 and 1. So `1011` in binary is 8 + 2 + 1 = **11** in decimal.
+
+Because `1011` could also be the decimal number one thousand and eleven, binary numbers are written with the prefix `0b`. Rust uses the same notation, and can print numbers in binary with `{:b}`:
+
+```rust
+let x = 0b1011;
+assert_eq!(x, 11);
+println!("{:b}", 11);        // prints 1011
+let y = 0b0010_1010;         // underscores only make it easier to read
+assert_eq!(y, 42);
+```
+
+Below is the **number converter**. Type a number in the box and it shows the number in every form at once. Type `0b1011` and check that it says 11 in the **decimal** row. Then try `0b101`, `255` and `0b1111_1111`.
+'''
+widget = "number_converter"
+
+[[steps]]
+title = "Practice: binary to decimal"
+goal = "Convert a small binary number yourself."
+text = '''
+Your turn. Use the same method as for `0b1011`:
+
+1. write the place values 8, 4, 2, 1 above the four digits;
+2. add the place values that have a 1 under them.
+
+What is `0b0110` in decimal? Do it in your head or on paper. (The answer box expects a decimal number.)
+'''
+instructions = [
+    "Write the place values 8, 4, 2, 1 above the digits 0, 1, 1, 0.",
+    "Add the place values that have a 1 under them.",
+    "Type the result, in decimal, in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["6"] }
+hints = [
+    "The 1s are in the positions worth 4 and 2.",
+    "4 + 2 = ?",
+]
+success = '''
+6. The two 1s stand under the 4 and the 2, and 4 + 2 = 6. The zero in front changes nothing, in the same way as 0345 is still 345.
+'''
+
+[[steps]]
+title = "Practice: a full byte"
+goal = "Convert an 8-bit binary number."
+text = '''
+Eight bits together are called a **byte**. A byte has eight positions:
+
+| 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|---|
+
+**Worked example: `0b1100_0001`.** The 1s stand under 128, 64 and 1, so the value is 128 + 64 + 1 = **193**.
+
+Now you: what is `0b1001_0110` in decimal?
+'''
+instructions = [
+    "Write the eight place values 128, 64, 32, 16, 8, 4, 2, 1 above the digits 1, 0, 0, 1, 0, 1, 1, 0.",
+    "Add the place values that have a 1 under them.",
+    "Type the result, in decimal, and press **Check**.",
+]
+check = { kind = "answer", answers = ["150"] }
+hints = [
+    "The 1s are under 128, 16, 4 and 2.",
+    "128 + 16 = 144. Then add 4 and 2.",
+]
+success = '''
+150 = 128 + 16 + 4 + 2. You can now read any binary number: the method is always the same, only the row of place values gets longer.
+'''
+
+[[steps]]
+title = "Decimal to binary"
+goal = "Write a decimal number in binary."
+text = '''
+To go the other way, from decimal to binary, take away the biggest place value that fits, again and again.
+
+**Worked example: 13.**
+
+- The place values are 1, 2, 4, 8, 16, ... The biggest that fits in 13 is **8**. Write a 1 at the 8. Left over: 13 - 8 = 5.
+- Does 4 fit in 5? Yes. A 1 at the 4. Left over: 1.
+- Does 2 fit in 1? No. A 0 at the 2.
+- Does 1 fit in 1? Yes. A 1 at the 1. Left over: 0. Done.
+
+| 8 | 4 | 2 | 1 |
+|---|---|---|---|
+| 1 | 1 | 0 | 1 |
+
+So 13 = `0b1101`. Check it: 8 + 4 + 1 = 13.
+
+Now you: write **21** in binary. Type it with the `0b` prefix, for example `0b111`.
+'''
+instructions = [
+    "Find the biggest place value (1, 2, 4, 8, 16, 32, ...) that fits in 21, and write a 1 for it.",
+    "Repeat with what is left over, writing a 0 for each place value that does not fit, down to the place value 1.",
+    "Type the binary number with the `0b` prefix (for example `0b111`) and press **Check**.",
+]
+check = { kind = "answer", answers = ["0b10101", "10101", "0b0001_0101", "0b00010101", "0b1_0101", "00010101"] }
+hints = [
+    "The biggest place value that fits in 21 is 16. Left over: 5.",
+    "5 = 4 + 1. So you need 1s at 16, 4 and 1, and 0s at 8 and 2.",
+    "From 16 down to 1: 1, 0, 1, 0, 1.",
+]
+success = '''
+`0b10101` = 16 + 4 + 1 = 21. You will rarely convert to binary by hand in practice (the number converter and ORRESS do it for you), but knowing how it works makes bit tricks in code readable.
+'''
+
+[[steps]]
+title = "How much fits in a few bits?"
+goal = "Know the largest number a number of bits can hold."
+text = '''
+How big can a number with a given number of bits get? The biggest value is when **all bits are 1**.
+
+- 1 bit: `0b1` = 1. Two values: 0 and 1.
+- 2 bits: `0b11` = 2 + 1 = 3. Four values: 0, 1, 2, 3.
+- 3 bits: `0b111` = 4 + 2 + 1 = 7. Eight values: 0 to 7.
+- 8 bits (one byte): `0b1111_1111` = 255. That gives 256 values: 0 to 255.
+
+Do you see the pattern? Every extra bit **doubles** the number of values. With n bits you have 2 to the power n values, and the largest is one less than that. That is why a Rust `u8`, which is one byte, goes from 0 to 255:
+
+```rust
+assert_eq!(u8::MAX, 255);
+assert_eq!(u8::MAX, 0b1111_1111);
+```
+
+Four bits come up a lot, as you will see in the next step. What is the largest number you can write with **4 bits**? (Answer in decimal.)
+'''
+instructions = [
+    "Write four 1s: `0b1111`.",
+    "Add their place values (8, 4, 2, 1) and type the result in decimal. Press **Check**.",
+]
+check = { kind = "answer", answers = ["15"] }
+hints = [
+    "All four bits are 1: 0b1111.",
+    "8 + 4 + 2 + 1 = ?",
+]
+success = '''
+15. Four bits hold the 16 values 0 to 15. Remember the number 16: it is the base of hexadecimal.
+'''
+
+[[steps]]
+title = "Hexadecimal"
+goal = "Read a hexadecimal number."
+text = '''
+Binary numbers get long quickly: the value 200 is `0b1100_1000`. So reversers use **hexadecimal**, or **hex** for short: base 16. It needs 16 digits, so after 0 to 9 it uses letters:
+
+| hex digit | 0-9 | A | B | C | D | E | F |
+|---|---|---|---|---|---|---|---|
+| value | 0-9 | 10 | 11 | 12 | 13 | 14 | 15 |
+
+The place values are 1, 16, 256 (16 x 16), 4096 (16 x 256), and so on. Hex numbers are written with the prefix `0x`, in Rust too. Upper or lower case does not matter: `0x2A` and `0x2a` are the same.
+
+**Worked example: `0x2A`.** The left digit is worth 16s, the right digit is worth 1s. A is 10. So `0x2A` = 2 x 16 + 10 = **42**.
+
+**Another one: `0x100`** = 1 x 256 + 0 + 0 = 256.
+
+```rust
+let x = 0x2A;
+assert_eq!(x, 42);
+println!("{:x}", 42);     // prints 2a
+println!("{:X}", 42);     // prints 2A
+println!("{:#x}", 42);    // prints 0x2a
+```
+
+Now you: what is `0x1F` in decimal? Try it in your head before using the converter.
+'''
+widget = "number_converter"
+instructions = [
+    "The left digit (1) counts 16s, the right digit (F) counts 1s. F is 15.",
+    "Calculate 1 x 16 + 15, type the result in decimal and press **Check**.",
+]
+check = { kind = "answer", answers = ["31"] }
+hints = [
+    "F is the digit for 15.",
+    "1 x 16 + 15 = ?",
+]
+success = '''
+`0x1F` = 16 + 15 = 31. You can check it in the converter: type `0x1F` and read the decimal row.
+'''
+
+[[steps]]
+title = "One hex digit is four bits"
+goal = "Convert between binary and hex quickly."
+text = '''
+Here is the reason hex is so popular. One hex digit has 16 values, and 4 bits also have 16 values. So **every hex digit stands for exactly 4 bits**. A group of 4 bits is called a **nibble**.
+
+| hex | binary | hex | binary |
+|---|---|---|---|
+| 0 | 0000 | 8 | 1000 |
+| 1 | 0001 | 9 | 1001 |
+| 2 | 0010 | A | 1010 |
+| 3 | 0011 | B | 1011 |
+| 4 | 0100 | C | 1100 |
+| 5 | 0101 | D | 1101 |
+| 6 | 0110 | E | 1110 |
+| 7 | 0111 | F | 1111 |
+
+To convert binary to hex, cut the binary number into groups of 4 bits from the right, and replace each group by its hex digit. No adding up needed!
+
+**Worked example: `0b1101_0110`.** The groups are `1101` and `0110`. `1101` is D, `0110` is 6. So the number is **`0xD6`**.
+
+It works backwards too: `0x3C` is `0011` `1100`, so `0b0011_1100`.
+
+Now you: write `0b1010_0011` in hex, with the `0x` prefix.
+'''
+instructions = [
+    "Split the number into its two groups of 4 bits: `1010` and `0011`.",
+    "Look up each group in the table above.",
+    "Type the two hex digits with the `0x` prefix (for example `0x7E`) and press **Check**.",
+]
+check = { kind = "answer", answers = ["0xA3", "A3"] }
+hints = [
+    "1010 is A in the table.",
+    "0011 is 3.",
+]
+success = '''
+`0xA3`. This trick is why reversers think in hex: you can see the bits inside it without calculating.
+'''
+
+[[steps]]
+title = "Two hex digits are one byte"
+goal = "See why bytes are always written as two hex digits."
+text = '''
+A byte is 8 bits, which is two groups of 4 bits. So **one byte is always exactly two hex digits**, from `00` to `FF`.
+
+That is why tools like ORRESS show bytes as pairs of hex digits. The start of every Windows program file looks like this in a hex view:
+
+```text
+4D 5A 90 00 03 00 00 00
+```
+
+Each pair is one byte: `4D`, `5A`, `90`, `00`, and so on. A list of bytes shown like this is called a **hex dump**. You will look at one in the ORRESS tour at the end of this level.
+
+Writing bytes in decimal would be messy: some would have one digit, some three (0 to 255). In hex they always have exactly two, so they line up in neat columns.
+
+The smallest byte value is `0x00` = 0. What is the **largest** byte value, `0xFF`, in decimal?
+'''
+instructions = [
+    "Calculate `0xFF`: the left F counts 16s, the right F counts 1s, and F is 15.",
+    "Type the result in decimal and press **Check**.",
+]
+check = { kind = "answer", answers = ["255"] }
+hints = [
+    "15 x 16 + 15.",
+    "240 + 15 = ?",
+]
+success = '''
+255, the same as `u8::MAX` and `0b1111_1111`. Three ways to write the same byte.
+'''
+
+[[steps]]
+title = "Decimal to hex"
+goal = "Write a decimal number in hex."
+text = '''
+To convert decimal to hex, divide by 16 and keep the remainders.
+
+**Worked example: 200.**
+
+- 200 / 16 = 12, remainder 8 (because 12 x 16 = 192, and 200 - 192 = 8).
+- 12 is smaller than 16, so we stop. 12 is the hex digit C.
+- Read from the last division to the first: **C**, then **8**. So 200 = `0xC8`.
+
+Check: C x 16 + 8 = 12 x 16 + 8 = 200.
+
+For bigger numbers you keep dividing the result. **Worked example: 1000.**
+
+- 1000 / 16 = 62, remainder 8 (62 x 16 = 992).
+- 62 / 16 = 3, remainder 14 (3 x 16 = 48, 62 - 48 = 14). 14 is E.
+- 3 is smaller than 16: stop.
+- Read from the last to the first: **3**, **E**, **8**. So 1000 = `0x3E8`.
+
+Now you: write **300** in hex, with the `0x` prefix.
+'''
+instructions = [
+    "Divide 300 by 16. Write down the result and the remainder.",
+    "If the result is 16 or more, divide it by 16 again. Turn every number from 10 to 15 into its letter (A to F).",
+    "Write the digits from the last division to the first, add the `0x` prefix, and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x12C", "12C", "0x012C"] }
+hints = [
+    "300 / 16 = 18, remainder 12 (18 x 16 = 288). 12 is C.",
+    "18 / 16 = 1, remainder 2.",
+    "From last to first: 1, 2, C.",
+]
+success = '''
+`0x12C` = 1 x 256 + 2 x 16 + 12 = 300. In practice you will use the number converter or the Inspector in ORRESS for this, but now you know what they calculate.
+'''
+
+[[steps]]
+title = "Hex in the wild"
+goal = "Use the number converter on numbers you will meet in ORRESS."
+text = '''
+Hex is everywhere in reverse engineering:
+
+- **Addresses**: memory addresses are shown in hex, like `0x140001000`.
+- **Bytes**: a hex dump shows every byte as two hex digits.
+- **Constants in code**: a number from the source code, like 1337, shows up as `0x539` in the disassembly.
+- **Sizes**: sizes of memory blocks are often round numbers in hex, such as `0x1000` (4096) or `0x400` (1024).
+
+Use the number converter for the big ones. It accepts decimal (`42`), hex (`0x2a`), binary (`0b101010`), and even a character in single quotes (`'A'`), and shows the number in every form. It also shows rows you do not know yet, such as *signed* and *little-endian*: the next two lessons explain them.
+
+Use the converter now: what is `0x539` in decimal?
+'''
+widget = "number_converter"
+instructions = [
+    "Click into the box of the number converter above and replace its contents with `0x539`.",
+    "Read the **decimal** row.",
+    "Type that decimal number in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["1337"] }
+hints = [
+    "Type exactly 0x539 into the converter box.",
+    "Or by hand: 5 x 256 + 3 x 16 + 9.",
+]
+success = '''
+1337. When you see `cmp ecx, 0x539` in a crackme later, you will know it compares something with 1337. You have finished the hardest part of the number basics: the rest of the course uses hex all the time, and it will soon feel natural.
+'''

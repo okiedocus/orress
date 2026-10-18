@@ -1,0 +1,208 @@
+id = "l5-control-flow-flattening"
+level = 5
+order = 31
+title = "Control-flow flattening"
+summary = "A function chopped into one dispatcher loop: how it hides the logic, how to unflatten it, and how ORRESS undoes it automatically."
+badge = "Flattener Foiled"
+reveal_source = "crackme08"
+goals = [
+    "recognise control-flow flattening from its dispatcher-and-state-variable shape",
+    "unflatten a function by hand by following the state variable",
+    "use ORRESS's decompiler to undo the flattening automatically",
+    "recover the key of a flattened crackme",
+]
+
+[[steps]]
+title = "A straight line, chopped up"
+goal = "See what flattening does to ordinary code."
+text = '''
+Here is a normal key check, the kind you can read top to bottom:
+
+```rust
+if input.len() != 8 { return false; }
+if input[0] != b'u' { return false; }
+if input[1] != b'n' { return false; }
+// ... and so on, then:
+return true;
+```
+
+**Control-flow flattening** destroys that readable order. It turns every step into an arm
+of one big `match`, inside a loop, and adds a **state variable** that chooses which arm
+runs next:
+
+```rust
+let mut state = 0;
+loop {
+    match state {
+        0 => { if input.len() != 8 { return false; } state = 1; }
+        1 => { if input[0] != b'u' { return false; } state = 2; }
+        2 => { if input[1] != b'n' { return false; } state = 3; }
+        // ...
+        9 => return true,
+        _ => return false,
+    }
+}
+```
+
+Both versions do exactly the same thing. But the second hides the real order inside the
+state numbers. Read the arms in the file and they appear in whatever jumbled order the
+compiler emitted them — not `0,1,2,...`. The obfuscator OLLVM produces exactly this shape.
+'''
+
+[[steps]]
+title = "The dispatcher and the state variable"
+goal = "Name the two parts that make flattening work."
+text = '''
+A flattened function has two moving parts:
+
+- The **dispatcher**: the block at the top of the loop that reads the state variable and
+  jumps to the matching arm. Because *every* arm jumps back to it, the dispatcher is a
+  single block with dozens of incoming edges — very high **fan-in**.
+- The **state variable**: a plain integer (often in a register, here it would be one
+  register holding `state`) that each arm sets before looping back, naming the next arm.
+
+So control does not flow arm-to-arm the way the source did. It always bounces back through
+the dispatcher: *arm -> dispatcher -> next arm -> dispatcher -> ...*. In the disassembly
+you will see a `jmp` table or a chain of compares on one register, and every arm ending by
+setting that register and jumping to one shared address.
+
+That "one block everything returns to, inside a loop" shape is the same fingerprint a VM
+interpreter has — which is why ORRESS's VM detector flags flattened functions too.
+'''
+deep_dive = '''
+Compilers love to prove the state machine is really just a sequence and collapse it back
+into straight-line code. To stop that (so the binary stays flattened for you to study),
+crackme #8 passes the state through a `black_box`, an optimisation barrier. Real
+obfuscators achieve the same with opaque operations on the state variable that the
+compiler cannot see through.
+'''
+
+[[steps]]
+title = "Spot the flattening"
+goal = "Identify flattening from a description."
+text = '''
+You open a function and it is one loop containing a big switch on a single register, and
+every block ends by setting that register and jumping back to the top. Which obfuscation
+is this?
+'''
+check = { kind = "choice", options = [
+  "Control-flow flattening: a dispatcher loop driven by a state variable",
+  "Packing: the code is compressed on disk",
+  "Opaque predicates and nothing else",
+  "A normal `for` loop over an array",
+], correct = 0, explain = [
+  "Right — one dispatcher, one state register, every block looping back: that is flattening.",
+  "Wrong — packing is about compressed/encrypted bytes on disk, not a dispatcher loop. The code here is fully present.",
+  "Wrong — opaque predicates are fake always-true/false branches; they can appear alongside flattening but are not this shape.",
+  "Wrong — a real loop iterates data; here the 'loop' only exists to re-enter the dispatcher for each original block.",
+] }
+success = "The dispatcher-plus-state-variable shape is the signature of flattening. Now you will undo it."
+
+[[steps]]
+title = "Unflattening by hand"
+goal = "Learn the manual recipe before letting the tool do it."
+text = '''
+To unflatten a function yourself, you rebuild the real order from the state numbers:
+
+1. **Find the dispatcher** and the **state variable** (the register it switches on).
+2. **List the arms**: for each state value, note what the arm does and which state it sets
+   next. For crackme #8, arm for state 1 checks `input[0]` then sets state 2; arm for
+   state 2 checks `input[1]` then sets state 3; and so on.
+3. **Follow the chain** from the start state. The dispatcher starts at state 0; follow
+   `0 -> 1 -> 2 -> ...` through the "set next state" values, ignoring the jumbled order the
+   arms sit in on screen.
+4. **Relink**: write the arms out in that real order, drop the dispatcher and the state
+   variable, and you have the original straight-line logic back.
+
+It is bookkeeping, not magic — and exactly the kind of bookkeeping a tool can do for you.
+'''
+
+[[steps]]
+title = "Open the flattened check"
+goal = "Load crackme #8 and reach its check function in the disassembly."
+text = '''
+Let's work the real thing. **Crackme #8** is control-flow-flattened. Open it, then look at
+its check function in the **Disassembly** view.
+
+The check function is the large one with many blocks — in the **Functions** list it stands
+out by its block count (around 36 blocks for roughly 100 lines of logic: that bloat is the
+flattening). Open it and you will see the dispatcher at the top and the arms scattered
+below, each ending by loading a number into a register and jumping back.
+'''
+instructions = [
+  "Click **Open crackme08** on this step (if it is not already open).",
+  "Open the **Functions** list: press **Ctrl+Shift+F**, or **View** menu -> **This File** -> **File: Functions**.",
+  "Click the row with the most **Blocks** (the oversized check function, about 36 blocks) to jump to it in the **Disassembly** view.",
+]
+spotlight = "tree.Functions"
+check = { kind = "open_crackme", name = "crackme08" }
+hints = [
+  "The check function is not `main`; it is the big one `main` calls. Sort or scan the Blocks column for the largest.",
+  "Clicking a function row opens it in the Disassembly view with the cursor on its first instruction.",
+]
+success = "You are looking at the flattened function: one dispatcher block the arms all jump back to, and the arms in scrambled order below it. Reading the key out of this by hand would be slow — so let the decompiler do it."
+
+[[steps]]
+title = "Let ORRESS unflatten it"
+goal = "Use the decompiler and find the deobfuscation note."
+text = '''
+With the cursor inside that function, open the **Decompiler**. ORRESS lifts the machine
+code to Rust-style pseudocode — and as it does, it **undoes the flattening**: it works out
+each arm's real successor from the state variable, relinks them, and drops the dispatcher.
+
+At the very top of the output you will see the note:
+
+```
+// deobfuscated by ORRESS: control-flow flattening undone
+```
+
+Below it, the jumbled dispatcher is gone and the function reads as the straight-line check
+it always was: a length test, then one comparison per input byte. That note is your signal
+that the clean code you are reading was reconstructed, not copied byte-for-byte from disk.
+'''
+instructions = [
+  "Make sure the cursor is inside the flattened check function in the **Disassembly** view.",
+  "Open the **Decompiler**: press **F5**, or **View** menu -> **Open View** -> **Open Decompiler**.",
+  "Read the first line of the output and confirm it says `// deobfuscated by ORRESS: control-flow flattening undone`.",
+]
+spotlight = "view.Decompiler"
+check = { kind = "action", id = "view::Decompiler" }
+hints = [
+  "F5 decompiles the function under the cursor. If it says to put the cursor in a function, click inside the check function in the disassembly first.",
+  "The deobfuscation note is the very first line, a green comment.",
+]
+success = "The decompiler relinked the arms and dropped the dispatcher. What took the obfuscator all that work to hide, ORRESS put back in a second."
+
+[[steps]]
+title = "Read the key out of the clean code"
+goal = "Recover the password from the deobfuscated pseudocode."
+text = '''
+Now read the recovered check. Each arm compares one input byte against a fixed value.
+ORRESS shows them as characters where it can, so the pseudocode reads like:
+
+```
+if read::<u8>(rcx) == b'u' { ... }
+if read::<u8>(rcx + 1) == b'n' { ... }
+if read::<u8>(rcx + 2) == b'f' { ... }
+// ...
+```
+
+Read the required byte from each arm, in order, and you have the password. (If a byte
+shows as a hex number instead of a character, convert it: `0x75` is `'u'`, `0x6e` is
+`'n'`, and so on — the ASCII table widget in earlier lessons does this, or the number
+converter.)
+
+Type the 8-character key the check demands.
+'''
+instructions = [
+  "In the deobfuscated pseudocode, read the byte each arm compares, from offset 0 to 7.",
+  "Assemble them into one 8-character string.",
+  "Type that string and press Check.",
+]
+check = { kind = "secret", sha256 = "5b32bfdd2311089e3a34de1daca5e74bc5b557a02b358d99dc1bfae7fdc2c2da" }
+hints = [
+  "The first three characters are `u`, `n`, `f`. It is a leet-speak word about this very technique.",
+  "Think \"unflatten\", trimmed to 8 characters with leet substitutions.",
+  "The key is `unfl4tt3`.",
+]
+success = "That is the key. You beat control-flow flattening: you recognised the dispatcher shape, let ORRESS relink it, and read the logic straight out. The crackme's source is now unlocked below — compare the flattened `match` to the clean check ORRESS recovered."

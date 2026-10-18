@@ -1,0 +1,718 @@
+# Level 4: Intermediate CTF. Terms first used in the 04-* lessons.
+
+# --- CTF practice -------------------------------------------------------------
+
+[[term]]
+term = "leetspeak"
+aliases = ["leet"]
+short = "Writing words with look-alike digits and symbols, such as 0 for o, 3 for e and 4 for a."
+text = '''
+CTF flags are usually written in leetspeak: `flag{r3v3rs1ng_1s_fun}`. It makes flags hard to guess
+but easy to read once you have them. When a decoded text looks like leetspeak, you have probably
+found the flag.
+'''
+see = ["CTF flag"]
+
+[[term]]
+term = "check function"
+aliases = ["check functions", "validation function"]
+short = "The function that decides whether your input (password, key, flag) is accepted."
+text = '''
+In a crackme, `main` reads your input, calls the check function, and prints "Correct!" or "Wrong"
+depending on its result. Finding it is step 2 of every reversing challenge: start at the success
+or failure message and look for the call whose result decides between them.
+
+```rust
+if check_password(input) { println!("Correct!"); } else { println!("Wrong"); }
+```
+'''
+see = ["crackme"]
+
+# --- encodings -----------------------------------------------------------------
+
+[[term]]
+term = "encoding"
+aliases = ["encodings", "encode", "encoded", "encodes", "decode", "decoded", "decodes", "decoding"]
+short = "Writing the same data in a different form, such as hex or base64. Anyone can undo it; no key is needed."
+text = '''
+An encoding is a fixed, public rule for writing bytes differently. Hex writes each byte as two
+digits, base64 packs bytes into 64 safe characters, URL encoding writes special characters as
+`%41`. Encodings hide nothing; they only make data look unreadable at first glance.
+
+Compare with encryption (needs a key) and hashing (cannot be undone at all).
+'''
+see = ["encryption", "hash function", "base64"]
+
+[[term]]
+term = "hex text"
+aliases = ["hex string", "hex strings", "hex encoding", "hex-encoded"]
+short = "Bytes written as hexadecimal digits, two characters per byte, for example 666c6167 for flag."
+text = '''
+Hex text uses only `0-9` and `a-f`, has an even length, and is twice as long as the data it
+holds. In Rust: `format!("{:02x}", byte)` for each byte. The Workbench's **From hex** step turns it
+back into bytes.
+'''
+see = ["hexadecimal", "encoding"]
+
+[[term]]
+term = "base64"
+aliases = ["base-64"]
+short = "An encoding that writes every 3 bytes as 4 characters from A-Z, a-z, 0-9, + and /, often ending with =."
+text = '''
+Base64 cuts the input into groups of 3 bytes (24 bits), splits each group into four 6-bit numbers,
+and looks each number up in a 64-character alphabet. Example: `Man` becomes `TWFu`. A missing byte
+at the end is marked with `=` padding.
+
+Recognise it by its alphabet, a length that is a multiple of 4, and `=` at the end. `Zmxh` at the
+start is base64 for `fla`, the start of a flag. Undo it with the Workbench's **From base64**.
+'''
+see = ["encoding", "base32"]
+
+[[term]]
+term = "base32"
+short = "An encoding like base64 but with only 32 characters: uppercase letters and the digits 2 to 7."
+see = ["base64"]
+
+[[term]]
+term = "URL encoding"
+aliases = ["percent-encoding", "URL-encoded", "URL decode"]
+short = "Writing special characters as % followed by two hex digits, as in web addresses: a space becomes %20."
+see = ["encoding"]
+
+[[term]]
+term = "ROT13"
+aliases = ["ROT-13"]
+short = "Replacing every letter with the letter 13 places further in the alphabet. Applying it twice gives the original back."
+text = '''
+`a` becomes `n`, `f` becomes `s`, so `flag{` becomes `synt{`. Digits and punctuation do not
+change. Because the alphabet has 26 letters, ROT13 undoes itself. It is a Caesar cipher with a
+shift of 13.
+'''
+see = ["Caesar cipher"]
+
+[[term]]
+term = "Caesar cipher"
+aliases = ["Caesar shift", "Caesar"]
+short = "Shifting every letter by a fixed number of places in the alphabet. Only 25 possible shifts, so it is trivial to break."
+see = ["ROT13"]
+
+[[term]]
+term = "Magic button"
+aliases = ["auto-decoder", "Magic auto-decoder"]
+short = "The Workbench button that tries chains of common decodings and lists the most readable results."
+text = '''
+Magic tries hex, base64, base32, URL decoding, zlib, gzip, single-byte XOR, ROT13, UTF-16 and more,
+in chains of up to 3 steps, and scores the results by how readable they are. Click **Use** to load
+a result's recipe. On the command line: `orress-cli magic FILE`.
+'''
+see = ["Workbench", "encoding"]
+
+[[term]]
+term = "orress-cli"
+aliases = ["ORRESS command line"]
+short = "ORRESS's command-line tool: strings, disassembly, decompiling, Workbench recipes and more, without the window."
+text = '''
+Examples: `orress-cli recipe "from_base64 | rot13" FILE` runs a Workbench recipe on a file,
+`orress-cli magic FILE` runs Magic, `orress-cli strings FILE` lists strings. Run
+`orress-cli --help` for the full list.
+'''
+see = ["Workbench"]
+
+[[term]]
+term = "zlib"
+aliases = ["gzip", "DEFLATE"]
+short = "Common compression formats. zlib data usually starts with 78 9C, gzip with 1F 8B. Compressed data looks random, like encrypted data."
+see = ["entropy"]
+
+[[term]]
+term = "bit rotation"
+aliases = ["rotation", "rotations", "rotate_left", "rotate_right", "rol", "ror"]
+short = "Shifting the bits of a value and moving the bits that fall off one end back in at the other end."
+text = '''
+`0b1000_0001u8.rotate_left(1)` is `0b0000_0011`: the top bit wrapped around to the bottom. Unlike
+a shift, a rotation loses no bits, so it can always be undone by rotating the other way. The x86
+instructions are `rol` and `ror`.
+'''
+see = ["shift"]
+
+# --- cryptography -------------------------------------------------------------
+
+[[term]]
+term = "cryptography"
+aliases = ["crypto", "cryptographic"]
+short = "The science of protecting information: encryption, hashing, signatures."
+text = '''
+For a reverse engineer, cryptography is mostly about recognition: identify the standard
+algorithm, find its key and data, and use a ready-made implementation. You almost never need its
+mathematics.
+'''
+see = ["encryption", "hash function", "magic constant"]
+
+[[term]]
+term = "encryption"
+aliases = ["encrypt", "encrypts", "encrypted", "encrypting", "decrypt", "decrypts", "decrypted", "decrypting", "decryption"]
+short = "Scrambling data with a key so that only someone with the key can turn it back (decrypt it)."
+text = '''
+```rust
+let ciphertext = encrypt(plaintext, key);
+let plaintext  = decrypt(ciphertext, key);
+```
+
+A program that decrypts something must contain or receive the key, so a reverse engineer can
+usually find it. Compare with encoding (no key) and hashing (no way back).
+'''
+see = ["cipher", "plaintext", "ciphertext", "secret key"]
+
+[[term]]
+term = "cipher"
+aliases = ["ciphers"]
+short = "An algorithm that encrypts and decrypts data with a key, such as AES, TEA or RC4."
+see = ["block cipher", "stream cipher", "encryption"]
+
+[[term]]
+term = "secret key"
+aliases = ["cipher key", "crypto key", "secret keys"]
+short = "The input that controls a cipher. The same plaintext with a different key gives completely different ciphertext."
+text = '''
+Modern ciphers are public; their security comes only from the key. In a program, look for it
+where the data goes into the cipher function: a string (crackme13 keeps `t1ny_crypt0_k3y!` as
+text), a byte array, or a value computed at run time. TEA and AES-128 keys are 16 bytes.
+'''
+see = ["cipher", "XOR key"]
+
+[[term]]
+term = "block cipher"
+aliases = ["block ciphers"]
+short = "A cipher that encrypts fixed-size chunks (blocks), such as 8 bytes for TEA or 16 bytes for AES."
+text = '''
+In code: a loop over the data in steps of 8 or 16 bytes, and inside it many rounds of shifts,
+XORs, additions and table lookups. Ciphertext from a block cipher is a whole number of blocks long.
+'''
+see = ["stream cipher", "cipher round", "AES", "TEA"]
+
+[[term]]
+term = "stream cipher"
+aliases = ["stream ciphers"]
+short = "A cipher that generates a keystream from the key and XORs it into the data byte by byte, such as RC4 or ChaCha20."
+see = ["keystream", "block cipher", "RC4"]
+
+[[term]]
+term = "keystream"
+aliases = ["key stream"]
+short = "The long sequence of pseudo-random bytes a stream cipher makes from its key; data XOR keystream = ciphertext."
+see = ["stream cipher"]
+
+[[term]]
+term = "cipher round"
+aliases = ["rounds", "cipher rounds"]
+short = "One repetition of a cipher's mixing steps. Ciphers repeat them many times: TEA 32 cycles, AES 10 to 14 rounds."
+see = ["block cipher"]
+
+[[term]]
+term = "S-box"
+aliases = ["S-boxes", "sbox", "substitution box"]
+short = "A lookup table that replaces each byte with another byte, used by ciphers to mix data. AES's starts 63 7C 77 7B."
+text = '''
+```rust
+let out = SBOX[input as usize];
+```
+
+A 256-byte table in a program's data is a strong hint of a cipher. AES's S-box is the most famous;
+its first bytes are `63 7C 77 7B F2 6B 6F C5`.
+'''
+see = ["AES", "magic constant"]
+
+[[term]]
+term = "AES"
+aliases = ["AES-128", "AES-256", "Rijndael"]
+short = "The Advanced Encryption Standard, the most used block cipher: 16-byte blocks, 16-, 24- or 32-byte keys."
+text = '''
+Recognise it by its S-box (`63 7C 77 7B ...`) in the data. Decrypting needs the key, the mode
+(ECB, CBC, CTR ...) and, for most modes, a 16-byte IV. The Workbench has **AES decrypt**.
+'''
+see = ["S-box", "block cipher mode", "IV"]
+
+[[term]]
+term = "block cipher mode"
+aliases = ["ECB", "CBC", "CTR", "cipher mode"]
+short = "How a block cipher handles data longer than one block: ECB encrypts each block alone, CBC and CTR chain them with an IV."
+see = ["AES", "IV"]
+
+[[term]]
+term = "IV"
+aliases = ["initialization vector", "initialisation vector", "nonce"]
+short = "A starting value that makes encryption of the same data come out different each time. Needed to decrypt CBC and CTR."
+see = ["block cipher mode"]
+
+[[term]]
+term = "TEA"
+aliases = ["Tiny Encryption Algorithm"]
+short = "A small block cipher (8-byte blocks, 16-byte key, 32 cycles), easy to recognise by its constant 0x9E3779B9."
+text = '''
+Popular in CTFs and malware because it fits in a few lines. Its key is four 32-bit words, read
+little-endian in most programs. The Workbench has **TEA decrypt** with an `endian` setting. The
+decompiler may show its constant as `-= 0x61c88647`, the same number in two's complement.
+'''
+see = ["TEA delta", "XTEA", "block cipher"]
+
+[[term]]
+term = "XTEA"
+aliases = ["eXtended TEA"]
+short = "TEA's successor with a slightly different key schedule; same delta constant 0x9E3779B9."
+see = ["TEA"]
+
+[[term]]
+term = "TEA delta"
+aliases = ["delta", "0x9E3779B9", "0x61C88647"]
+short = "The constant 0x9E3779B9, derived from the golden ratio, used by TEA and XTEA. Stored as the bytes b9 79 37 9e."
+see = ["TEA", "magic constant"]
+
+[[term]]
+term = "RC4"
+aliases = ["ARC4", "ARCFOUR"]
+short = "An old, simple stream cipher popular in malware. Recognised by a loop that fills a 256-byte array with 0 to 255."
+text = '''
+RC4 has no numeric magic constant. Look for its key-scheduling algorithm: a loop writing 0..255
+into a buffer, then 256 swaps driven by the key. Encryption and decryption are the same operation.
+The Workbench has **RC4**; on the command line `orress-cli rc4`.
+'''
+see = ["key-scheduling algorithm", "stream cipher"]
+
+[[term]]
+term = "key-scheduling algorithm"
+aliases = ["KSA", "key schedule"]
+short = "The part of a cipher that expands the key into the internal state it works with, such as RC4's 256-byte table."
+see = ["RC4"]
+
+[[term]]
+term = "ChaCha20"
+aliases = ["ChaCha", "Salsa20"]
+short = "A modern stream cipher, recognisable by the 16-character text expand 32-byte k in its data."
+see = ["stream cipher", "magic constant"]
+
+[[term]]
+term = "hash function"
+aliases = ["hash", "hashes", "hashing", "hashed", "hash functions", "digest", "digests"]
+short = "A function that turns any input into a short, fixed-size fingerprint (the digest) that cannot be turned back."
+text = '''
+The same input always gives the same digest, a tiny change gives a completely different one, and
+there is no way back from digest to input. Digest sizes identify the hash: CRC32 4 bytes, MD5 16,
+SHA-1 20, SHA-256 32. A program that hashes your password and compares the digest can only be
+beaten by guessing (or by patching the comparison).
+'''
+see = ["one-way function", "MD5", "SHA-1", "SHA-256", "dictionary attack"]
+
+[[term]]
+term = "one-way function"
+aliases = ["one-way", "one-way functions"]
+short = "A function that is easy to compute but practically impossible to invert, such as a cryptographic hash."
+see = ["hash function"]
+
+[[term]]
+term = "MD5"
+short = "An old hash function with 16-byte digests. Recognised by the start values 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476."
+see = ["hash function", "SHA-1"]
+
+[[term]]
+term = "SHA-1"
+aliases = ["SHA1"]
+short = "A hash function with 20-byte (40 hex digit) digests. Shares MD5's four start values and adds 0xC3D2E1F0."
+see = ["hash function", "MD5"]
+
+[[term]]
+term = "SHA-256"
+aliases = ["SHA256", "SHA-2"]
+short = "The standard hash function today, with 32-byte (64 hex digit) digests. Start values begin 0x6A09E667, 0xBB67AE85."
+see = ["hash function"]
+
+[[term]]
+term = "CRC32"
+aliases = ["CRC-32", "CRC"]
+short = "A 4-byte checksum used by zip and PNG to detect damage. Recognised by 0xEDB88320 or its 1 KB lookup table."
+see = ["checksum", "hash function"]
+
+[[term]]
+term = "magic constant"
+aliases = ["magic constants", "crypto constant", "crypto constants"]
+short = "A fixed number or table that is part of an algorithm's definition, so finding it identifies the algorithm."
+text = '''
+Examples: `0x9E3779B9` (TEA), `0x67452301` (MD5, SHA-1), `0x6A09E667` (SHA-256), `0xEDB88320`
+(CRC32), the S-box `63 7C 77 7B` (AES), the text `expand 32-byte k` (ChaCha20). Search for them as
+little-endian bytes in the Hex view, and remember that a decompiler may show the negative form
+(`0x61c88647` for TEA's delta).
+'''
+see = ["TEA delta", "S-box", "endianness"]
+
+[[term]]
+term = "dictionary attack"
+aliases = ["dictionary", "password list", "wordlist"]
+short = "Guessing a password by trying a list of common passwords and words, for example against a stored hash."
+see = ["brute force", "hash function"]
+
+[[term]]
+term = "encrypt-and-compare"
+aliases = ["encrypt and compare"]
+short = "A check that encrypts your input and compares the result with stored ciphertext. Decrypting the stored ciphertext gives the answer."
+see = ["encryption", "check function"]
+
+# --- symbolic execution ---------------------------------------------------------
+
+[[term]]
+term = "symbolic execution"
+aliases = ["symbolic", "symbolically", "symbolic solver", "symbolic solve"]
+short = "Running code with unknowns instead of numbers, collecting the conditions on the way to a block, and solving them."
+text = '''
+Every operation builds a formula (`x ^ 0x5a`) instead of a value, and every branch that depends
+on the input adds a constraint (`x ^ 0x5a == 0x15`). Solve the constraints of the path to the
+success block and you have an input that reaches it. In ORRESS: the **Symbolic solve** section of
+the Emulator.
+'''
+see = ["symbolic variable", "constraint", "SMT solver", "path explosion"]
+
+[[term]]
+term = "concrete value"
+aliases = ["concrete", "concrete values", "concretely", "concrete execution"]
+short = "A real, known number, as opposed to a symbolic unknown. Normal execution is concrete execution."
+see = ["symbolic execution"]
+
+[[term]]
+term = "symbolic variable"
+aliases = ["symbolic variables", "symbolic byte", "symbolic bytes"]
+short = "An unknown, like x in algebra, that stands for an input byte during symbolic execution."
+see = ["symbolic execution"]
+
+[[term]]
+term = "constraint"
+aliases = ["constraints"]
+short = "A condition the input must satisfy, for example input[0] ^ 0x5a == 0x15."
+see = ["path constraint", "SMT solver"]
+
+[[term]]
+term = "path constraint"
+aliases = ["path constraints"]
+short = "All constraints collected on the way to one block: the input reaches that block exactly when all of them hold."
+see = ["constraint", "symbolic execution"]
+
+[[term]]
+term = "SMT solver"
+aliases = ["solver", "solvers", "constraint solver", "SAT solver"]
+short = "A program that finds values satisfying a list of constraints over integers and bits, or proves that none exist."
+text = '''
+You give it constraints; it answers **sat** (with a solution), **unsat** (impossible) or
+**unknown**. z3 is the best known. ORRESS has a small built-in solver for byte-wise checks and
+exports SMT-LIB2 for z3.
+'''
+see = ["z3", "SMT-LIB2", "satisfiable"]
+
+[[term]]
+term = "z3"
+short = "Microsoft Research's SMT solver, the standard tool for solving the constraints of a crackme."
+see = ["SMT solver", "SMT-LIB2"]
+
+[[term]]
+term = "SMT-LIB2"
+aliases = ["SMT-LIB", "smt2"]
+short = "The standard text language for SMT constraints: declare-const for unknowns, assert for conditions."
+text = '''
+```text
+(declare-const x (_ BitVec 8))
+(assert (= (bvxor x #x5a) #x15))
+(check-sat)
+(get-model)
+```
+
+ORRESS shows the collected constraints in this format under **SMT-LIB2 (for external z3)**.
+'''
+see = ["z3"]
+
+[[term]]
+term = "satisfiable"
+aliases = ["sat", "unsat", "unsatisfiable"]
+short = "A set of constraints is satisfiable (sat) when some input makes all of them true, unsatisfiable (unsat) when none does."
+see = ["SMT solver"]
+
+[[term]]
+term = "path explosion"
+aliases = ["state explosion"]
+short = "The number of paths doubling with every branch, which makes exploring all of them impossible for large functions."
+see = ["symbolic execution"]
+
+[[term]]
+term = "target address"
+aliases = ["target block", "success block"]
+short = "In ORRESS's symbolic solve: the block the input must reach, usually the one that leads to Correct!."
+see = ["avoid address", "symbolic execution"]
+
+[[term]]
+term = "avoid address"
+aliases = ["avoid addresses", "avoid block", "failure block"]
+short = "In ORRESS's symbolic solve: a block that means failure. Branches toward it are steered the other way."
+see = ["target address"]
+
+[[term]]
+term = "symbolic address"
+aliases = ["symbolic memory address"]
+short = "A memory address that depends on the unknown input, such as TABLE[input[0]]. ORRESS's symbolic solver stops on these."
+see = ["symbolic execution", "S-box"]
+
+# --- side channels --------------------------------------------------------------
+
+[[term]]
+term = "side channel"
+aliases = ["side channels", "side-channel", "side-channel attack", "side-channel solve"]
+short = "Information that leaks through how a program works (time, power, instruction count) instead of through its output."
+text = '''
+A check that stops at the first wrong character does less work for a worse guess. Measure the
+work and you learn how many leading characters are right. ORRESS's **Side-channel solve** in the
+Emulator counts executed instructions to do this byte by byte.
+'''
+see = ["early exit", "instruction counting", "timing attack", "constant-time code"]
+
+[[term]]
+term = "early exit"
+aliases = ["early-exit", "early return"]
+short = "Leaving a loop or function as soon as the answer is known, for example at the first mismatching byte."
+text = '''
+Efficient, and a classic leak: the amount of work then depends on how much of the secret you got
+right.
+
+```rust
+for i in 0..n { if a[i] != b[i] { return false; } }   // early exit
+```
+'''
+see = ["side channel", "constant-time code"]
+
+[[term]]
+term = "oracle"
+aliases = ["oracles"]
+short = "Something you can query that reveals more about a secret than it should, such as a check that leaks how far it got."
+see = ["side channel"]
+
+[[term]]
+term = "timing attack"
+aliases = ["timing attacks", "timing side channel"]
+short = "A side channel that measures how long an operation takes. Real-world timing is noisy, so measurements are repeated and averaged."
+see = ["side channel", "instruction counting"]
+
+[[term]]
+term = "instruction counting"
+aliases = ["instruction count", "instruction counts", "counting instructions"]
+short = "Counting how many instructions a function executes in an emulator: a noise-free stand-in for timing."
+see = ["side channel", "timing attack"]
+
+[[term]]
+term = "charset"
+aliases = ["character set", "charsets"]
+short = "The set of characters a solver tries at each position, such as printable ASCII (95 characters) or digits (10)."
+see = ["side channel"]
+
+[[term]]
+term = "constant-time code"
+aliases = ["constant-time", "constant time"]
+short = "Code that does the same work for every secret value, so a side channel has nothing to measure."
+text = '''
+```rust
+let mut diff = 0u8;
+for i in 0..a.len() { diff |= a[i] ^ b[i]; }   // no early exit
+diff == 0
+```
+'''
+see = ["early exit", "side channel"]
+
+[[term]]
+term = "cache attack"
+aliases = ["cache attacks", "Flush+Reload"]
+short = "A side channel that learns which memory another program used from the processor's cache, leaking table lookups."
+see = ["side channel"]
+
+[[term]]
+term = "power analysis"
+aliases = ["DPA", "differential power analysis"]
+short = "A hardware side channel: measuring the power a chip draws while it encrypts to recover its key."
+see = ["side channel"]
+
+# --- managed code -----------------------------------------------------------------
+
+[[term]]
+term = "bytecode"
+aliases = ["byte code", "bytecodes"]
+short = "Instructions for a software processor that a runtime executes, instead of machine code for the real CPU."
+text = '''
+Think of bytecode as a Rust `enum` of instructions and the runtime as a `match` loop over them.
+Java, C#, Python and WebAssembly compile to bytecode. Level 5 shows obfuscators that invent their
+own bytecode (a bytecode VM) to hide code.
+'''
+see = ["managed runtime", "operand stack", "native code", "bytecode VM"]
+
+[[term]]
+term = "native code"
+aliases = ["native", "native binary", "native binaries"]
+short = "Machine code for a real processor, such as x86-64, as produced by the Rust or C compiler."
+see = ["machine code", "bytecode"]
+
+[[term]]
+term = "managed code"
+aliases = ["managed"]
+short = "Code that runs under a managed runtime (.NET, the JVM, CPython) instead of directly on the CPU."
+see = ["managed runtime", "bytecode", "metadata"]
+
+[[term]]
+term = "managed runtime"
+aliases = ["managed runtimes", "language virtual machine", "runtime", "runtimes"]
+short = "A program that loads and runs bytecode, such as .NET's CLR, the JVM or CPython. Also called a language virtual machine."
+text = '''
+Not to be confused with a virtual machine like VMware (a whole simulated computer, Level 6) or
+with the custom bytecode VMs of obfuscators (Level 5). A managed runtime runs one language's
+official bytecode, usually with a JIT compiler.
+'''
+see = ["bytecode", "JIT compiler", ".NET", "JVM", "CPython"]
+
+[[term]]
+term = "JIT compiler"
+aliases = ["JIT", "just-in-time", "just in time"]
+short = "A compiler inside a runtime that turns bytecode into machine code while the program runs, for speed."
+see = ["managed runtime"]
+
+[[term]]
+term = "metadata"
+aliases = ["meta data"]
+short = "The description a managed file carries of itself: names of classes, methods and fields, their types, and string constants."
+text = '''
+The runtime needs it to load and link code by name, so it survives in the file. For a reverse
+engineer this is a gift: original names and strings without any work.
+'''
+see = ["managed code", "constant pool", "user strings"]
+
+[[term]]
+term = "operand stack"
+aliases = ["evaluation stack"]
+short = "The stack that bytecode instructions push values onto and pop operands from, instead of using registers."
+text = '''
+`load a; load b; add` pushes `a`, pushes `b`, then pops both and pushes `a + b`. Operands come
+first, the operation after them. The JVM, CIL, CPython and WebAssembly all work this way.
+'''
+see = ["bytecode", "stack machine"]
+
+[[term]]
+term = ".NET"
+aliases = ["dotnet", "CLR", "Common Language Runtime", "C#"]
+short = "Microsoft's managed platform. C# compiles to CIL inside a normal-looking .exe or .dll, run by the CLR."
+see = ["CIL", ".NET assembly", "managed runtime"]
+
+[[term]]
+term = ".NET assembly"
+aliases = [".NET assemblies", ".NET executable"]
+short = "A .exe or .dll that contains .NET code: a PE file with a CLI header pointing to metadata and CIL."
+text = '''
+Note the different meaning of "assembly" here: in .NET it is a unit of deployment (a .dll or
+.exe), not assembly language. ORRESS's Info view names .NET files in its detections, and the
+**.NET View** shows their types, methods, CIL and user strings.
+'''
+see = [".NET", "CIL", "PE"]
+
+[[term]]
+term = "CIL"
+aliases = ["IL", "MSIL", "Common Intermediate Language"]
+short = "The bytecode of .NET. Stack-based, with instructions such as ldloc, ldarg, add, xor, ceq and ret."
+see = [".NET", "operand stack"]
+
+[[term]]
+term = "user strings"
+aliases = ["user string heap", "user-string heap"]
+short = "The table in a .NET assembly that holds every string literal of the program."
+see = [".NET assembly", "metadata"]
+
+[[term]]
+term = "JVM"
+aliases = ["Java Virtual Machine", "JVM bytecode", "Java bytecode"]
+short = "The runtime that executes Java (and Kotlin) bytecode from .class files."
+see = ["class file", "constant pool", "managed runtime"]
+
+[[term]]
+term = "class file"
+aliases = ["class files", ".class"]
+short = "A compiled Java class: metadata, constant pool and bytecode. Starts with the bytes CA FE BA BE."
+see = ["JVM", "JAR"]
+
+[[term]]
+term = "JAR"
+aliases = [".jar", "JAR file", "JAR files"]
+short = "A Java archive: a zip file of .class files plus a manifest that names the main class."
+see = ["class file"]
+
+[[term]]
+term = "APK"
+aliases = [".apk", "dex", ".dex", "Dalvik"]
+short = "An Android app: a zip file whose code is in .dex files (Dalvik bytecode)."
+see = ["JAR"]
+
+[[term]]
+term = "constant pool"
+aliases = ["constant pools"]
+short = "The table in a Java class file that holds its strings, numbers and the names of everything it references."
+see = ["class file", "metadata"]
+
+[[term]]
+term = "method descriptor"
+aliases = ["descriptor", "descriptors", "method descriptors"]
+short = "Java's compact notation for a method's types, e.g. (Ljava/lang/String;)Z takes a String and returns a boolean."
+see = ["JVM"]
+
+[[term]]
+term = "CPython"
+aliases = ["Python bytecode", "CPython bytecode"]
+short = "The standard Python interpreter, which compiles .py source to bytecode and runs it."
+see = ["pyc", "managed runtime"]
+
+[[term]]
+term = "pyc"
+aliases = [".pyc", "pyc file", "pyc files"]
+short = "A compiled Python file: a version-specific 4-byte magic number (ending 0D 0A), a header, and marshalled code objects."
+see = ["CPython", "PyInstaller"]
+
+[[term]]
+term = "PyInstaller"
+short = "A tool that packs a Python program and the Python runtime into one .exe. Inside are .pyc files you can extract."
+see = ["pyc"]
+
+[[term]]
+term = "WebAssembly"
+aliases = ["Wasm", ".wasm"]
+short = "A low-level stack bytecode for browsers and standalone runtimes; C, C++ and Rust compile to it. Starts with 00 61 73 6D."
+see = ["WAT", "linear memory", "bytecode"]
+
+[[term]]
+term = "WAT"
+aliases = ["WebAssembly Text"]
+short = "The readable text form of WebAssembly, with instructions such as local.get, i32.const and i32.xor."
+see = ["WebAssembly"]
+
+[[term]]
+term = "linear memory"
+aliases = ["Wasm memory"]
+short = "A WebAssembly module's memory: one big array of bytes that all its loads and stores use."
+see = ["WebAssembly"]
+
+[[term]]
+term = "JavaScript"
+aliases = ["JS", ".js"]
+short = "The language of web pages, shipped as source text, so it is minified or obfuscated instead of compiled."
+see = ["minification"]
+
+[[term]]
+term = "minification"
+aliases = ["minified", "minify", "minifier"]
+short = "Shrinking source code by removing whitespace and shortening names to a, b, c. A beautifier puts the layout back."
+see = ["JavaScript", "beautify"]
+
+[[term]]
+term = "beautify"
+aliases = ["beautifier", "beautified", "pretty-print"]
+short = "Re-indenting and re-formatting minified code so it becomes readable again."
+see = ["minification"]
+
+[[term]]
+term = "ConfuserEx"
+aliases = ["ProGuard"]
+short = "Obfuscators for managed code (ConfuserEx for .NET, ProGuard for Java) that rename symbols, encrypt strings and scramble control flow."
+see = ["obfuscation", "managed code"]

@@ -1,0 +1,167 @@
+id = "l5-packers"
+level = 5
+order = 35
+title = "Packers and unpacking"
+summary = "Why a packed binary looks like noise, how to recognise one from entropy and sections, and how to get to the real code."
+badge = "Unpacker"
+goals = [
+    "explain what a packer does and why the real code is missing on disk",
+    "recognise packing from entropy, section names and a nearly empty import table",
+    "read a section's entropy in ORRESS's Sections view",
+    "describe how to reach the Original Entry Point and dump the unpacked image",
+]
+
+[[steps]]
+title = "What is a packer?"
+goal = "Understand what packing does to a program."
+text = '''
+A **packer** takes a finished program, **compresses or encrypts** its real code and data
+into a blob, and glues on a small **unpacking stub**. When you run the packed file, the
+stub does its work first: it decompresses or decrypts the original program back into
+memory, then **jumps to it**.
+
+Packers exist for good reasons (smaller files — **UPX** is the classic) and bad ones
+(hiding malware from scanners and analysts). Either way, the effect on static analysis is
+the same: on disk, the real program is not there in a readable form yet — only the stub
+and a blob.
+
+So if you open a packed binary and the disassembly looks like garbage with almost no
+recognisable logic, that is expected. You are looking at the wrapper, not the program.
+This is the same lesson as flattening and VMs, one layer out: the behaviour is only
+present at run time, so you make the program produce it, then analyse the result.
+'''
+
+[[steps]]
+title = "Why packed code looks wrong"
+goal = "Learn the on-disk shape of a packed executable."
+text = '''
+A packed executable has a very different shape from a normal one:
+
+- A **tiny code section** (just the stub) and a **large, high-entropy section** (the
+  packed blob).
+- **Very few imports** — the stub resolves the real imports *at run time*, after
+  unpacking, so the import table on disk is nearly empty.
+- Odd **section names** (`UPX0`/`UPX1` for UPX, random-looking names for others) and often
+  a section that is writable *and* executable.
+- The stub ends with a **tail jump** into the section it just unpacked — a jump into what
+  looked like data. That target is the **Original Entry Point (OEP)**: where the real
+  program starts.
+
+Spotting these on disk tells you to switch strategy: you will have to let the program
+unpack itself and grab the result.
+'''
+deep_dive = '''
+A normal Windows program's imports (its Import Address Table) name dozens of API functions
+by name. A packed one often imports just `LoadLibraryA` and `GetProcAddress` — the two
+functions the stub needs to rebuild everything else. A nearly empty import table full of
+those two names is itself a packing tell.
+'''
+
+[[steps]]
+title = "Recognising a packer"
+goal = "Pick the combination that signals packing."
+text = '''
+You open an executable. Which combination most strongly says "this is packed"?
+'''
+check = { kind = "choice", options = [
+  "High entropy, almost no imports, and a jump from the stub into a non-code section",
+  "It is a large file",
+  "It imports many Windows APIs",
+  "It has lots of printable strings",
+], correct = 0, explain = [
+  "Right — high entropy, a stripped import table, and a tail jump into 'data' are the tell-tale trio.",
+  "Wrong — file size alone says nothing; plenty of large programs are not packed and packed files are often small.",
+  "Wrong — that is what a normal program looks like. A packed one hides its imports until run time.",
+  "Wrong — packed code is compressed/encrypted, so readable strings are scarce until it unpacks.",
+] }
+hints = [
+  "A normal program imports plenty of APIs and has readable strings; a packed one hides both until run time.",
+  "High entropy + a nearly empty import table + a tail jump to the OEP is the classic trio.",
+]
+success = "High entropy, a stripped import table, and a tail jump into 'data' are the signs. The strongest single number among them is entropy."
+
+[[steps]]
+title = "Entropy"
+goal = "Know the maximum entropy of a byte and why it matters."
+text = '''
+**Entropy** measures how random a chunk of bytes is (you met it when reading sections in
+the static-analysis level). Normal x86 code sits around 6 bits per byte; English text is
+lower. Compressed or encrypted data looks *random*, so its entropy climbs close to the
+maximum.
+
+What is the maximum possible entropy of a byte, in bits? (A byte has 256 possible values,
+and entropy in bits is log2 of the number of equally likely values.)
+'''
+instructions = [
+  "Compute log2(256).",
+  "Type the number of bits and press Check.",
+]
+check = { kind = "answer", answers = ["8"], number = true }
+hints = ["Entropy in bits is log2(number of possible values). For a byte that is log2(256).", "2 to the power 8 is 256, so log2(256) = 8."]
+success = "8 bits — and packed sections push right up near it, which is why high entropy flags packing. ORRESS warns when an executable section's entropy passes about 7.2."
+
+[[steps]]
+title = "Read entropy in the Sections view"
+goal = "Find the per-section entropy ORRESS shows."
+text = '''
+You do not have to compute entropy yourself — ORRESS shows it per section. Open the
+**Sections** view for a file and look at the **Entropy** column (a bar plus a number, 0 to
+8) and the **Perms** column (`R`/`W`/`X`; a writable *and* executable section is flagged).
+
+Open crackme #5 and look at its sections. You will see this file is **not** packed: its
+`.text` entropy is around 6.4 (normal machine code), and its import table and strings are
+intact. That is the useful contrast — knowing what "not packed" looks like is how you
+notice when something *is*. On a UPX-packed file the same view would show `UPX0`/`UPX1`
+sections with entropy near 8.
+'''
+instructions = [
+  "Click **Open crackme05** on this step.",
+  "Open the **Sections** view: command palette (**Ctrl+Shift+P**) -> type \"Sections\", or **View** menu -> **This File** -> **File: Sections**.",
+  "Read the **Entropy** column for the `.text` section and note it is around 6.4, not near 8.",
+]
+spotlight = "tree.Sections"
+check = { kind = "view", view = "Sections" }
+hints = [
+  "The Sections view lists every section with an Entropy bar and number.",
+  "If you do not see it in a menu, open the command palette with Ctrl+Shift+P and type \"Sections\".",
+]
+success = "You read entropy straight from the Sections view. Around 6.4 for code is normal; a section near 8 is your packing alarm."
+
+[[steps]]
+title = "Let ORRESS flag it"
+goal = "Know where a packed verdict shows up."
+text = '''
+For a genuinely packed file, two ORRESS features call it out:
+
+- **Info** (the "What is this file?" view) reports high overall entropy and any detected
+  packer, with a note that the real code appears only at run time.
+- **Triage** classifies the file as **packed** — either from a known packer signature or
+  from an executable section whose entropy passes ~7.2 — and tells you the real logic is
+  hidden until it is unpacked. It also lists **unpacking** among its suggested techniques.
+
+Neither can show you the hidden code directly, because that code does not exist on disk
+yet. What they do is tell you *which* strategy to switch to. For packing, that strategy is
+to let the program unpack itself.
+'''
+
+[[steps]]
+title = "Getting to the real code"
+goal = "Walk the unpacking workflow."
+text = '''
+You cannot read what is not unpacked yet, so you make the program unpack itself and capture
+the result:
+
+1. **Run it to the OEP.** Set a breakpoint after the unpacking stub (often right at that
+   tail jump into the unpacked section), or single-step the stub in the **Emulator**,
+   which applies every memory write. When execution reaches the **OEP**, the real program
+   is now sitting in memory, decrypted.
+2. **Dump the unpacked image** from memory and **re-analyse the dump** — now the
+   disassembly, imports and strings are all there.
+3. **Known packer?** Use its unpacker directly — for **UPX**, `upx -d` restores the
+   original in one step.
+
+That is the whole game: recognise packing from its shape, let it unpack, then analyse the
+real thing. For malware, always do this in a safe lab (see the Malware Analysis level).
+Self-modifying code, the next lesson, uses the very same run-then-read trick on a smaller
+scale.
+'''

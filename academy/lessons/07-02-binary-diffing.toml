@@ -1,87 +1,295 @@
 id = "l7-binary-diffing"
 level = 7
-order = 51
+order = 2
 title = "Binary diffing"
-summary = "Compare two related binaries to see exactly what changed: how structural matching works, patch diffing for 1-days, and ORRESS's Binary Diff tab."
+summary = "Compare two versions of a program function by function, and find exactly what a security patch changed."
+goals = [
+    "explain why two builds of a program differ in thousands of bytes even when the code barely changed",
+    "describe how function matching works: signatures, opcode hashes and similarity scores",
+    "compare two binaries in ORRESS's Binary diff tab and read the result",
+    "use patch diffing to find and understand a fixed security bug",
+]
 badge = "Patch Analyst"
 
 [[steps]]
-title = "Comparing two binaries"
+title = "Two versions of one program"
+goal = "See why the difference between two binaries is often the interesting part."
 text = '''
-Often you don't have one binary to understand — you have **two related ones**, and the interesting thing is the **difference** between them:
+Often you do not have one program to understand, but **two related ones**, and the question is what is different between them:
 
-- A program **before and after a security patch** — what did the vendor fix?
-- **Two samples of a malware family** — what did the author add or change in the new variant?
-- **Two builds of a library** — did this function really change, or just move?
+- A program **before and after a security update**. The vendor says "fixed a security issue" and nothing more. What was the bug?
+- **Two samples of the same malware family.** What did the authors add in the new version?
+- **Two builds of your own program.** Did a compiler update or a small source change do something you did not expect?
 
-**Binary diffing** answers these. It matches up the functions in the two binaries and labels each one: the same, changed, newly added, or removed. Instead of re-reading the whole program, you go straight to what's new.
+Reading both programs completely would take days. **Binary diffing** takes two binaries, pairs up the functions that belong together, and tells you which functions are the same, which changed, which are new and which are gone. You then read only the few functions that matter.
+
+In this lesson you play a security researcher. KeyVault 1.0 (crackme17, from the previous lesson) has a bug that customers reported. The vendor released KeyVault 1.1 (crackme18) "with security improvements". You have no source code. Your task: find out what was fixed, and what an attacker could do with version 1.0.
 '''
 
 [[steps]]
-title = "Why you can't just compare bytes"
+title = "Why comparing bytes does not work"
+goal = "Understand that addresses shift when code changes."
 text = '''
-You can't `diff` two executables byte-for-byte. Recompiling even a single changed line shifts every address after it, may reorder functions, and rewrites relocations — so thousands of bytes differ even when the *logic* is almost identical. A raw byte diff is a sea of noise.
+Your first idea might be to compare the two files byte by byte, like the `diff` tool compares text files. That fails completely, and the reason is **addresses**.
 
-The trick is to compare at the **function level**, using a **position-independent signature** for each function:
+The compiler places functions one after another. If one function grows by 32 bytes, every function after it moves 32 bytes further. Every `call` and every reference to data now contains a different address. Here is the start of `main` in both versions of KeyVault:
 
-- Its **shape**: how many instructions, basic blocks, control-flow edges and calls it has.
-- An **opcode hash**: a hash of the instruction opcode sequence that deliberately ignores the operand addresses, so it survives relocation.
+```text
+crackme17 (1.0)                          crackme18 (1.1)
+140001100  push rsi                      140001120  push rsi
+140001101  sub  rsp,0x60                 140001121  sub  rsp,0x60
+140001105  lea  rcx,[0x1400193d0]        140001125  lea  rcx,[0x1400193e6]
+14000110c  mov  edx,0x67                 14000112c  mov  edx,0x67
+140001111  call sub_140005a30            140001131  call sub_140005a70
+```
 
-Two functions with the same shape and opcode hash are the *same code*, even at different addresses. Matching by structure, not location, is what makes diffing work.
+The instructions are the same. Only the addresses differ: `main` itself moved by `0x20` bytes, the text it prints moved, and the function it calls moved. A byte comparison reports thousands of differences that mean nothing.
+
+So diffing tools compare **functions**, and describe each function in a way that does **not** depend on where it is in memory.
 '''
 
 [[steps]]
-title = "The four verdicts"
+title = "A fingerprint for every function"
+goal = "Know what ORRESS compares when it matches functions."
 text = '''
-After matching, every function falls into one of four buckets: **identical** (matched, same code), **changed** (matched, but the code differs — with a similarity score), **added** (only in the new binary), and **removed** (only in the old one).
+ORRESS describes each function with a **function signature** (a fingerprint), made of two parts.
 
-A function that exists in the new build but has no counterpart in the old build is classed as which?
+1. **Its shape:** the number of instructions, **basic blocks**, edges between blocks (the arrows in the graph view) and calls.
+2. **An opcode hash:** ORRESS walks over the function's instructions and feeds each mnemonic and its operands into a hash, but replaces every **address** (jump targets, call targets, data references, large numbers) with a placeholder. Registers and small numbers stay in.
+
+In Rust it would look like this:
+
+```rust
+struct FuncSig {
+    insns: u32, blocks: u32, edges: u32, calls: u32, // the shape
+    opcode_hash: u64,                                // the instructions, without addresses
+}
+```
+
+Because addresses are left out, `call sub_140005a30` and `call sub_140005a70` hash the same, and the two `main` functions above get the same fingerprint. But a real change, such as `jz` turned into `jnz`, or `cmp rdx,8` turned into `cmp rdx,10`, changes the hash.
 '''
 check = { kind = "choice", options = [
-  "Added — it's new in this build",
-  "Identical",
-  "Removed",
-  "Changed",
-], correct = 0 }
+    "A `cmp rdx,8` was changed into `cmp rdx,10`",
+    "The whole function moved to a different address",
+    "The function now calls a helper that moved to another address",
+    "A string the function prints moved to another place in the data",
+], correct = 0, explain = [
+    "Right. 8 and 10 are small numbers, so they are part of the hash. A changed constant is a real change in the logic.",
+    "Moving changes only addresses, and addresses are replaced by a placeholder. The hash stays the same.",
+    "Call targets are addresses, so they are left out of the hash.",
+    "The reference to the string is an address. It is replaced by the placeholder, so the hash does not change.",
+] }
 hints = [
-  "It appears in the new binary and matches nothing in the old one.",
-  "'Removed' is the opposite case: present in the old binary, gone from the new.",
+    "Which of these changes involves something that is not an address?",
+    "Small numbers and registers stay in the hash; addresses do not.",
 ]
-success = "Right — a function present only in the newer binary is Added; one present only in the older binary is Removed."
+success = "That is the key idea of binary diffing: ignore where things are, compare what they do."
 
 [[steps]]
-title = "Patch diffing and 1-days"
+title = "Matching and the four verdicts"
+goal = "Understand how functions are paired and what each verdict means."
 text = '''
-The most famous use of binary diffing is **patch diffing**. Take a binary and its freshly patched version, diff them, and the functions that come back **changed** are exactly where the vendor altered something — very often a **security fix**.
+With a fingerprint for every function in both programs, ORRESS **matches** them in rounds, from most to least certain:
 
-This cuts both ways. Defenders diff a patch to understand what was vulnerable. Attackers do the same to build an exploit for the bug *before* everyone installs the update — a **"1-day"** (the window between a patch shipping and systems applying it).
+1. Same **name** (only real names from symbols or imports, never `sub_...`).
+2. Same **opcode hash**, if exactly one function on each side has it.
+3. Same **shape**, if exactly one function on each side has it.
+4. For what is left: the most similar pair, if the **similarity score** is above 0.5. The score is a weighted comparison of the shapes: instructions count 40%, blocks 30%, edges 20%, calls 10%.
 
-Which of the four verdicts points you straight at the code the patch modified? (One word.)
+Then every function gets one of four **verdicts**:
+
+| Verdict | Meaning |
+|---|---|
+| **identical** | matched, and the code is the same |
+| **changed** | matched, but the code differs; shown with the similarity, e.g. `~82%` |
+| **added** | only in the second binary (B): new code |
+| **removed** | only in the first binary (A): code that was deleted |
+
+For **patch diffing**, the **changed** and **added** lists are the gold. A security fix usually changes one or two functions (a new check, a different constant) and sometimes adds a small helper.
+
+A function exists in version 1.1 (B) but has no partner in version 1.0 (A). Which verdict does it get?
 '''
-check = { kind = "answer", answers = ["changed"], number = false, case_sensitive = false }
-hints = ["Not added or removed — the function exists in both, but its code is different.", "It's the bucket that carries a similarity score."]
-success = "Changed — those are the functions the patch touched. Read them (and any new bounds or size checks) to find what was fixed."
-
-[[steps]]
-title = "Binary diffing in ORRESS"
-text = '''
-ORRESS has a **Binary Diff** tab. Open it, click **"Compare against another binary…"**, and pick the second file. ORRESS analyses it, matches its functions against the open binary, and shows a **summary** — how many identical, changed, added and removed — followed by the lists. Each **changed** pair carries a **similarity score** (0 to 1) telling you how much it changed.
-
-Open the **Binary Diff** tab (the View menu, or the command palette — search for "diff").
+check = { kind = "choice", options = [
+    "Added",
+    "Removed",
+    "Changed",
+    "Identical",
+], correct = 0, explain = [
+    "Right. It exists only in the second binary, so it is new code.",
+    "Removed is the opposite: a function that exists only in the first binary.",
+    "Changed needs a partner in the other binary. This function has none.",
+    "Identical also needs a partner with the same code.",
+] }
+hints = [
+    "The question is about a function that exists only in version B.",
+]
+deep_dive = '''
+Professional tools such as BinDiff and Diaphora use more features: the call graph (who calls whom), constants, strings, and a comparison of the basic blocks inside each matched pair. ORRESS's matcher is simpler and fast. Its weak spot is step 4: when two unrelated functions happen to have a very similar shape, it can pair the wrong ones. If a match looks strange, open both functions and check them yourself.
 '''
-check = { kind = "action", id = "view::Diff" }
-hints = ["Ctrl+Shift+P, then type \"diff\" — or the View menu."]
 
 [[steps]]
-title = "A diffing workflow"
+title = "Open version 1.1"
+goal = "Get crackme18 onto your disk and into ORRESS."
 text = '''
-Put it together into a repeatable method:
+To compare the two versions, both files must be on your disk. When you open a practice program with a lesson button, ORRESS saves it in its own folder, next to the other crackmes:
 
-1. **Open version A**, then **Compare against** version B.
-2. **Read the summary.** A handful of changed/added functions in a big binary tells you the change is small and targeted — zoom in on those.
-3. **Work the changed list by similarity.** The lowest (but non-zero) similarity scores are the functions that changed the *most* — usually the heart of the patch or variant.
-4. **Inspect each changed pair.** Open both in the decompiler and read what differs: a new length check, a different constant, an added call. For a patch, that's your vulnerability; for malware, that's the new feature.
-5. **Check Added functions** for brand-new capability (a new C2 routine, a new command handler).
+- on Windows: `%APPDATA%\okiedocus\ORRESS\config\academy\crackmes`
+- on Linux: `~/.config/orress/academy/crackmes`
+- on macOS: `~/Library/Application Support/nl.okiedocus.ORRESS/academy/crackmes`
 
-Binary diffing turns "what changed between these two?" from a re-read of the whole program into a short, focused list. It's how 1-days get found and how malware families get tracked across versions.
+You do not have to remember this: the menu **File > Open Recent** shows the full path of every file you opened.
+
+Open crackme18 now. In the next step you open crackme17 again, so that version 1.0 is the **active** file (the one the Binary diff tab compares from).
+'''
+instructions = [
+    "Click the **Open crackme18** button below this text.",
+]
+check = { kind = "open_crackme", name = "crackme18" }
+hints = ["The button is part of this lesson step."]
+success = "crackme18.exe is now saved in the crackmes folder and open in ORRESS."
+
+[[steps]]
+title = "Make version 1.0 the active file"
+goal = "Open crackme17 so it is file A of the comparison."
+text = '''
+The **Binary diff** tab always compares the **active file** (it calls it **A**) with a second file you pick (**B**). The active file is the one whose tab you used last.
+
+Put the old version on the A side and the new version on the B side. Then "added" means "new in the update" and "removed" means "deleted by the update", which is the natural way to read a patch.
+'''
+instructions = [
+    "Click the **Open crackme17** button below this text.",
+]
+check = { kind = "open_crackme", name = "crackme17" }
+hints = ["The button is part of this lesson step."]
+success = "crackme17 (version 1.0) is the active file now."
+
+[[steps]]
+title = "Run the diff"
+goal = "Compare 1.0 with 1.1 and read the summary."
+text = '''
+Now compare. The Binary diff tab shows `A: crackme17.exe (... functions)`, a button to pick B, and after the comparison:
+
+- a line `B: crackme18.exe (...)`,
+- a bold summary line: `identical ...   changed ...   added ...   removed ...`,
+- the lists **Changed**, **Added (only in B)** and **Removed (only in A)**. Functions without a real name are shown as `sub_` plus their address.
+
+Analysing B takes a few seconds; a spinner with "analyzing and diffing..." is shown meanwhile.
+'''
+instructions = [
+    "Open the menu **View > Open View** and click **Binary diff**.",
+    "Check that the first line says `A: crackme17.exe`. If it says crackme18.exe, click a `crackme17.exe` tab first and come back.",
+    "Click **Compare against another binary...**.",
+    "In the file dialog, go to the crackmes folder (see the previous steps, or **File > Open Recent**), select `crackme18.exe` and click **Open**.",
+    "Wait for the summary line. Look at the list **Added (only in B)**.",
+    "Type the address of the added function (the part after `sub_`, with `0x` in front) in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001100"], number = true }
+hints = [
+    "The summary should read `identical 419   changed 1   added 1   removed 0`.",
+    "There is one entry under **Added (only in B)**: `sub_140001100`.",
+    "Type `0x140001100`.",
+]
+success = '''Out of about 420 functions, 419 are identical: all the Rust library code, and `main`, even though they moved. One function changed and one was added. That is the whole security update, found in seconds.'''
+
+[[steps]]
+title = "The changed function"
+goal = "Identify the changed pair."
+text = '''
+Look at the **Changed** list. Each line shows the function in A, an arrow, the matching function in B, and the similarity, for example `sub_1400012c0 -> sub_1400012e0  ~82%` (ORRESS draws a real arrow).
+
+You know `sub_1400012c0` from the time-travel lesson: it is `check_key` in version 1.0. So the vendor changed the key check, and added a new function next to it. The similarity tells you how big the change is: 100% would be identical code, around 80% means "mostly the same, with something added".
+
+In which order should you read things? Start with the **added** function: new, small helpers in a patch are often the fix itself. Then compare the changed pair to see how the helper is used.
+'''
+instructions = [
+    "In the **Binary diff** tab, read the line under **Changed**.",
+    "Type the similarity percentage (just the number, without `~` and `%`) in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["82"], number = true }
+hints = [
+    "The line ends with `~` followed by a number and `%`.",
+    "The line is `sub_1400012c0 -> sub_1400012e0  ~82%`. Type `82`.",
+]
+success = "82% similar: the old `check_key` is still there in 1.1, at `0x1400012e0`, with something new around it."
+
+[[steps]]
+title = "Read the added function"
+goal = "Decompile the new helper in version 1.1 and see what it checks."
+text = '''
+The added function lives in crackme18, so look at it there. Open crackme18's disassembly, jump to `0x140001100`, and press **F5** for the decompiler. You will see something like this:
+
+```rust
+fn sub_140001100(a1: &[u8]) -> bool {
+    if a1.len() != 10 { return false; }
+    if a1[3] != b'-' { return false; }
+    return a1[8] == b'-';
+}
+```
+
+So the new helper checks the **shape** of the key: its length and two dashes. Read it in the decompiler yourself and answer: how long must a key be?
+'''
+instructions = [
+    "Click any tab whose name starts with `crackme18.exe` (for example `crackme18.exe · Info`) so crackme18 is the active file.",
+    "Press **Ctrl+D** to open its **Disassembly**.",
+    "Press **Ctrl+G**, type `140001100` and press **Enter**.",
+    "Press **F5** to open the **Decompiler** for this function.",
+    "Read the first `if`. Type the required key length (a decimal number) in the answer box and press **Check**.",
+]
+spotlight = "view.Decompiler"
+check = { kind = "answer", answers = ["10"], number = true }
+hints = [
+    "The first line of the function compares `a1.len()` with a number.",
+    "In the disassembly the same check is `cmp rdx,0xa`. `0xa` is 10 in decimal.",
+    "The key must be 10 bytes long. Type `10`.",
+]
+success = "Version 1.1 refuses every key that is not exactly 10 bytes long, with dashes at positions 3 and 8, before it compares a single byte."
+
+[[steps]]
+title = "What was the bug?"
+goal = "Use the diff to understand the vulnerability in version 1.0."
+text = '''
+Now compare the two versions of `check_key`. Version 1.1 first calls the new helper. Version 1.0 goes straight into the byte loop, and that loop runs `while i < key.len()`: over the bytes **you typed**, not over the 10 bytes of the real key. Remember the trace: the loop stopped when `r9` reached the length in `rdx`.
+
+So what happens in version 1.0 when the key is shorter than 10 bytes? The loop compares only the bytes that are there. If they are all correct, it ends and returns `true`. For a key of length 0 it compares **nothing** at all.
+
+This kind of bug is a classic: the program lets the attacker decide how much is checked. It is an **authentication bypass**, and diffing the patch revealed it without the source code. Which key does version 1.0 accept but version 1.1 reject?
+'''
+check = { kind = "choice", options = [
+    "An empty key (just press Enter)",
+    "The real key, `ORR-DIFF-7`",
+    "`AAAAAAAAAA` (ten letters A)",
+    "`ORR-DIFF-8`",
+], correct = 0, explain = [
+    "Right. With length 0 the loop in 1.0 never runs and the function returns true. Version 1.1 rejects it because the length is not 10.",
+    "Both versions accept the real key. That is not the bug.",
+    "Both versions reject it: in 1.0 the first byte already does not match.",
+    "Both versions reject it: it has the right length and dashes, but the last byte is wrong.",
+] }
+hints = [
+    "In version 1.0, how many bytes are compared when the key has length 0?",
+    "A loop `while i < 0` never runs, and the function then returns true.",
+]
+success = '''Exactly. You can try it: run crackme17 in a terminal and press Enter at the prompt, and it says "Access granted". In the real world, a bug found this way in a patch is called a **1-day**: it is already fixed, but every system that has not installed the update yet is open to it. Defenders diff patches to judge how urgent an update is; attackers do it to exploit the gap.'''
+
+[[steps]]
+title = "A patch-diffing workflow"
+goal = "Take away a repeatable method."
+text = '''
+The method you just used works for any two versions of a program:
+
+1. **Open the old version** and make it the active file (A).
+2. **Compare** against the new version (B) in **View > Open View > Binary diff**.
+3. **Read the summary.** A few changed or added functions in a big program means a small, targeted change. Hundreds of changes usually mean a different compiler or settings, and the diff is mostly noise.
+4. **Read the added functions first.** Small new helpers are often the fix (or, in malware, the new feature).
+5. **Compare each changed pair.** Decompile the function in A, then its partner in B, and look for new checks, changed constants and new calls. To see both disassemblies at once, use **View > Split Pane Right** and show one file on each side.
+6. **Explain the bug** in one sentence: what could an attacker do with the old version?
+
+The same comparison is available outside the window, too: the `orress-mcp` program offers it as the tool `binary_diff`, so an AI agent or a script can diff many pairs of files. You will meet that in the scripting lesson.
+'''
+deep_dive = '''
+Real patch diffing has some extra hurdles:
+
+- **Symbols help a lot.** Microsoft publishes symbol files (PDB) for Windows system files, so names make matching much more reliable. ORRESS uses names first whenever they exist.
+- **Updates contain more than the fix.** A monthly update may change hundreds of functions. Filter by the components named in the security advisory, then sort by similarity: functions with high but not perfect similarity (a small change) are the most likely fixes.
+- **Inlining moves code around.** If the compiler copied a small function into its callers, the fix may show up in several changed functions at once.
 '''

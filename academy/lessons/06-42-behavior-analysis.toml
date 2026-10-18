@@ -1,12 +1,19 @@
 id = "l6-behavior-analysis"
 level = 6
-order = 43
+order = 42
 title = "Behaviour analysis"
 summary = "Watch what a sample actually does when it runs: the behavioural domains, mapping actions to intent, and ORRESS's guarded sandbox."
 badge = "Behaviourist"
+goals = [
+    "explain how behaviour analysis differs from static triage",
+    "name the behavioural domains (process, file, registry, network, image)",
+    "map an observed action (copy + Run key) to intent (persistence)",
+    "say what ORRESS's Sandbox enforces and what it can and cannot show",
+]
 
 [[steps]]
 title = "From capabilities to behaviour"
+goal = "See why running a sample reveals what static analysis cannot."
 text = '''
 Static triage told you what a sample **can** do — the APIs it imports, the capabilities those imply. **Behaviour analysis** watches what it **actually does** when you run it: the real sequence of actions it takes against the system.
 
@@ -57,6 +64,11 @@ ORRESS has a **Sandbox** view built for exactly this — and it enforces the saf
 
 Open the **Sandbox** view (the View menu, or the command palette).
 '''
+instructions = [
+    "Open the **View** menu -> **Open View** -> **Open Sandbox**.",
+    "(Or press **Ctrl+Shift+P** and type \"Sandbox\".)",
+    "Read the VM-status line at the top, then scroll down to the **Policy** section and its checkboxes.",
+]
 check = { kind = "action", id = "view::Sandbox" }
 spotlight = "view.Sandbox"
 hints = ["Ctrl+Shift+P, then type \"Sandbox\" — or the View menu."]
@@ -68,6 +80,7 @@ When the sample runs, the sandbox produces a **log of events**, each tagged with
 
 Which single domain (one word, as the sandbox labels it) covers the sample **resolving a domain name, beaconing to its C2, and downloading a second stage**?
 '''
+instructions = ["Type the one-word domain name (as the Sandbox activity log labels it) and press Check."]
 check = { kind = "answer", answers = ["network"], number = false, case_sensitive = false }
 hints = ["It's the domain about talking to other machines.", "DNS, connections and downloads all fall under this category."]
 success = "Network — and FakeNet lets you watch all of it (the domains it resolves, the URLs it fetches) without letting the traffic escape."

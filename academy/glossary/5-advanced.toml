@@ -1,0 +1,480 @@
+# Glossary terms introduced at Level 5 (Advanced): obfuscation, control-flow
+# flattening, virtual-machine protections, packers, self-modifying code, and other
+# CPU architectures. Terms taught in earlier levels (bytecode, entropy, register,
+# stack, basic block, disassembly, emulator ...) are defined there and reused here.
+
+[[term]]
+term = "obfuscation"
+aliases = ["obfuscated", "obfuscate", "obfuscator", "obfuscators"]
+short = "Rewriting a program so it still does the same thing but is much harder to read."
+text = '''
+**Obfuscation** transforms a program into an equivalent one that is painful to
+understand. The behaviour is unchanged; only the *form* is scrambled. It is used to
+protect commercial software and licence checks, to hide malware from analysts, and by
+CTF authors to make a challenge harder.
+
+Common tricks: renaming everything to noise, inserting code that does nothing
+(**junk code**), guarding real code with conditions that are always true or false
+(**opaque predicates**), chopping a function into a dispatch loop (**control-flow
+flattening**), and replacing the code with bytecode for a made-up CPU (**VM-based
+obfuscation**).
+'''
+see = ["deobfuscation", "junk code", "opaque predicate", "control-flow flattening", "VM-based obfuscation"]
+
+[[term]]
+term = "deobfuscation"
+aliases = ["deobfuscate", "deobfuscated", "deobfuscating"]
+short = "Undoing obfuscation to get code back into a readable form."
+text = '''
+**Deobfuscation** reverses obfuscation: it recovers code you can actually read. Some of
+it is automatic — ORRESS's decompiler folds away opaque predicates and undoes
+control-flow flattening, printing a `// deobfuscated by ORRESS` note when it does — and
+some is manual, like reversing a custom VM by hand.
+'''
+see = ["obfuscation", "control-flow flattening", "devirtualization"]
+
+[[term]]
+term = "control-flow flattening"
+aliases = ["flattening", "flattened", "flatten", "unflatten", "unflattening", "control flow flattening"]
+short = "Obfuscation that turns a function's branches into one big dispatcher loop driven by a state variable."
+text = '''
+Normal code flows like a straight line with `if`s and loops. **Control-flow flattening**
+destroys that shape: every original basic block becomes one arm of a single `switch`
+inside a loop, and each arm sets a **state variable** that chooses the next arm. The
+real order is hidden inside the state numbers, so you can no longer read the logic top to
+bottom. The compiler toolchain OLLVM is a well-known source of it.
+
+To **unflatten** by hand: read each arm, note which state it jumps to next, and relink
+the arms into their real order. ORRESS's decompiler does this automatically.
+'''
+see = ["dispatcher", "state variable", "deobfuscation"]
+
+[[term]]
+term = "dispatcher"
+aliases = ["dispatch loop", "dispatch", "dispatches"]
+short = "The central block a flattened function or a VM interpreter jumps back to, to pick what runs next."
+text = '''
+A **dispatcher** is the switchboard at the heart of a flattened function or a bytecode
+interpreter. It reads a value (a state number, or the next opcode), and jumps to the
+block that handles it. Every arm runs, then jumps back to the dispatcher for the next
+one, so in a control-flow graph the dispatcher is a single block that *many* other blocks
+branch back to — it has a very high **fan-in**.
+'''
+see = ["state variable", "fan-in", "handler", "fetch-decode-execute"]
+
+[[term]]
+term = "state variable"
+aliases = ["state variables"]
+short = "The number a flattened function keeps to remember which block runs next."
+text = '''
+In a control-flow-flattened function the **state variable** holds the number of the block
+to run next. Each arm of the dispatcher ends by setting the state variable, which sends
+control back to the dispatcher and on to the chosen arm. Recovering the mapping from
+state number to block is how you unflatten the function by hand.
+'''
+see = ["control-flow flattening", "dispatcher"]
+
+[[term]]
+term = "opaque predicate"
+aliases = ["opaque predicates"]
+short = "A condition that always evaluates the same way but is written so it looks like it might go either way."
+text = '''
+An **opaque predicate** is a test the obfuscator knows the answer to in advance but which
+is not an obvious constant — for example `(x | 1) != 0` (always true) or `(x & 1) == 2`
+(always false). It adds fake branches and dead arms to confuse you. ORRESS proves many of
+them with a known-bits analysis and folds them away, deleting the bogus branch.
+'''
+see = ["obfuscation", "junk code", "deobfuscation"]
+
+[[term]]
+term = "junk code"
+aliases = ["junk instructions"]
+short = "Instructions inserted only to pad and confuse; they have no effect on the result."
+text = '''
+**Junk code** is filler the obfuscator adds — instructions that compute values nobody
+uses, or that cancel each other out. Its only purpose is to bulk up the function and hide
+the few lines that matter. Spotting that a value is never used lets you ignore the junk.
+'''
+see = ["obfuscation", "opaque predicate"]
+
+[[term]]
+term = "VM-based obfuscation"
+aliases = ["VM obfuscation", "VM protection", "virtualization", "virtualized", "virtualize", "VM-based protection"]
+short = "Obfuscation that replaces a function's machine code with bytecode for a made-up CPU, plus an interpreter that runs it."
+text = '''
+**VM-based obfuscation** (virtualization) is the strongest common protection. It takes a
+function, compiles it to **bytecode for an invented instruction set**, and ships a small
+**interpreter** that executes that bytecode. Your disassembler now shows the interpreter,
+not the logic — the real algorithm has become *data*. Commercial protectors VMProtect and
+Themida do this, and CTF authors love hand-rolling tiny versions.
+'''
+see = ["bytecode VM", "interpreter", "devirtualization", "VMProtect", "Themida"]
+
+[[term]]
+term = "bytecode VM"
+aliases = ["bytecode interpreter", "bytecode virtual machine", "custom VM", "custom virtual machine"]
+short = "A made-up CPU defined in software: a blob of bytecode plus an interpreter that runs it."
+text = '''
+A **bytecode VM** is a CPU built out of code rather than silicon. It has a blob of
+**bytecode** (the program, in a custom instruction set), a **virtual program counter**
+that points into it, some **virtual state** (a stack or virtual registers), and a
+**fetch-decode-execute** loop that runs it. Real examples include the JVM and CPython; in
+obfuscation, a tiny custom one hides the protected logic.
+'''
+see = ["VM-based obfuscation", "fetch-decode-execute", "stack machine", "register machine", "virtual program counter"]
+
+[[term]]
+term = "interpreter"
+aliases = ["interpreters"]
+short = "The code that reads bytecode one instruction at a time and carries out each one."
+text = '''
+An **interpreter** runs a program written for a virtual machine: it reads the next
+instruction, works out what it means, does it, and moves on. In a VM-protected binary the
+interpreter is the only native code you can see, so finding and understanding it is the
+first step to recovering the hidden logic.
+'''
+see = ["bytecode VM", "dispatcher", "handler"]
+
+[[term]]
+term = "handler"
+aliases = ["handlers"]
+short = "The block of code that carries out one virtual instruction (one opcode) in an interpreter."
+text = '''
+In an interpreter each **handler** implements one opcode: one does addition, one does a
+push, one does a compare, and so on. The dispatcher jumps to the right handler for the
+current opcode; the handler does its work and jumps back. Reversing every handler tells
+you what each opcode means — that is the VM's instruction set.
+'''
+see = ["dispatcher", "opcode table", "interpreter"]
+
+[[term]]
+term = "opcode table"
+aliases = ["handler table"]
+short = "The list that maps each virtual opcode number to the handler and operation it stands for."
+text = '''
+The **opcode table** is the map from opcode number to what it does: `0 -> push input
+byte`, `1 -> push immediate`, `2 -> xor`, and so on. You build it by reversing each
+handler. Once you have it, you can read any bytecode written in that instruction set —
+exactly what ORRESS's VM report recovers for you.
+'''
+see = ["handler", "bytecode VM", "devirtualization"]
+
+[[term]]
+term = "fetch-decode-execute"
+aliases = ["fetch-decode-execute loop", "fetch decode execute"]
+short = "The interpreter's core loop: read the next opcode, work out what it is, do it, repeat."
+text = '''
+**Fetch-decode-execute** is the heartbeat of every CPU and interpreter. *Fetch* the
+opcode the virtual program counter points at; *decode* it (pick the handler); *execute*
+that handler; advance the counter; loop. Recognising this loop in native code is how you
+spot an interpreter.
+'''
+see = ["dispatcher", "virtual program counter", "interpreter"]
+
+[[term]]
+term = "stack machine"
+aliases = ["stack machines", "stack-based"]
+short = "A virtual machine that works on a stack: operations pop their inputs and push their result."
+text = '''
+A **stack machine** keeps its working values on a stack. `ADD` pops two values and pushes
+their sum; `PUSH n` puts `n` on top. The JVM and CPython are stack machines. There are no
+named registers, so handlers are short and the bytecode reads like reverse-Polish
+arithmetic.
+'''
+see = ["register machine", "bytecode VM"]
+
+[[term]]
+term = "register machine"
+aliases = ["register-based", "register machines"]
+short = "A virtual machine that works on a fixed set of virtual registers instead of a stack."
+text = '''
+A **register machine** holds its values in a small set of numbered **virtual registers**
+rather than on a stack. Instructions name the registers they read and write, like
+`ADD r0, r1`. Real CPUs are register machines, and a VM author may pick this style to look
+less like a classic stack interpreter.
+'''
+see = ["stack machine", "virtual register", "bytecode VM"]
+
+[[term]]
+term = "virtual program counter"
+aliases = ["vpc", "virtual pc"]
+short = "The interpreter's index into the bytecode: which virtual instruction runs next."
+text = '''
+The **virtual program counter** (vpc) is the interpreter's own program counter: an index
+into the bytecode blob that says where the next virtual instruction is. Each step the
+interpreter reads the opcode at the vpc and advances it past the opcode and its operands.
+'''
+see = ["bytecode VM", "fetch-decode-execute"]
+
+[[term]]
+term = "virtual register"
+aliases = ["virtual registers"]
+short = "A storage slot a register-based VM uses, held in a buffer the interpreter owns."
+text = '''
+A **virtual register** is one of the slots a register machine computes with. They are not
+real CPU registers — they live in a small array the interpreter keeps in memory — but the
+bytecode treats them the way machine code treats real registers.
+'''
+see = ["register machine", "bytecode VM"]
+
+[[term]]
+term = "devirtualization"
+aliases = ["devirtualize", "devirtualizing", "devirtualized"]
+short = "Turning a VM's bytecode back into readable code by mapping its opcodes and reading its program."
+text = '''
+**Devirtualization** is the payoff of reversing a VM: you map every handler to its
+operation (the opcode table), locate the bytecode, and translate it back into normal
+operations — recovering the algorithm the virtualization hid. ORRESS's VM report does the
+first stages automatically and even solves the recovered check.
+'''
+see = ["VM-based obfuscation", "opcode table", "lifting"]
+
+[[term]]
+term = "lifting"
+aliases = ["lift", "lifted", "lifts"]
+short = "Translating low-level or virtual instructions up into a higher-level, readable form."
+text = '''
+**Lifting** means raising code to a higher level: walking a VM's bytecode and emitting the
+equivalent real operation for each opcode, so the hidden program reads like ordinary code.
+More generally, a decompiler lifts machine instructions into expressions and statements.
+'''
+see = ["devirtualization", "opcode table"]
+
+[[term]]
+term = "fan-in"
+aliases = ["high fan-in"]
+short = "How many different blocks branch into one block; a dispatcher has very high fan-in."
+text = '''
+**Fan-in** is the number of places that jump to a given block. A dispatcher is the one
+block that every handler returns to, so it has unusually high fan-in — dozens of incoming
+edges inside a single loop. That shape is the fingerprint ORRESS looks for when it flags a
+VM or a flattened function.
+'''
+see = ["dispatcher", "VM-based obfuscation"]
+
+[[term]]
+term = "packer"
+aliases = ["packers", "packing", "packed", "pack"]
+short = "A tool that compresses or encrypts a program into a blob and glues on a stub that restores it at run time."
+text = '''
+A **packer** takes a finished program, squeezes its real code and data into a blob, and
+attaches a small **unpacking stub**. Running the file runs the stub first: it restores the
+original program into memory and jumps to it. Packing shrinks files (UPX) and hides code
+from scanners (malware). On disk the real program isn't readable — only the stub and the
+blob are.
+'''
+see = ["unpacking stub", "OEP", "dumping", "UPX"]
+
+[[term]]
+term = "unpacking stub"
+aliases = ["unpacker", "unpacking", "unpack", "unpacks"]
+short = "The small loader a packer adds that restores the real program into memory and jumps to it."
+text = '''
+The **unpacking stub** is the only code that runs at first in a packed file. It
+decompresses or decrypts the original program into memory, rebuilds its import table, and
+then performs a **tail jump** into the restored code at its **OEP**. Analysts let the stub
+run, then capture the now-unpacked program.
+'''
+see = ["packer", "tail jump", "OEP"]
+
+[[term]]
+term = "OEP"
+aliases = ["Original Entry Point"]
+short = "The Original Entry Point: where the real program starts, after the unpacking stub finishes."
+text = '''
+The **OEP** (Original Entry Point) is the address the real program begins at once it has
+been unpacked. The stub ends by jumping to it. Finding the OEP tells you when unpacking is
+done and the memory image is worth dumping and re-analysing.
+'''
+see = ["unpacking stub", "packer", "dumping"]
+
+[[term]]
+term = "dumping"
+aliases = ["memory dump", "dumped"]
+short = "Copying a program's in-memory image out to a file so you can analyse the unpacked bytes."
+text = '''
+**Dumping** means snapshotting a running program's memory to a file. For a packed binary
+you run it to the OEP, so the real code is decrypted in memory, then dump that image and
+analyse the dump — now the disassembly, strings and imports are all present.
+'''
+see = ["OEP", "packer"]
+
+[[term]]
+term = "tail jump"
+aliases = ["tail-jump"]
+short = "The jump at the end of an unpacking stub into the freshly unpacked code (the OEP)."
+text = '''
+A **tail jump** is the stub's final instruction: a jump (or call) into the section it just
+unpacked — control leaving the stub and entering what looked like data on disk. Its target
+is the OEP, so breaking on the tail jump is a classic way to catch the program the moment
+it is unpacked.
+'''
+see = ["unpacking stub", "OEP"]
+
+[[term]]
+term = "UPX"
+aliases = []
+short = "A popular, open-source packer; its sections are named UPX0/UPX1 and `upx -d` unpacks it."
+text = '''
+**UPX** (the Ultimate Packer for eXecutables) is the best-known packer. It is not
+malicious in itself and is used widely to shrink files. You recognise it by its `UPX0` and
+`UPX1` section names, and because it unpacks in one step with `upx -d`. Malware sometimes
+uses UPX, often after tampering so the stock unpacker refuses.
+'''
+see = ["packer", "unpacking stub"]
+
+[[term]]
+term = "VMProtect"
+aliases = []
+short = "A commercial protector that virtualizes code into a custom VM."
+text = '''
+**VMProtect** is a commercial protector that turns chosen functions into bytecode for a
+custom virtual machine, among other tricks. It is a real-world example of VM-based
+obfuscation; the method you learn on tiny CTF VMs is the same one used against it, only
+larger.
+'''
+see = ["VM-based obfuscation", "Themida"]
+
+[[term]]
+term = "Themida"
+aliases = []
+short = "A commercial protector known for heavy virtualization and anti-analysis."
+text = '''
+**Themida** is another commercial protector that virtualizes code and layers on
+anti-debugging and anti-VM tricks. Like VMProtect, it is a production-scale version of the
+VM obfuscation you practise here.
+'''
+see = ["VM-based obfuscation", "VMProtect"]
+
+[[term]]
+term = "self-modifying code"
+aliases = ["SMC", "self-modifying", "self modifying code"]
+short = "Code that writes new instructions into its own code at run time, then runs them."
+text = '''
+**Self-modifying code** (SMC) rewrites its own instructions while running — decrypting,
+patching or generating them — then executes the result. Until the writer runs, the real
+instructions aren't there, so the static disassembly of that region is meaningless. The
+tell is a store whose destination lands inside an executable section: code writing code.
+'''
+see = ["writer loop", "packer"]
+
+[[term]]
+term = "writer loop"
+aliases = ["decode loop", "decoder loop"]
+short = "The loop in self-modifying code that produces the real instructions by writing into the code region."
+text = '''
+The **writer loop** is the part of self-modifying code that builds the real instructions:
+it reads bytes, transforms them (XOR, ADD, ROL), stores them back into the code region,
+and counts. Running past it with the emulator applies every write, so the region then
+holds the decoded instructions, ready to disassemble.
+'''
+see = ["self-modifying code"]
+
+[[term]]
+term = "RISC"
+aliases = ["reduced instruction set"]
+short = "A CPU family with fixed-width, simple instructions and a load/store rule (ARM64, MIPS, RISC-V)."
+text = '''
+**RISC** (Reduced Instruction Set Computer) designs use fixed-width instructions, a small
+regular instruction set, many registers, and a **load/store** rule: arithmetic happens
+only between registers, and memory is touched only by dedicated load/store instructions.
+ARM64, MIPS and RISC-V are RISC. Fixed width makes disassembly reliable.
+'''
+see = ["CISC", "load/store architecture", "ARM64", "fixed-width instruction"]
+
+[[term]]
+term = "CISC"
+aliases = ["complex instruction set"]
+short = "A CPU family with variable-length, complex instructions that can work on memory directly (x86)."
+text = '''
+**CISC** (Complex Instruction Set Computer) designs, above all x86, use variable-length
+instructions (1 to 15 bytes), many complex operations, and arithmetic that can read and
+write memory directly (`add rax, [rbx+8]`). Code is compact but harder to decode, because
+you must work out each instruction's length before you can read the next.
+'''
+see = ["RISC", "fixed-width instruction"]
+
+[[term]]
+term = "ARM64"
+aliases = ["AArch64", "ARM"]
+short = "The 64-bit ARM architecture: a RISC ISA in phones, Apple Silicon and many servers."
+text = '''
+**ARM64** (also called **AArch64**) is the 64-bit ARM architecture. It is RISC:
+fixed-width 4-byte instructions, a load/store model, and 31 general registers named
+`x0`-`x30`, plus a dedicated **link register**. ORRESS decodes ARM64 alongside x86 and
+x86-64, so the disassembly, graph and decompiler views work the same way.
+'''
+see = ["RISC", "load/store architecture", "x0-x30", "link register"]
+
+[[term]]
+term = "load/store architecture"
+aliases = ["load/store", "load/store model", "load-store architecture"]
+short = "A design where arithmetic works only on registers; memory is reached only by load and store instructions."
+text = '''
+In a **load/store architecture** the CPU cannot do arithmetic straight on memory. To
+change a value in memory it must *load* it into a register, compute there, then *store* it
+back. This is a defining RISC trait, and it is why ARM64 code shuffles values through
+registers with explicit loads and stores around every computation, where x86 folds the
+memory access into the operation.
+'''
+see = ["RISC", "ARM64"]
+
+[[term]]
+term = "x0-x30"
+aliases = ["x0", "x30", "w0"]
+short = "ARM64's 31 general-purpose 64-bit registers (their 32-bit halves are w0-w30)."
+text = '''
+**x0-x30** are ARM64's 31 general-purpose 64-bit registers; `w0`-`w30` name their lower
+32-bit halves. By convention `x0`-`x7` pass arguments and return values. There is no
+`x31`: that encoding means either the zero register or the stack pointer, depending on the
+instruction.
+'''
+see = ["ARM64", "link register"]
+
+[[term]]
+term = "link register"
+aliases = ["lr"]
+short = "The ARM64 register (x30) that holds the return address for a function call."
+text = '''
+On ARM64 a call (`bl`) does not push the return address to the stack like x86's `call`.
+Instead it stores the return address in the **link register** (`x30`, also written `lr`),
+and the function returns with `ret`, which jumps to it. A function that calls others saves
+`lr` to the stack in its prologue so the nested call can reuse the register.
+'''
+see = ["ARM64", "x0-x30"]
+
+[[term]]
+term = "fixed-width instruction"
+aliases = ["fixed-width", "fixed width", "fixed-length instruction"]
+short = "An instruction encoding where every instruction is the same number of bytes (4 bytes on ARM64)."
+text = '''
+A **fixed-width instruction** set gives every instruction the same size — 4 bytes on
+ARM64, MIPS and base RISC-V. You never have to guess where the next instruction starts, so
+linear disassembly just works. x86, by contrast, is variable-length (1 to 15 bytes), so a
+disassembler must decode each instruction to learn its length.
+'''
+see = ["RISC", "CISC", "ARM64"]
+
+[[term]]
+term = "MIPS"
+aliases = []
+short = "A RISC architecture common in routers and older embedded gear, often big-endian."
+text = '''
+**MIPS** is a RISC architecture found in routers and other embedded devices. It is
+fixed-width and load/store like other RISC chips, and is frequently **big-endian**, so
+bytes and words can read reversed from what an x86 analyst expects. ORRESS does not decode
+MIPS yet; the method in the architectures lesson is how you would approach it.
+'''
+see = ["RISC", "RISC-V"]
+
+[[term]]
+term = "RISC-V"
+aliases = ["riscv"]
+short = "An open, royalty-free RISC architecture used in microcontrollers and research."
+text = '''
+**RISC-V** is an open, royalty-free RISC architecture. Its base instructions are
+fixed-width and load/store, with a small core set plus optional extensions. It turns up in
+microcontrollers and increasingly elsewhere. ORRESS does not decode it yet, but it is a
+textbook RISC target for the general method.
+'''
+see = ["RISC", "MIPS"]

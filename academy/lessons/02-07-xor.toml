@@ -1,0 +1,402 @@
+id = "l2-xor"
+level = 2
+order = 7
+title = "XOR-encoded passwords"
+summary = "A password that is never stored: recognise an XOR encoding, collect the key and the ciphertext, and decode it by hand and with the Workbench."
+goals = [
+    "explain why XOR is used to hide data, and why XOR undoes itself",
+    "recognise an XOR check and a repeating key in assembly and decompiled code",
+    "read an unrolled loop as one loop again",
+    "decode XOR-encoded bytes by hand and with the Workbench",
+]
+badge = "XOR Breaker"
+reveal_source = "crackme03"
+
+[[steps]]
+title = "Hiding a password"
+goal = "See how a program can check a password it never stores."
+text = '''
+Your first two crackmes kept their password in a form you could read: as text in the
+Strings view, or as character codes in `cmp` instructions. A crackme author who wants to
+make you work stores the password **encoded**, so neither trick shows it.
+
+A very common way is **XOR**. The author picks a few secret bytes, the **key**, and XORs
+the password with it before compiling. The program contains only the result, the
+**ciphertext**. When you type something, the program XORs your input with the same key
+and compares it with the ciphertext:
+
+```rust
+const KEY: [u8; 4] = [0x5a, 0x1c, 0x7e, 0x33];
+const CIPHER: [u8; 8] = [/* the password, XORed with KEY */];
+
+fn check_password(input: &[u8]) -> bool {
+    if input.len() != CIPHER.len() { return false; }
+    for i in 0..CIPHER.len() {
+        if input[i] ^ KEY[i % 4] != CIPHER[i] { return false; }
+    }
+    true
+}
+```
+
+The readable password (the **plaintext**) is nowhere in the file. But the program needs
+both `KEY` and `CIPHER` to do its check, so both *are* in the file. Find them, and you
+can undo the encoding yourself. That is the whole lesson.
+
+`KEY[i % 4]` means the key is used over and over: byte 0 of the input uses `KEY[0]`,
+byte 4 uses `KEY[0]` again. That is a **repeating key**.
+'''
+
+[[steps]]
+title = "Why XOR undoes itself"
+goal = "Use the property (x ^ k) ^ k == x."
+text = '''
+You met XOR (`^`) in Level 1: it compares two numbers bit by bit, and each result bit is
+1 when the two bits are **different**:
+
+| a | b | a ^ b |
+|---|---|---|
+| 0 | 0 | 0 |
+| 0 | 1 | 1 |
+| 1 | 0 | 1 |
+| 1 | 1 | 0 |
+
+So XOR with a 1 bit flips a bit, and XOR with a 0 bit leaves it alone. Do it twice with
+the same key, and every flipped bit is flipped back:
+
+```rust
+let x = 0x4F_u8;            // 0100 1111  'O'
+let k = 0x5A_u8;            // 0101 1010
+let c = x ^ k;              // 0001 0101  = 0x15  (the ciphertext)
+assert_eq!(c ^ k, x);       // 0100 1111  = 'O' again
+```
+
+That gives the rule for every XOR check:
+
+> if `input ^ key == cipher`, then `input == cipher ^ key`.
+
+You never have to "reverse" anything complicated: XOR the ciphertext with the key and
+the plaintext appears. This is why XOR is everywhere in crackmes and malware: it is one
+instruction, it hides text from the Strings view, and the same code encodes and decodes.
+It is **not** real encryption, because the key is always inside the program.
+
+Try it: what is `0x41 ^ 0x20`? (0x41 is `A`.) Use the number converter to see the bits.
+'''
+widget = "number_converter"
+instructions = [
+    "Write both numbers in binary: 0x41 = 0100 0001, 0x20 = 0010 0000.",
+    "XOR them bit by bit (1 where the bits differ).",
+    "Type the result in hex in the answer box.",
+]
+check = { kind = "answer", answers = ["0x61"], number = true }
+hints = [
+    "0x20 has only one bit set. XOR flips exactly that bit of 0x41.",
+    "0100 0001 ^ 0010 0000 = 0110 0001.",
+    "0x61, which is `a`: XOR with 0x20 switches between upper and lower case.",
+]
+success = '''
+0x61, the letter `a`. XOR with 0x20 flips the "lower case" bit of an ASCII letter, a trick
+you will see in real code. Now the real thing.
+'''
+
+[[steps]]
+title = "Meet crackme #3"
+goal = "Open the XOR crackme."
+text = '''
+**Crackme #3** asks for a *key* (its word for the password) and answers *Correct! You
+decoded the XOR'd key.* or *Wrong key. Try again!*. Open it, and start with the
+first-look routine you learned in lesson 1. You will find the familiar picture: a 64-bit
+Rust program for Windows, stripped, importing `ReadConsoleW` and `memcmp`.
+'''
+instructions = ["Press the **Open crackme03** button below."]
+check = { kind = "open_crackme", name = "crackme03" }
+
+[[steps]]
+title = "Nothing in the strings"
+goal = "Confirm that the password is not stored as text."
+text = '''
+Open the Strings view and look for the program's messages. You will find the title, the
+prompt `Key: `, *Correct! You decoded the XOR'd key.* and *Wrong key. Try again!*. No
+password-like text anywhere near them.
+
+That fits the plan from step 1: the password is stored XOR-encoded, and encoded bytes are
+not readable text. (Even a lucky encoded byte that happens to be a printable character
+is not a string: the Strings view needs several printable characters in a row.)
+
+The success message even tells you what to expect: *You decoded the XOR'd key.* Messages
+are leads, sometimes very direct ones.
+'''
+instructions = [
+    "In the **Project** panel on the left, under `crackme03.exe`, click **Strings**.",
+    "Type `key` in the filter box and read the messages.",
+]
+spotlight = "tree.Strings"
+check = { kind = "view", view = "Strings" }
+
+[[steps]]
+title = "Find and name the check"
+goal = "Go from main to the check function and rename it."
+text = '''
+Use what you learned in lessons 3 and 4. Go to `main`, scroll to the decision just
+before the two messages:
+
+```text
+call     sub_140001100
+test     al,al
+je       ...                ; "Wrong key. Try again!"
+```
+
+`sub_140001100` returns a `bool` that decides between *Correct!* and *Wrong key.*: it is
+the check. Name it `check_password` before you read it. Then every view shows the name,
+including the decompiler.
+'''
+instructions = [
+    "Press **Ctrl+Shift+M** to go to `main` of crackme03.exe.",
+    "Scroll down to the line `call sub_140001100` (just before `test al,al`).",
+    "Click that line (not the name) and press **N**. Check that the window says **Rename 0x140001100**.",
+    "Type `check_password` and press **Enter**.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "renamed" }
+hints = [
+    "The disassembly needs keyboard focus: click a line first.",
+    "On a line with a call, N renames the called function.",
+]
+
+[[steps]]
+title = "Read the check"
+goal = "Recognise an XOR check in decompiled code."
+text = '''
+Click the name `check_password` in the call to go into the function, and press **F5**.
+The Decompiler shows:
+
+```rust
+fn check_password(a1: &[u8]) -> bool {
+    if a1.len() != 8 {
+        return false;
+    }
+    if a1[0] ^ 90 != 21 {
+        return false;
+    }
+    if a1[1] ^ 28 != b'N' {
+        return false;
+    }
+    ...
+    return a1[7] ^ 51 == 1;
+}
+```
+
+Three things to notice:
+
+1. **There is no loop.** The source had a loop over 8 bytes, but the compiler knew the
+   length is always 8 and wrote the body 8 times, once per position. This is **loop
+   unrolling**. Read the 8 copies as one loop again: what changes from copy to copy is
+   the index and two constants.
+2. **The pattern** is `input[i] ^ K != C`: exactly the XOR check from step 1. `K` is a
+   key byte, `C` a ciphertext byte.
+3. **The numbers are decimal** here (`90`, `21`), or a character when the number is
+   printable (`b'N'` is 0x4E). The disassembly shows the same values in hex:
+   `xor al,0x5a` and `cmp byte ptr [rsp+7],0x15`. Convert with the number converter.
+
+What is the first key byte, `KEY[0]`, in hex?
+'''
+widget = "number_converter"
+instructions = [
+    "In `main`, click the name `check_password` in the line `call check_password`. The disassembly jumps into the function.",
+    "Press **F5** to open the Decompiler on the right (click the **Lesson** tab to come back).",
+    "Read the first XOR line: `a1[0] ^ 90 != 21`.",
+    "Convert the key byte 90 to hex with the number converter and type it in the answer box.",
+]
+check = { kind = "answer", answers = ["0x5A"], number = true }
+hints = [
+    "The key byte is the number after `^`.",
+    "90 in hex: 90 = 5 * 16 + 10.",
+    "0x5A.",
+]
+success = '''
+`KEY[0] = 0x5A`, and the first ciphertext byte is 21 = 0x15. In the disassembly this is
+`xor al,0x5a` followed by `cmp byte ptr [rsp+7],0x15`. The detour through `[rsp+7]` is
+the `black_box` the author used so the compiler keeps every XOR visible.
+'''
+
+[[steps]]
+title = "Collect KEY and CIPHER"
+goal = "Write down all key and ciphertext bytes and see the key repeat."
+text = '''
+The disassembly of `check_password` shows the hex values directly, so it is the easiest
+place to collect them. Each position is one block:
+
+```text
+movzx eax,byte ptr [rcx]      ; input[0]
+xor   al,0x5a                 ; ^ KEY[0]
+...
+cmp   byte ptr [rsp+7],0x15   ; == CIPHER[0] ?
+```
+
+Go through the 8 blocks and fill in the table (on paper or in a Notes tab, **Ctrl+N**):
+
+| i | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| KEY | 0x5A | 0x1C | 0x7E | 0x33 | ? | ? | ? | ? |
+| CIPHER | 0x15 | 0x4E | 0x2C | 0x76 | ? | ? | ? | ? |
+
+Look at the key row when you are done. Something repeats: the key is shorter than the
+password, and it starts again from the beginning. That is the `KEY[i % 4]` from the
+source.
+
+How many bytes long is the key before it repeats?
+'''
+instructions = [
+    "Press **Space** if the graph is open, so you see the linear Disassembly of `check_password`.",
+    "For each of the 8 blocks, write down the number after `xor al,` and the number after `cmp byte ptr [rsp+7],`.",
+    "Compare the key bytes of positions 4 to 7 with positions 0 to 3, and type the key length in the answer box.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["4"], number = true }
+hints = [
+    "Position 4 has `xor al,0x5a` again.",
+    "The key bytes are 5a 1c 7e 33 5a 1c 7e 33.",
+    "The key is 4 bytes long.",
+]
+success = '''
+The full table:
+
+| i | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| KEY | 5A | 1C | 7E | 33 | 5A | 1C | 7E | 33 |
+| CIPHER | 15 | 4E | 2C | 76 | 09 | 4F | 4A | 01 |
+
+A 4-byte repeating key: `KEY = [0x5A, 0x1C, 0x7E, 0x33]`.
+'''
+
+[[steps]]
+title = "Decode by hand"
+goal = "Recover one plaintext character with XOR."
+text = '''
+Now apply the rule `input = cipher ^ key`, one position at a time.
+
+**Worked example, position 0:**
+
+```text
+CIPHER[0]  0x15   0001 0101
+KEY[0]     0x5A   0101 1010
+XOR               0100 1111  = 0x4F = 'O'
+```
+
+The first character of the password is `O`.
+
+Your turn: position 1. `CIPHER[1] = 0x4E` and `KEY[1] = 0x1C`. Write both in binary,
+XOR them, and look the result up in the ASCII table below.
+'''
+widget = "ascii_table"
+instructions = [
+    "Write 0x4E and 0x1C in binary (4 bits per hex digit).",
+    "XOR them bit by bit.",
+    "Find the result in the ASCII table and type the character in the answer box.",
+]
+check = { kind = "answer", answers = ["R"], case_sensitive = true }
+hints = [
+    "0x4E = 0100 1110, 0x1C = 0001 1100.",
+    "0100 1110 ^ 0001 1100 = 0101 0010 = 0x52.",
+    "0x52 is the upper-case letter `R`.",
+]
+success = '''
+`R`. You can decode the remaining six the same way. Or let the computer do it: that is
+the next step.
+'''
+
+[[steps]]
+title = "Decode with the Workbench"
+goal = "Let the Workbench XOR all bytes at once."
+text = '''
+Decoding by hand is good for understanding, slow for 8 bytes and impossible for 8000.
+ORRESS has a tool for it: the **Workbench** (**Tools > Workbench**, or **Ctrl+Shift+W**).
+It works like a kitchen recipe: you put data in, add steps, and get the result out.
+
+It has three columns:
+
+- **Operations** (left): everything it can do, by category: encodings (hex, base64),
+  bitwise operations (XOR, add, rotate), crypto, compression, hashes. Click one to add it.
+- **Recipe** (middle): the steps, run from top to bottom, each on the output of the one
+  before. Each step has its settings, such as the key.
+- **Input** and **Output** (right): your data, as **text** or **hex**, and the result.
+
+The Workbench starts with an example (a base64 text and a *From base64* step), so first
+clear it. Then enter the 8 ciphertext bytes in hex and add one **XOR** step with the
+4-byte key. The XOR operation repeats the key by itself, exactly like `KEY[i % 4]`.
+'''
+instructions = [
+    "Press **Ctrl+Shift+W** (or open the **Tools** menu and click **Workbench**). The Workbench opens in the middle.",
+    "Under the recipe, click **Clear** to remove the example step.",
+    "Next to **Input**, click **hex**. Replace the text in the input box with `15 4e 2c 76 09 4f 4a 01`.",
+    "In the search box under **Operations**, type `xor` and click **XOR**.",
+    "In the XOR step of the recipe, replace the **key** value `0x00` with `0x5a1c7e33`.",
+    "Read the **Output** box (make sure **text** is selected next to **Output**).",
+]
+check = { kind = "action", id = "workbench::Open" }
+hints = [
+    "If the output shows strange characters, check that **hex** is selected for the input.",
+    "The key must be written as one hex number: `0x5a1c7e33` means the bytes 5a, 1c, 7e, 33.",
+]
+success = '''
+The output is readable text: the password. The Workbench can do much more: chain several
+steps (for example *From base64* then *XOR*), and **Magic** tries common decodings for
+you when you do not know the recipe.
+'''
+
+[[steps]]
+title = "Enter the password"
+goal = "Prove you decoded it."
+text = '''
+Type the password you decoded. It has 8 characters and starts with `OR`.
+
+If you want to be sure, run crackme #3 from a terminal (it is in ORRESS's configuration
+folder, under `academy/crackmes`) and type it there: it must say *Correct! You decoded
+the XOR'd key.*
+'''
+instructions = [
+    "Type the 8 characters from the Workbench's **Output** in the answer box (upper/lower case matters).",
+    "Press **Check**.",
+]
+check = { kind = "secret", sha256 = "b1cdf3807031964dd3d9f5702f4912a34cc28faf18d67a6f98af96d96142af88" }
+hints = [
+    "Positions 0 and 1 are `O` and `R` (you decoded them by hand).",
+    "It is the name of this program in capitals, followed by a two-digit number.",
+    "`ORRESS` and then `42`.",
+]
+success = '''
+Cracked. A password that never existed in the file, recovered by reading the check and
+undoing one XOR. The source code of crackme #3 is now unlocked at the bottom of this
+lesson: compare the `while` loop in it with the eight unrolled blocks you read.
+'''
+
+[[steps]]
+title = "Other ways to the same answer"
+goal = "Know the other tools for XOR, for bigger jobs."
+text = '''
+You will meet XOR again and again: encoded strings in malware, flags in CTF challenges,
+configuration blocks. Some ways to deal with it:
+
+- **A few lines of Rust.** Often the clearest:
+
+```rust
+let key = [0x5a, 0x1c, 0x7e, 0x33];
+let cipher = [0x15, 0x4e, 0x2c, 0x76, 0x09, 0x4f, 0x4a, 0x01];
+let plain: String = cipher.iter().enumerate()
+    .map(|(i, c)| (c ^ key[i % key.len()]) as char).collect();
+println!("{plain}");
+```
+
+- **The command line**: `orress-cli xor -k 0x5a1c7e33 FILE` XORs a file with a key, and
+  `orress-cli recipe "from_hex | xor key=0x5a1c7e33" FILE` runs a Workbench recipe.
+- **Straight from the file**: select bytes in the Hex view and press **Ctrl+Shift+B**
+  (*Hex: Send Selection to Workbench*). After decoding, **Write back to file** puts the
+  result into the program as a patch, so the disassembly shows the decoded text.
+- **When you do not know the key**: a 1-byte key has only 256 possibilities; the
+  operation **XOR brute force** tries them all (a *brute force* search). If you know how
+  the text starts (a flag starts with `flag{`), **XOR key from known text** recovers the
+  key: `key = cipher ^ known plaintext` (a *known-plaintext attack*).
+
+The method is always the same: find where the program XORs, collect the key and the
+data, and XOR again.
+'''
+success = "Lesson complete. XOR has no secrets for you any more."

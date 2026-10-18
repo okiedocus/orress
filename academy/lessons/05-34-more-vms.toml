@@ -1,0 +1,168 @@
+id = "l5-more-vms"
+level = 5
+order = 34
+title = "Two more VMs, on your own"
+summary = "Apply the custom-VM method to a 16-bit stack machine and a register machine, and recover both keys."
+badge = "VM Veteran"
+reveal_source = "crackme06"
+goals = [
+    "apply the custom-VM method without step-by-step guidance",
+    "handle a 16-bit stack machine with little-endian immediate operands",
+    "read a register-based VM with uniform fixed-size instructions",
+    "recover the keys of two more virtualized crackmes",
+]
+
+[[steps]]
+title = "Same method, new machines"
+goal = "Set up the two practice targets and why they differ."
+text = '''
+You beat one VM with a lot of guidance. Now you apply the same method to two more, with
+less. They are built differently on purpose, to prove the method is not tied to crackme
+#5's exact shape:
+
+- **Crackme #6** is a **16-bit stack machine**: the stack holds `u16` values, and some
+  opcodes carry a **2-byte little-endian immediate** operand (a `PUSHI lo hi` that pushes
+  `lo | (hi << 8)`). Its check multiplies, so expect `*` in the lifted logic.
+- **Crackme #7** is a **register machine**: no stack, four virtual registers, and uniform
+  **3-byte instructions** of the form `[opcode, rd, arg]`.
+
+The recipe does not change: find the dispatcher, map the handlers into an opcode table,
+locate the bytecode, read it, recover the key. Let's do #6 first.
+'''
+
+[[steps]]
+title = "Watch the operand widths"
+goal = "Anticipate the one thing that trips people on crackme #6."
+text = '''
+Before you open crackme #6, fix one thing in your head. In crackme #5 every operand was a
+single byte. In crackme #6 the push-immediate opcode carries a **2-byte little-endian**
+value: the low byte first, then the high byte. So the bytes `11 00` mean the value
+`0x0011` = 17, and `97 43` mean `0x4397`.
+
+If you misread a 2-byte immediate as two separate 1-byte opcodes, the whole rest of the
+bytecode decodes into garbage — the classic way to get lost in a VM. When you map the
+handlers, note each opcode's **operand size**, and advance the virtual program counter by
+exactly that much.
+
+Which is the correct 16-bit value for the little-endian bytes `0e 11`?
+'''
+instructions = [
+  "Combine the two bytes as little-endian: value = low | (high << 8).",
+  "Type the decimal (or 0x hex) value and press Check.",
+]
+check = { kind = "answer", answers = ["0x110e"], number = true }
+hints = [
+  "Little-endian means the first byte is the low 8 bits: low = 0x0e, high = 0x11.",
+  "value = 0x0e | (0x11 << 8) = 0x110e = 4366.",
+]
+success = "0x110e. Tracking operand widths is what keeps your disassembly aligned with the interpreter's."
+
+[[steps]]
+title = "Reverse crackme #6"
+goal = "Devirtualize the 16-bit stack VM and recover its key."
+text = '''
+Open **crackme #6** and apply the method. Open **Triage** and read the **VM-based
+obfuscation** section: ORRESS flags the interpreter and, in **opcode table & bytecode**,
+recovers the opcode table, the bytecode disassembly, and the **lifted checks** — which for
+this VM look like:
+
+```
+((zext16(in[i]) ^ K[i]) * M[i]) == C[i]
+```
+
+Each byte is XORed with `K[i]`, multiplied by an odd `M[i]` (odd, so it is reversible mod
+65536), and must equal `C[i]`. To recover `in[i]`: multiply `C[i]` by the modular inverse
+of `M[i]` (mod 65536), then XOR with `K[i]` — or just read ORRESS's **recovered key** line,
+which solves these constraints for you.
+
+Type crackme #6's 8-character key.
+'''
+instructions = [
+  "Click **Open crackme06** on this step.",
+  "Open **Triage** (**Ctrl+Shift+T**) and expand **opcode table & bytecode** under the VM finding.",
+  "Read the **lifted checks** and **recovered key**, then type the 8-character key and press Check.",
+]
+spotlight = "view.Triage"
+check = { kind = "secret", sha256 = "c85335bfaddb35148af4ae2c8a42d2175e0536bbcbbeaa555088478499ded706" }
+hints = [
+  "The multiply is reversible because each M[i] is odd; ORRESS solves it and prints the key.",
+  "The key is an 8-character leet phrase about hacking versions.",
+  "The key is `h4ckv3rs`.",
+]
+success = "You devirtualized a different VM — 16-bit stack, little-endian immediates, a multiply in the check — with the same method. The source is unlocked below."
+
+[[steps]]
+title = "Stack machine vs register machine"
+goal = "Know what changes when the VM uses registers."
+text = '''
+Crackme #7 is a **register machine**, not a stack machine. What does that change about how
+you read its handlers?
+'''
+check = { kind = "choice", options = [
+  "Handlers name the virtual register they read or write (rd, rs) instead of popping and pushing a stack",
+  "There is no dispatcher, so the interpreter shape is different",
+  "The bytecode is encrypted and cannot be read",
+  "Register VMs cannot do arithmetic, only moves",
+], correct = 0, explain = [
+  "Right — a register VM's handlers operate on numbered virtual registers (`rd ^= imm`), where a stack VM's handlers pop inputs and push results.",
+  "Wrong — it still has a dispatcher and the same fetch-decode-execute loop; only the state model changed.",
+  "Wrong — the bytecode is plain bytes, just interpreted as `[opcode, rd, arg]` triples here.",
+  "Wrong — register VMs do full arithmetic (xor, add, rotate, subtract); they just keep operands in registers.",
+] }
+hints = [
+  "A stack machine pops and pushes; a register machine reads and writes numbered slots.",
+  "Look at what each handler touches: a stack buffer, or an array of virtual registers?",
+]
+success = "A register VM's handlers work on numbered virtual registers rather than a stack. Same loop, same dispatcher — different state model."
+
+[[steps]]
+title = "Reverse crackme #7"
+goal = "Devirtualize the register VM and recover its key."
+text = '''
+Open **crackme #7** and finish the set. It has four virtual registers and uniform 3-byte
+instructions `[opcode, rd, arg]`: load an input byte into a register, XOR it with an
+immediate, rotate it, and compare it to a constant.
+
+Open **Triage** and read the **VM-based obfuscation** section. The **lifted checks** read:
+
+```
+rotate_left(in[i] ^ K[i], R[i]) == C[i]
+```
+
+the same per-byte form you solved in crackme #5 — invert with a right-rotate then XOR, or
+read ORRESS's **recovered key**.
+
+Type crackme #7's 8-character key.
+'''
+instructions = [
+  "Click **Open crackme07** on this step.",
+  "Open **Triage** (**Ctrl+Shift+T**) and expand **opcode table & bytecode** under the VM finding.",
+  "Read the **lifted checks** and **recovered key**, then type the 8-character key and press Check.",
+]
+spotlight = "view.Triage"
+check = { kind = "secret", sha256 = "12346694c6272973a262b223eb2fa5e8be1f134496609c47fa7b158637241338" }
+hints = [
+  "The check is the same rotate-left-of-XOR form as crackme #5; invert it per byte.",
+  "The key is an 8-character leet phrase about register values.",
+  "The key is `r3g_v4lz`.",
+]
+success = "Three custom VMs beaten with one method: a byte stack machine, a 16-bit stack machine with wide immediates, and a register machine. The shape of the interpreter and the discipline of mapping handlers to an opcode table carried across all three."
+
+[[steps]]
+title = "What you can now do"
+goal = "Consolidate the transferable skill."
+text = '''
+Step back and notice what transferred. Across three very different VMs you used one
+procedure every time:
+
+1. **Spot** the interpreter by its high-fan-in dispatcher (Triage flags it).
+2. **Map** the handlers into an opcode table, watching each opcode's operand size.
+3. **Locate** the bytecode and the virtual program counter.
+4. **Read** the bytecode through the table, and **lift** it to the real per-byte logic.
+5. **Invert** that logic to recover the input.
+
+Nothing about this is specific to a crackme. A commercial VM protector has more opcodes,
+nastier handlers, and layers of other obfuscation on top — but the method is the one you
+just practised three times. When you meet a real virtualized target, you will not be
+starting from zero.
+'''

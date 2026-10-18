@@ -1,0 +1,395 @@
+id = "l4-managed-code"
+level = 4
+order = 29
+title = "Managed code"
+summary = "C#, Java, Python and WebAssembly programs ship bytecode, not machine code. Learn what bytecode is, how to read it, and why it is easier to reverse."
+goals = [
+    "explain what bytecode and a managed runtime are",
+    "explain why metadata makes managed code easier to reverse",
+    "read stack-based bytecode for the JVM, CPython and .NET",
+    "recognise .class, .wasm, .pyc and .NET files by their first bytes",
+    "find ORRESS's view for each format",
+]
+badge = "Bytecode Reader"
+
+[[steps]]
+title = "Not every program is machine code"
+goal = "Understand what bytecode is."
+text = '''
+Everything you reversed so far was **native code**: machine code for the x86-64 processor. The Rust compiler translated your program all the way down to instructions the CPU runs directly.
+
+Many languages stop halfway. Their compiler produces **bytecode**: instructions for an imaginary, simplified processor that does not exist in hardware. A program called a **managed runtime** (also called a language virtual machine) reads that bytecode and executes it on the real CPU.
+
+You can picture bytecode as a Rust `enum` of instructions, and the runtime as a loop over them:
+
+```rust
+enum Instr { Push(i32), Load(usize), Add, Xor, Return }
+
+fn run(code: &[Instr], locals: &[i32]) -> i32 {
+    let mut stack = Vec::new();
+    for ins in code {
+        match ins {
+            Instr::Push(v) => stack.push(*v),
+            Instr::Load(i) => stack.push(locals[*i]),
+            Instr::Add => { let b = stack.pop().unwrap(); let a = stack.pop().unwrap(); stack.push(a + b); }
+            Instr::Xor => { let b = stack.pop().unwrap(); let a = stack.pop().unwrap(); stack.push(a ^ b); }
+            Instr::Return => return stack.pop().unwrap(),
+        }
+    }
+    0
+}
+```
+
+Real runtimes are much faster than this loop: a **JIT compiler** ("just in time") inside the runtime translates hot bytecode into native machine code while the program runs. But the file you get, and reverse, contains the bytecode.
+
+The big four you will meet: **.NET** (C#), **Java**, **Python**, and **WebAssembly**. Plus **JavaScript**, which is usually shipped as source text, not bytecode at all.
+'''
+success = "Bytecode is the instruction set of a software processor. Next: who runs which bytecode."
+
+[[steps]]
+title = "The managed runtimes"
+goal = "Know the common formats, their runtimes and file types."
+text = '''
+| Language | Compiled to | Runtime | Files |
+|---|---|---|---|
+| C#, F#, VB.NET | **CIL** (Common Intermediate Language, also called IL or MSIL) | **.NET** (the CLR, Common Language Runtime) | `.exe`, `.dll` (PE files with extra .NET data) |
+| Java, Kotlin | JVM bytecode | the **JVM** (Java Virtual Machine) | `.class`, bundled in `.jar` (a zip file) |
+| Android apps | Dalvik bytecode | Android's runtime | `.dex` inside `.apk` (a zip file) |
+| Python | CPython bytecode | **CPython** (the normal Python program) | `.pyc` |
+| C, C++, Rust, Go and more | **WebAssembly** | browsers and standalone runtimes | `.wasm` |
+| JavaScript | (nothing: shipped as text) | browsers, Node.js | `.js` |
+
+Some notes for reverse engineers:
+
+- A **.NET** program is a normal-looking `.exe`, so you might first open it as native code. Its native part is tiny, though: it only starts the .NET runtime. The real program is the CIL inside.
+- A `.jar` or `.apk` is a zip archive. You open it to find the `.class` or `.dex` files inside.
+- A `.pyc` is what Python writes when it compiles a `.py` file. CTF challenges sometimes give you only the `.pyc`, or a Windows `.exe` made by a tool such as PyInstaller, which is a small loader plus `.pyc` files packed inside.
+- **WebAssembly** is the odd one: it is low-level like machine code (no class names, often no function names), but it is still a bytecode for a software machine. Even Rust compiles to it.
+'''
+success = "Different runtimes, same principle. And one principle in particular makes them friendly to you."
+
+[[steps]]
+title = "Why managed code is easier"
+goal = "Understand the role of metadata."
+text = '''
+When Rust compiles to native code, it throws away almost everything a human needs: variable names, types, often function names. A stripped `.exe` is a desert, which is why you spent a whole level learning to find `main` and rename functions.
+
+Managed runtimes cannot work like that. When a Java program calls `pw.charAt(i)`, the JVM must find the class `String` and its method `charAt` *by name* while the program runs. When .NET loads a class, it checks the types of every method. So the file has to carry a description of itself, its **metadata**:
+
+- the names of classes (types), methods and fields, usually the original names from the source,
+- the types of every argument and return value (the method's **signature**, called a **descriptor** in Java),
+- every text constant, stored plainly in a table (the **constant pool** in Java, the **user strings** in .NET).
+
+For you that means: open a managed program and you see `class Check`, `boolean check(String pw)` and `"flag{...}"` right away. And because the bytecode is so close to the source, a **decompiler** for managed code produces something very close to the original source, with the right names.
+'''
+check = { kind = "choice", options = [
+    "The runtime needs names, types and strings to load and link the code, so they are stored in the file as metadata",
+    "Managed code is not compiled at all; the file is the source code",
+    "Managed files are encrypted, and ORRESS knows the key",
+    "The CPU runs bytecode more slowly, so it is easier to watch",
+], correct = 0, explain = [
+    "Right. Names, signatures and constants travel inside the file because the runtime needs them, and you get them for free.",
+    "It is compiled, to bytecode. Only JavaScript is usually shipped as source text.",
+    "Normal managed files are not encrypted at all. Protectors can encrypt strings, but that is an extra step added on purpose.",
+    "Speed has nothing to do with it. The difference is the information stored in the file.",
+] }
+hints = [
+    "What does the runtime need to know when it loads a class and calls a method by name?",
+]
+success = "Metadata is the gift of managed code. The next gift: its bytecode is easy to read once you know one trick, the operand stack."
+
+[[steps]]
+title = "The operand stack"
+goal = "Read stack-based bytecode."
+text = '''
+x86-64 instructions work on registers: `add eax, ebx`. Most bytecodes have no registers. Instead they work on an **operand stack**, like the `Vec` in the Rust example of the first step:
+
+- *load* and *push* instructions put a value on top of the stack,
+- operations such as *add* or *xor* pop the top two values and push the result,
+- *store* pops the top value into a local variable.
+
+Worked example: the expression `t + (c ^ (i + 7))`, step by step. The stack is written bottom to top, with the top on the right.
+
+| Instruction | What it does | Stack after it |
+|---|---|---|
+| load t | push variable t | `t` |
+| load c | push c | `t, c` |
+| load i | push i | `t, c, i` |
+| push 7 | push the constant 7 | `t, c, i, 7` |
+| add | pop i and 7, push i+7 | `t, c, (i+7)` |
+| xor | pop c and (i+7), push the XOR | `t, (c^(i+7))` |
+| add | pop both, push the sum | `t+(c^(i+7))` |
+| store t | pop the result into t | (empty) |
+
+Notice the order: the operands come first, the operation after them. Reading stack bytecode means doing what the table does: keep a small stack in your head (or on paper) and replay the instructions.
+
+The JVM, .NET's CIL and CPython all work like this. WebAssembly too. Machines built this way are called *stack-based*; you will meet them again in Level 5, where obfuscators build their own.
+'''
+success = "Keep the table in mind: the next steps show real bytecode doing exactly this."
+
+[[steps]]
+title = "Real JVM bytecode"
+goal = "Read a Java method in bytecode."
+text = '''
+Here is a small Java class, as a challenge author would write it:
+
+```java
+public class Check {
+    static final String SECRET = "flag{jvm_r3v3rs3}";
+
+    public boolean check(String pw) {
+        int t = 0;
+        for (int i = 0; i < pw.length(); i++) {
+            t += pw.charAt(i) ^ (i + 7);
+        }
+        return t == 1337;
+    }
+}
+```
+
+And here is the `check` method as ORRESS's **Java Class View** shows it (compiled with Java 17). Local variable 1 is `pw`, 2 is `t`, 3 is `i`:
+
+```text
+check(Ljava/lang/String;)Z
+   0: iconst_0                      push 0
+   1: istore_2                      t = 0
+   2: iconst_0
+   3: istore_3                      i = 0
+   4: iload_3
+   5: aload_1
+   6: invokevirtual  java/lang/String.length:()I
+   9: if_icmpge      31             if i >= pw.length() goto 31
+  12: iload_2                       push t
+  13: aload_1                       push pw
+  14: iload_3                       push i
+  15: invokevirtual  java/lang/String.charAt:(I)C     pops pw, i; pushes pw.charAt(i)
+  18: iload_3                       push i
+  19: bipush         7              push 7
+  21: iadd                          i + 7
+  22: ixor                          charAt(i) ^ (i + 7)
+  23: iadd                          t + ...
+  24: istore_2                      t = ...
+  25: iinc           3, 1           i++
+  28: goto           4
+  31: iload_2
+  32: sipush         1337
+  35: if_icmpne      42
+  38: iconst_1                      return true
+  39: goto           43
+  42: iconst_0                      return false
+  43: ireturn
+```
+
+The `i` in `iload`, `iadd` means *int*, the `a` in `aload` means a reference (an object). `(Ljava/lang/String;)Z` is the method's descriptor: it takes a `String` and returns `Z`, which is Java's code for `boolean`. Lines 12 to 24 are exactly the stack table of the last step.
+
+The class also keeps `SECRET` with its value `"flag{jvm_r3v3rs3}"` in its constant pool, so the Java Class View shows it under the fields. (It is a decoy here: `check` never uses it.)
+
+With which number does `check` compare `t` at the end?
+'''
+check = { kind = "choice", options = [
+    "1337: the bytecode compares t with sipush 1337 at offset 32",
+    "7: the value pushed at offset 19",
+    "0: the value pushed at offset 0",
+    "31: the jump target at offset 9",
+], correct = 0, explain = [
+    "Right. Offsets 31 to 35 push t, push 1337, and jump to 'return false' if they are not equal.",
+    "7 is added to i before the XOR, at offsets 19 and 21. It is part of the sum, not the target value.",
+    "0 is the start value of t and of i.",
+    "31 is an offset in the bytecode, the place where the loop ends. It is not a value of t.",
+] }
+hints = [
+    "Look at what happens after the loop: offsets 31 to 43.",
+    "sipush pushes a 16-bit constant.",
+]
+success = "1337. You read a Java method from its bytecode, with the original method name and string constant handed to you by the metadata."
+
+[[steps]]
+title = "Replay the bytecode"
+goal = "Compute what the method does for a given input."
+text = '''
+Reading bytecode for real means replaying it. Do it once for the `check` method of the last step with the input `pw = "AB"`.
+
+The loop runs twice (`pw.length()` is 2). Each round adds `pw.charAt(i) ^ (i + 7)` to `t`:
+
+- Round `i = 0`: `charAt(0)` is `'A'` = 65 = `0x41`. `i + 7` = 7. `0x41 ^ 0x07` = `0x46` = 70. `t` becomes 70.
+- Round `i = 1`: `charAt(1)` is `'B'` = 66 = `0x42`. `i + 7` = 8 = `0x08`. Compute `0x42 ^ 0x08` and add it to `t`.
+
+What is `t` when the loop ends? (The method then compares `t` with 1337, so it returns `false` for "AB", but the question is about `t`.)
+'''
+instructions = [
+    "Compute `0x42 ^ 0x08` (in binary `0100 0010` XOR `0000 1000`).",
+    "Add the result to 70.",
+    "Type the final value of `t` (decimal or hex with `0x`) and press **Check**.",
+]
+widget = "number_converter"
+check = { kind = "answer", answers = ["144"], number = true }
+hints = [
+    "0100 0010 XOR 0000 1000 = 0100 1010.",
+    "0100 1010 = 0x4a = 74.",
+    "70 + 74 = 144.",
+]
+success = "144. To pass, the sum over all characters must reach exactly 1337, and many inputs do that: this check has lots of valid passwords. Exactly the kind of condition a solver (or a little Rust program that searches) handles well."
+
+[[steps]]
+title = "The same function in Python and .NET"
+goal = "See that all stack bytecodes look alike."
+text = '''
+The same check, written in Python and in C#, compiled, and shown by ORRESS. Python first (`.pyc` for Python 3.14, as the **Python Bytecode View** shows it):
+
+```text
+def check(pw)
+   38 LOAD_FAST_BORROW     total
+   40 LOAD_GLOBAL          ord + NULL
+   50 LOAD_FAST_BORROW     c
+   52 CALL                 1           ord(c)
+   60 LOAD_FAST_BORROW     i
+   62 LOAD_SMALL_INT       7
+   64 BINARY_OP            +           i + 7
+   76 BINARY_OP            ^           ord(c) ^ (i + 7)
+   88 BINARY_OP            +=          total += ...
+  100 STORE_FAST           total
+  ...
+  110 LOAD_FAST_BORROW     total
+  112 LOAD_CONST           1337
+  114 COMPARE_OP           ==
+  118 RETURN_VALUE
+```
+
+And the C# version in CIL (the **.NET View** shows a method's IL when you select it):
+
+```text
+Check.Verify(string) : bool
+  IL_0006: ldloc.0                      push t
+  IL_0007: ldarg.1                      push pw
+  IL_0008: ldloc.1                      push i
+  IL_0009: callvirt System.String.get_Chars    pw[i]
+  IL_000e: ldloc.1                      push i
+  IL_000f: ldc.i4.7                     push 7
+  IL_0010: add
+  IL_0011: xor
+  IL_0012: add
+  IL_0013: stloc.0                      t = ...
+  ...
+  IL_0021: ldloc.0
+  IL_0022: ldc.i4 1337
+  IL_0027: ceq                          t == 1337
+  IL_0029: ret
+```
+
+Different spellings (`iload`, `LOAD_FAST`, `ldloc`), the same shape: push the operands, then the operation. Once you can read one stack bytecode, you can read them all. Note also how much the metadata gives away in each: method names (`check`, `Verify`), the library calls by name (`ord`, `String.get_Chars`), argument types.
+
+Which CIL instruction computes the XOR?
+'''
+check = { kind = "choice", options = ["xor", "add", "ceq", "ldc.i4.7"], correct = 0, explain = [
+    "Right. IL_0011 xor pops pw[i] and i+7 and pushes their XOR, like ixor in Java and BINARY_OP ^ in Python.",
+    "There are two adds: IL_0010 computes i + 7 and IL_0012 adds to t. Neither is the XOR.",
+    "ceq compares t with 1337 at the end.",
+    "ldc.i4.7 pushes the constant 7 ('load constant, 4-byte integer, value 7').",
+] }
+hints = [
+    "Look for the instruction between the two adds.",
+]
+success = "`xor`. Three languages, one pattern."
+
+[[steps]]
+title = "WebAssembly and JavaScript"
+goal = "Know what is different about the web formats."
+text = '''
+**WebAssembly** is a stack bytecode too, but it is designed to be compiled from C, C++ or Rust, so it is much closer to machine code: there are no classes, only functions, numbered locals and one big block of linear memory (an array of bytes, the program's whole RAM). Function names are often missing, apart from the functions the module **exports** (makes callable from outside) and **imports** (needs from the host, for example the browser). It is shown as text in a format called **WAT** (WebAssembly Text). A short example of what a check function can look like:
+
+```text
+(func $check (param i32 i32) (result i32)
+  local.get 0
+  i32.load8_u        ;; read one byte from memory
+  i32.const 90
+  i32.xor
+  ...
+```
+
+Reading WAT feels like reading assembly with a stack: harder than Java, easier than x86-64.
+
+**JavaScript** is shipped as source text, so there is nothing to decompile. Instead it is often **minified** (all names shortened to `a`, `b`, `c` and all whitespace removed) and **obfuscated**: strings hidden as `\x66\x6c\x61\x67` escapes or `String.fromCharCode(102,108,97,103)`, glued together from pieces, or decoded with `atob` (JavaScript's base64 decoder). The fix is the encoding knowledge from earlier in this level: decode the escapes, evaluate the string pieces, and re-indent the code.
+
+ORRESS's **WebAssembly View** lists a module's imports, exports, functions with their signatures, memories and globals, and shows the WAT. Its **JavaScript View** decodes `\xNN` escapes, `fromCharCode` and string concatenation, lists all string literals, and **beautifies** minified code (puts back line breaks and indentation).
+'''
+success = "The web formats: WebAssembly is low-level bytecode, JavaScript is obfuscated source."
+
+[[steps]]
+title = "Recognise the format"
+goal = "Identify a managed file by its first bytes."
+text = '''
+Before you can pick the right view, you have to know what you are looking at. File names lie (a challenge file may be called `data.bin`), but the first bytes rarely do. Each format starts with a fixed **magic number**:
+
+| First bytes | Format |
+|---|---|
+| `CA FE BA BE` ("cafe babe") | Java `.class` |
+| `00 61 73 6D` (a zero byte, then `asm`) | WebAssembly `.wasm` |
+| `50 4B 03 04` (`PK`) | a zip archive: `.jar`, `.apk`, also `.docx` |
+| `64 65 78 0A` (`dex` and a newline) | Android `.dex` |
+| 2 bytes that depend on the Python version, then `0D 0A` | Python `.pyc` |
+| `4D 5A` (`MZ`) | a Windows PE file: native, *or* .NET |
+
+For a PE file, the **Info** view tells you which one it is: ORRESS's detections name .NET programs. (Inside, a .NET program has a *CLI header* that points to its metadata.)
+
+A file you received for a challenge starts with these bytes in the Hex view:
+
+```text
+00 61 73 6D 01 00 00 00
+```
+'''
+check = { kind = "choice", options = ["WebAssembly", "Java class", "Python bytecode", ".NET assembly"], correct = 0, explain = [
+    "Right. 00 61 73 6D is a zero byte followed by 'asm', the WebAssembly magic. The next four bytes, 01 00 00 00, are the format version 1.",
+    "A Java class file starts with CA FE BA BE.",
+    "A .pyc ends its 4-byte magic with 0D 0A, and its first two bytes depend on the Python version.",
+    "A .NET assembly is a PE file and starts with MZ (4D 5A).",
+] }
+hints = [
+    "Read the bytes as ASCII: 0x61 is 'a', 0x73 is 's', 0x6d is 'm'.",
+]
+success = "WebAssembly. First bytes first: they decide which tool you open."
+
+[[steps]]
+title = "Find the views in ORRESS"
+goal = "Know where each managed-code view lives."
+text = '''
+ORRESS has one view per format. Open a file of that format, then open its view from **View**, **Open View**:
+
+- **Open .NET View**: types and their methods, the CIL of the selected method, the module and assembly names, the metadata tables, and the user strings.
+- **Open Java Class View**: the class, its fields (with constant values, where flags like `SECRET` hide), its methods with descriptors, and the bytecode of the selected method.
+- **Open Archive View**: the entries of a `.jar`, `.apk` or `.zip`, and the JAR manifest; a `.class` entry opens straight into the Java disassembly.
+- **Open Python Bytecode View**: the tree of code objects (the module, each function, each comprehension) with their constants, names and disassembly.
+- **Open WebAssembly View**: imports, exports, functions, memories, globals and the WAT.
+- **Open JavaScript View**: decoded strings and beautified code.
+
+The Academy's practice programs are all native Windows programs, so these views have nothing to show for them. When you get a managed-code challenge, for example from a CTF website, open it with **File**, **Open File…** and then open the matching view.
+
+Open the Java Class View now, to see where it is. Without a `.class` file open it only says that it needs one.
+'''
+instructions = [
+    "Click the **View** menu at the top of the window.",
+    "Point at **Open View**, then click **Open Java Class View**.",
+]
+spotlight = "view.Java"
+check = { kind = "action", id = "view::Java" }
+hints = [
+    "View menu, then the Open View submenu.",
+    "You can also press Ctrl+Shift+P and type Java.",
+]
+success = "That is where it lives. The other five views are in the same submenu."
+
+[[steps]]
+title = "Attacking managed code"
+goal = "A plan for managed-code challenges."
+text = '''
+The plan for a managed-code challenge:
+
+1. **Recognise the format** by its first bytes or the Info view. Do not force an x86 disassembly onto bytecode: it produces nonsense.
+2. **Read the metadata first.** Class names, method names, field values and strings often give the logic away, sometimes the flag itself.
+3. **Read the check method's bytecode**, replaying the stack where needed. Translate it into Rust in your notes; then all the techniques of this level apply: invert it, decode it, or solve it.
+4. **Expect obfuscation.** Protectors exist for managed code because it is so easy to read. .NET's *ConfuserEx* or Java's *ProGuard* rename everything to meaningless names (`a`, `b`, `\u0001`), encrypt the strings, and scramble the control flow. Renamed code is still readable bytecode; encrypted strings are decrypted at run time by a small function that you can find and run.
+
+Dedicated decompilers produce source code for managed formats: for example dnSpy or ILSpy for .NET, JADX for Android, CFR or Procyon for Java, and pycdc or decompyle3 for Python. ORRESS shows you the metadata and bytecode; for full source, those tools complement it.
+
+That completes Intermediate CTF. You can decode, recognise and decrypt, solve, listen to side channels, and read bytecode. Level 5 goes after programs that fight back: packers, obfuscation and custom virtual machines.
+'''
+success = "Level 4 done. You now have the toolkit for most intermediate CTF reversing challenges."

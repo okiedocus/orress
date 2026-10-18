@@ -1,90 +1,186 @@
 id = "l7-your-own-analysis-passes"
 level = 7
-order = 53
-title = "Your own analysis passes"
-summary = "The final skill: automate ORRESS. Drive its analysis engine from scripts and AI through the MCP server to build reusable passes."
-badge = "Toolsmith"
-
-[[steps]]
-title = "Scaling yourself"
-text = '''
-This is the last lesson, and the last skill isn't a new analysis technique — it's **automation**.
-
-Once you've reversed enough binaries, you notice you keep doing the *same* steps: triage every new sample, pull its strings and IOCs, diff it against a known-good baseline, flag the obfuscated ones. Doing that by hand is fine for one file. For a thousand — an incoming malware feed, every build of your product, a firmware dump full of embedded binaries — you need to **script it**.
-
-An **analysis pass** is a reusable, automated procedure over a binary. Instead of clicking through the GUI, you express your routine once and run it over everything. That's how one analyst keeps up with a flood of samples.
-'''
-
-[[steps]]
-title = "ORRESS as a server"
-text = '''
-ORRESS doesn't just have a GUI — it exposes its analysis engine as a **server** that scripts and AI agents can call. It speaks the **Model Context Protocol (MCP)**: a simple JSON-RPC interface (`initialize`, `tools/list`, `tools/call`) whose tools are the very analyses you've been using by hand.
-
-The tools available today include:
-
-- `triage` — the full static triage report (flags, capabilities, IOCs, hashes).
-- `strings` — extract strings.
-- `disassemble` — disassemble a function or region.
-- `detect_vm` — find VM-interpreter obfuscation.
-- `binary_diff` — diff two binaries (identical/changed/added/removed).
-- `deobfuscate_js` — unroll obfuscated JavaScript.
-- `archive_list` — list the contents of an archive.
-
-Each takes a file path (or two) and returns **structured results** a program can read — no screen-scraping.
-'''
-
-[[steps]]
-title = "Composing a pass"
-text = '''
-A custom pass is just these primitives **combined** to answer your question. Which of these is a realistic analysis pass you could build from ORRESS's MCP tools?
-'''
-check = { kind = "choice", options = [
-  "For every file in a folder: run triage, flag the ones detect_vm reports as obfuscated, and binary_diff each against a known-good baseline",
-  "Recompile the Linux kernel from source",
-  "Render a 3D animation of the binary",
-  "Order replacement hardware for the analysis machine",
-], correct = 0 }
-hints = [
-  "A pass chains the analysis tools over your inputs and collects the results.",
-  "triage + detect_vm + binary_diff, run across a folder, is exactly the kind of pipeline the MCP tools are for.",
+order = 5
+title = "The final project: a full solve"
+summary = "Bring the whole course together: triage, find the check, understand it with the decompiler, and write a keygen that recovers the key from the program itself."
+goals = [
+    "plan a solve with a clear checklist instead of random clicking",
+    "triage a program and locate its key-check function on your own",
+    "read a check function in the decompiler and state what it computes",
+    "write a keygen script that reads the program's own data and recovers the key",
 ]
-success = "Right — a pass orchestrates the analysis tools (triage, detect_vm, binary_diff) over your inputs and gathers structured output. The other options have nothing to do with the engine."
+badge = "Reverse Engineer"
+reveal_source = "crackme18"
 
 [[steps]]
-title = "The AI Assistant"
+title = "Graduation project"
+goal = "Know the goal and the plan."
 text = '''
-There's also an interactive front-end to the same engine: the **AI Assistant**. You can ask it questions about the open binary in plain language and have it drive the analysis for you — a conversational way to run a pass without writing the script yourself.
+This is the last lesson of the course. There is almost no hand-holding here: you use the skills from every level to solve one program, KeyVault 1.1 (**crackme18**), from start to finish, and recover its licence key.
 
-Crucially, it respects your privacy: it runs on **your own Claude plan through the Claude Code CLI** (no API key to manage), offers an **offline static-only mode**, and **sending the binary's context is opt-in** — you decide what leaves your machine.
+You could brute-force a key check with the emulator's side-channel solver, or solve it symbolically. This time you do it the way an expert does by hand: understand the check, then compute the key directly. The plan is a checklist you can reuse on any crackme:
 
-Open the **AI Assistant** (the View menu, or the command palette).
+1. **Triage.** What is this file? Format, language, where to start.
+2. **Locate.** Find the function that checks the key.
+3. **Understand.** Read it in the decompiler. What does it compute?
+4. **Recover.** Turn that understanding into a key, with a script that reads the program's own data.
+5. **Verify.** Confirm the key works.
+
+Open crackme18 and begin.
 '''
-check = { kind = "action", id = "view::Assistant" }
-spotlight = "view.Assistant"
-hints = ["Ctrl+Shift+P, then type \"Assistant\" — or the View menu."]
+instructions = [
+    "Click the **Open crackme18** button below this text.",
+]
+check = { kind = "open_crackme", name = "crackme18" }
+hints = ["The button is part of this lesson step."]
+success = "crackme18 is open and analysed. Work the checklist."
 
 [[steps]]
-title = "The protocol underneath"
+title = "Step 1 - Triage"
+goal = "Read the file overview and note the language."
 text = '''
-Both paths — your own scripts and the AI Assistant — reach ORRESS's analysis engine through the **same standard protocol**, the one named in the "ORRESS as a server" step. It's what lets any agent or tool call ORRESS's analyses in a uniform way.
+Always start with **What Is This File?**. It tells you the format, the architecture, the language or compiler, the protections, and tips on where to start. Knowing it is a Rust program compiled for x86-64 Windows tells you what the disassembly and decompiler will look like.
 
-What is the three-letter acronym for that protocol? (It stands for Model Context Protocol.)
+Open the overview and read the **detected Language** line.
 '''
-check = { kind = "answer", answers = ["MCP"], number = false, case_sensitive = false }
-hints = ["Model Context Protocol -> take the initial of each word.", "M-C-P."]
-success = "MCP — the Model Context Protocol. Expose your engine over it and any agent can orchestrate it; that's what makes ORRESS automatable."
+instructions = [
+    "With crackme18 active, press **Ctrl+I** (or **View > This File > File: What Is This File?**).",
+    "Find the **detected Language** line (under the protections).",
+    "Type the language name (one word) in the answer box and press **Check**.",
+]
+spotlight = "view.Info"
+check = { kind = "answer", answers = ["rust"], number = false, case_sensitive = false }
+hints = [
+    "The line starts with `detected Language:`.",
+    "It is the language this whole course prefers. Type `Rust`.",
+]
+success = "A stripped Rust program for x86-64 Windows, a console app. No packer, so the code is right there to read."
 
 [[steps]]
-title = "Build your own passes"
+title = "Step 2 - Locate the check"
+goal = "Find the key-check function from main."
 text = '''
-Putting it together, the way you turn repetitive analysis into a pass:
+The program reads a line and calls one function to check it, then prints "Access granted" or "Access denied". You find that function the same way as always: in `main`, look for the `call` whose result is immediately tested with `test al, al` (the returned `bool` is in `al`).
 
-1. **Spot the routine.** Notice a sequence of steps you repeat on every sample.
-2. **Express it with the tools.** Script a chain of MCP `tools/call`s — or just ask the Assistant to do it — over your inputs.
-3. **Run it at scale.** Point the pass at a folder, a malware feed, a CI pipeline, or a triage queue.
-4. **Collect structured output.** Feed the results straight into a report, a dashboard, or a database — no copy-paste.
+In crackme18's `main`, that test sits at `0x140001248`. The `call` on the line just above it is the check. Jump there and read the called address.
+'''
+instructions = [
+    "Press **Ctrl+D** to open the **Disassembly**.",
+    "Press **Ctrl+G**, type `140001248` and press **Enter**.",
+    "Read the line just above `test al,al`: it is `call sub_...`.",
+    "Type the called address (with `0x`) in the answer box and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x1400012e0"], number = true }
+hints = [
+    "The line above `test al,al` is `call sub_1400012e0`.",
+    "Type `0x1400012e0`.",
+]
+success = "The key check is `sub_1400012e0`. Now understand what it does."
 
-Examples worth building: auto-triage an incoming sample feed; regression-diff every release of your own product to catch unexpected changes; sweep a firmware image's archive and triage each embedded binary.
+[[steps]]
+title = "Step 3 - Understand it"
+goal = "Decompile the check and read what it computes."
+text = '''
+Reading a loop in assembly is slow. The **decompiler** turns it back into Rust-like code. Jump to the check and press **F5**. You will see roughly:
 
-That closes the loop. You started at Foundations with binary and hex; you finish by **programming the reverse-engineering engine itself**. The tool is no longer something you only use — it's something you extend. Go build.
+```rust
+fn sub_1400012e0(a1: &[u8]) -> bool {
+    if sub_140001100(a1, a1.len()) != 0 {        // a shape check (length + dashes)
+        // ... every byte must be printable ...
+        let mut rdx_2 = 0;
+        while rdx_2 != 10 {
+            if (a1[rdx_2] ^ 92) + rdx_2 != read::<u8>(rdx_2 + &data_140019478) {
+                break;                            // wrong byte
+            }
+            rdx_2 += 1;
+        }
+    }
+}
+```
+
+The important line is the comparison. Each key byte `a1[i]` is XORed with `92` (that is `0x5c`), then `i` is added, and the result must equal the `i`-th byte of a table in the program's data, `data_140019478`.
+
+What is done to the key byte **before** `i` is added? Answer in one word.
+'''
+instructions = [
+    "Press **Ctrl+G**, type `1400012e0` and press **Enter** (in the disassembly).",
+    "Press **F5** to open the **Decompiler**.",
+    "Read the line with `^ 92`. Type the operation applied to the key byte (one word) in the answer box and press **Check**.",
+]
+spotlight = "view.Decompiler"
+check = { kind = "answer", answers = ["xor", "xored"], number = false, case_sensitive = false }
+hints = [
+    "`^` in Rust is one specific bitwise operation.",
+    "`a1[i] ^ 92` is a bitwise XOR. Type `xor`.",
+]
+success = '''So the rule is `(key[i] ^ 0x5c) + i == ENC[i]`, where `ENC` is the table at `data_140019478`. Note that name, you need the address `0x140019478` next.'''
+
+[[steps]]
+title = "Step 4 - Recover the key"
+goal = "Write a keygen script that reads ENC and inverts the rule."
+text = '''
+You know the rule and where the table is. Invert it: from `(key[i] ^ 0x5c) + i == ENC[i]` it follows that
+
+```text
+key[i] = (ENC[i] - i) ^ 0x5c
+```
+
+Let a script read the 10 table bytes and compute the key. `read(addr, len)` returns the bytes as numbers. The key is made of letters, digits and dashes, so you can turn each code into a character by looking it up in a small charset string (this avoids character literals):
+
+```rhai
+// Keygen for KeyVault 1.1.
+let enc = read(0x140019478, 10);
+print("ENC table: " + enc);
+let charset = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+let key = "";
+for i in 0..10 {
+    let code = ((enc[i] - i) ^ 0x5c) & 0xff;
+    for c in charset { if c.to_int() == code { key += c; } }
+}
+print("key: " + key);
+```
+
+Open the Scripting console and run it.
+'''
+instructions = [
+    "Open **View > Open View > Scripting console**.",
+    "Clear the script box and paste the keygen above.",
+    "Click **Run** and read the `key:` line in the output.",
+    "Type the recovered key in the answer box (case matters) and press **Check**.",
+]
+spotlight = "view.Script"
+check = { kind = "secret", sha256 = "a02124df865a2c5cc9633d5a7ef71f85d3346040060184c4acf548a43944cb0b" }
+hints = [
+    "The output prints the ENC table and then `key: ` followed by 10 characters.",
+    "It has the shape XXX-XXXX-X, with two dashes.",
+    "Type exactly what the script printed after `key: `.",
+]
+success = "Your script read the program's own table and computed the key, no guessing, no brute force. That is reverse engineering: understand, then produce."
+
+[[steps]]
+title = "Step 5 - Verify"
+goal = "Confirm the key, and know how else you could have solved it."
+text = '''
+To be sure, you would run the program and paste the key: it prints "Access granted". You can do that any time from a terminal.
+
+It is worth knowing the other roads to the same key, all taught in this course, so you can pick the fastest one next time:
+
+- **Side-channel solver** (Level 4): the loop stops at the first wrong byte, so more correct bytes mean more instructions. The Emulator's instruction-counting solver recovers the key one byte at a time, without you reading the rule.
+- **Symbolic solver** (Level 4): mark the "granted" block as the target and let the solver find an input that reaches it.
+- **Time-travel** (this level): record the check with a near-miss key and read ENC and the loop counter straight from the trace.
+
+You chose to understand the check and invert it, which is the most reliable: it gives the real key, and it tells you *why*.
+'''
+
+[[steps]]
+title = "You did it"
+goal = "Look back at the whole journey."
+text = '''
+That is the end of the Academy.
+
+Look back at how far you came. You started at Foundations not knowing what a byte or a register was. You learned to read assembly, to use the decompiler, the debugger, the emulator and the Workbench. You beat anti-debugging, recognised crypto, solved checks with keygens, symbolic execution and side channels. You took apart packers, custom VMs and obfuscation, triaged malware safely and wrote YARA rules. In this last level you debugged backward through a recording, diffed a patch to find a fixed bug, learned how kernel drivers and rootkits work, and automated ORRESS with your own scripts.
+
+Reverse engineering is a craft you get better at by doing. Pick a crackme from the CTF site, a program on your own machine, or an old game, and apply the checklist: triage, locate, understand, recover, verify. The tool is no longer something you only click through, it is something you can read, question and extend.
+
+Go and take something apart.
 '''

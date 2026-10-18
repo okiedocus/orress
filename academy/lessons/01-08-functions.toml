@@ -1,0 +1,312 @@
+id = "l1-functions"
+level = 1
+order = 8
+title = "Functions: call and ret"
+summary = "How call and ret use the stack and the return address, and how functions call each other."
+goals = [
+    "explain what `call` and `ret` do with the stack and `rip`",
+    "calculate the return address of a real `call` instruction",
+    "write and call functions in the simulator",
+    "follow nested calls on the stack",
+    "find functions and their names in ORRESS",
+]
+
+[[steps]]
+title = "call and ret"
+goal = "Know the two instructions behind every function call."
+text = '''
+A Rust function call does two things: it runs the function, and afterwards it continues right after the call. The CPU needs to remember *where* to continue. It uses the stack for that.
+
+- **`call f`** pushes the address of the next instruction (the **return address**) on the stack, then jumps to `f`.
+- **`ret`** (return) pops the top of the stack into `rip`: it jumps back to the return address.
+
+In other words, `call f` is `push <address of the next line>` + `jmp f`, and `ret` is "pop into `rip`".
+
+```rust
+fn triple(x: u64) -> u64 { x * 3 }
+
+let a = triple(3);
+let b = a + 1;
+```
+
+```text
+    mov rax, 3
+    call triple      ; push the address of the next line, jump to triple
+    add rax, 1       ; <- the return address points here
+    ...
+triple:
+    imul rax, 3
+    ret              ; pop the return address and jump back there
+```
+
+The function runs, `ret` finds the return address on top of the stack, and the CPU continues with `add rax, 1`. The same function can be called from a hundred places; each `call` pushes its own return address, so `ret` always goes back to the right place.
+
+This is why the stack must be balanced (Lesson 7): when `ret` runs, the return address must be on top again. Every push the function did must have been popped, and every `sub rsp` undone.
+
+In this simulator the program itself also ends with `ret`: the end-of-program value at the bottom of the stack is a return address too. Returning to it ends the program with *The program returned from its last function. Done!*
+'''
+
+[[steps]]
+title = "Exercise: find the return address"
+goal = "Work out the return address of a real call."
+text = '''
+In real programs the return address is a real address. Here are three lines from crackme #1's `main`. The first column is the address of each instruction:
+
+```text
+14000111d  mov  edx, 0x15
+140001122  call sub_1400059b0
+140001127  call sub_140005aa0
+```
+
+The instruction `call sub_1400059b0` starts at `0x140001122`. A `call` with an address is 5 bytes long. The next instruction therefore starts at `0x140001122 + 5`, and that is the return address that `call` pushes.
+
+Two more things to notice:
+
+- `sub_1400059b0` is a **function name** that ORRESS made up: `sub_` (for "subroutine", an old word for function) plus the address where the function starts. The program has no real names because it was stripped (Level 0).
+- When `sub_1400059b0` executes its `ret`, the CPU continues at the next `call`, and pushes a new return address for that one.
+
+What return address does `call sub_1400059b0` push on the stack?
+'''
+instructions = [
+    "Take the address of the `call` instruction: `0x140001122`.",
+    "Add the length of the instruction, 5 bytes. (Or look at the address of the next line.)",
+    "Type the result as a hex number starting with `0x` and press **Check**.",
+]
+check = { kind = "answer", answers = ["0x140001127"], number = true }
+hints = [
+    "The return address is the address of the instruction right after the call.",
+    "0x140001122 + 5 = 0x140001127.",
+]
+success = '''
+`0x140001127`, the address of the next line. When a debugger (Level 3) stops inside a function, the stack shows return addresses like this one, and they tell you who called the function.
+'''
+
+[[steps]]
+title = "Watch a call on the stack"
+goal = "Step through `call` and `ret` and watch the return address."
+text = '''
+The simulator loaded the `triple` example:
+
+```text
+    mov rax, 3
+    call triple
+    ret              ; end of the program
+triple:
+    mov rbx, rax
+    add rax, rbx
+    add rax, rbx
+    ret              ; back to the caller
+```
+
+1. `mov rax, 3`: the argument.
+2. `call triple` pushes the return address and jumps to the label `triple`.
+3. Inside `triple`: copy `rax` to `rbx`, then add it twice. 3 + 3 + 3.
+4. The `ret` of `triple` pops the return address and jumps back, to the line after the call.
+5. That line is the program's own `ret`, which returns to the end-of-program value.
+
+The simulator does not have real addresses. As its return address it pushes the **position** of the next instruction in its program, counting from 0: here `0x2`, because the instruction after the call is the third one. On a real CPU it would be an address like `0x140001127`.
+
+Step through it slowly. After `call triple`, look at the top of the **Stack** pane: `0x2` sits above the end-of-program value. After the `ret` inside `triple`, it is gone again.
+
+What is in `rax` when the program has finished?
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** twice. Look at the top of the **Stack** pane: the return address `0x2` appeared.",
+    "Keep pressing **Step** until the status line says *Done!*. Watch the `>` jump back after the `ret` of `triple`.",
+    "Type the final value of `rax` in the answer box and press **Check**.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+    mov rax, 3
+    call triple
+    ret              ; end of the program
+triple:
+    mov rbx, rax
+    add rax, rbx
+    add rax, rbx
+    ret              ; back to the caller
+'''
+check = { kind = "answer", answers = ["9"], number = true }
+hints = [
+    "triple adds the original value to itself twice.",
+    "3 + 3 + 3.",
+]
+
+[[steps]]
+title = "Exercise: write a function"
+goal = "Write a function and call it."
+text = '''
+Now write a function yourself. Translate:
+
+```rust
+fn square(x: u64) -> u64 {
+    x * x
+}
+
+let result = square(6);
+```
+
+Keep it simple, as in the example: the argument is in `rax` when the function starts, and the result goes back in `rax`. (Real programs use other registers for arguments; that is the next lesson.)
+
+The simulator has a skeleton:
+
+- The "main" part sets `rax` to 6, then must **call** `square`, then ends with `ret`.
+- The function `square` starts at the label `square:`. It needs one `imul` and a `ret`.
+
+The `ret` after the call in the main part is important. Without it, the CPU would continue from the main part right into `square` a second time, because the lines are one after another in memory. In real programs functions are placed one after another too, and each one ends with `ret` (or a jump) for the same reason.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Replace `; call your function here` with `call square`.",
+    "Replace `; your function here` with `imul rax, rax` and, on the next line, `ret`.",
+    "Press **Run**. `rax` must be 36.",
+]
+spotlight = "sim.code"
+sim_code = '''
+    mov rax, 6
+    ; call your function here
+    ret
+square:
+    ; your function here
+'''
+check = { kind = "sim", expect = [["rax", 36]], requires = ["call", "imul"] }
+hints = [
+    "The call goes after the mov: `call square`.",
+    "Inside square: `imul rax, rax`, then `ret`.",
+]
+solution = '''
+    mov rax, 6
+    call square
+    ret
+square:
+    imul rax, rax
+    ret
+'''
+
+[[steps]]
+title = "Exercise: call it twice"
+goal = "See that one function can be called from several places."
+text = '''
+Functions exist so that code can be reused. Each `call` pushes its own return address, so the function always returns to the right caller.
+
+```rust
+fn double(x: u64) -> u64 { x + x }
+
+let a = double(5);   // 10
+let b = double(a);   // 20
+```
+
+**Exercise.** Write a function `double` that computes `rax = rax + rax`, and call it **twice**, so that `rax` goes from 5 to **20**.
+
+While you step through it, watch the return address on the **Stack** pane: it is different for the two calls (the simulator shows the position of the line after each call). One function, two places to go back to.
+
+This is also why reverse engineers look at the **callers** of a function. ORRESS's Functions view has a **Callers** column that counts how many places call each function. A small function with many callers is usually a helper (like `double` here, or a string-length function). A function with exactly one caller, right before *Correct!* or *Wrong*, is usually the interesting one.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "In the main part, write `call double` two times, one below the other, before the `ret`.",
+    "Below the label `double:`, write `add rax, rax` and `ret`.",
+    "Press **Run**. `rax` must be 20.",
+]
+spotlight = "sim.code"
+sim_code = '''
+    mov rax, 5
+    ; call double two times
+    ret
+double:
+    ; rax = rax + rax, then return
+'''
+check = { kind = "sim", expect = [["rax", 20]], requires = ["call", "add"] }
+hints = [
+    "Two lines `call double` after the mov.",
+    "The function body is `add rax, rax` and `ret`.",
+]
+solution = '''
+    mov rax, 5
+    call double
+    call double
+    ret
+double:
+    add rax, rax
+    ret
+'''
+
+[[steps]]
+title = "Functions that call functions"
+goal = "Follow return addresses when calls are nested."
+text = '''
+A function can call another function. Each `call` pushes one more return address, and each `ret` pops one. So the stack holds a return address for **every function that is still running**: a trail back to the start. This trail is called the **call stack**. When a Rust program panics with `RUST_BACKTRACE=1`, the backtrace it prints is this call stack.
+
+The simulator loaded this program:
+
+```text
+    mov rax, 1
+    call outer
+    ret
+outer:
+    add rax, 1
+    call inner       ; outer calls inner
+    add rax, 1
+    ret
+inner:
+    imul rax, 10
+    ret
+```
+
+Step through it until the `>` marker is on the line `imul rax, 10`, which means `inner` is about to run. Then look at the **Stack** pane.
+
+While `inner` runs, how many return addresses are on the stack, not counting the end-of-program value?
+'''
+instructions = [
+    "Click the **CPU Simulator** tab and press **Reset**.",
+    "Press **Step** until the `>` in the program is on `imul rax, 10`.",
+    "Count the values above the `(end of program)` line in the **Stack** pane.",
+    "Pick your answer below. Then press **Run** and check that `rax` ends as 21.",
+]
+spotlight = "sim.stack"
+sim_code = '''
+    mov rax, 1
+    call outer
+    ret
+outer:
+    add rax, 1
+    call inner       ; outer calls inner
+    add rax, 1
+    ret
+inner:
+    imul rax, 10
+    ret
+'''
+check = { kind = "choice", options = ["One", "Two", "Three", "None"], correct = 1, explain = [
+    "There are two running calls: the one into outer, and the one into inner.",
+    "One return address back into the main part (from `call outer`) and one back into outer (from `call inner`). inner returns first, then outer.",
+    "Only two calls have happened so far. The end-of-program value does not count.",
+    "Every call pushes a return address. Two calls have run and neither has returned yet.",
+] }
+hints = [
+    "How many `call` instructions have run, and how many `ret` instructions?",
+]
+
+[[steps]]
+title = "Functions in ORRESS"
+goal = "Know how ORRESS shows functions and where a program really starts."
+text = '''
+In a compiled program every Rust function becomes a piece of machine code that starts at some address and ends with `ret`. ORRESS finds these pieces by following every `call` instruction. Where you will see them:
+
+- **Functions view** (in the **Project** panel, or with **Ctrl+Shift+F**): every function found, with its address, size and the number of places that call it ("callers").
+- **Disassembly view**: a thin line across the view marks the start of each function, with its name.
+- **Names**: stripped programs have no names, so ORRESS invents `sub_<address>`. A few names it can still find: functions imported from Windows DLLs (like `memcmp` or `WakeByAddressSingle`), and functions it recognises, like `main` and `rust_runtime_main`.
+
+Where does a Rust program start? Not in your `main`. Windows starts the program at its **entry point** (Level 0), which runs setup code from the C runtime. That calls Rust's runtime start function, which calls your `main`, and `main`'s `ret` goes back into that runtime code, which then ends the process. ORRESS's **Go to main** (**Ctrl+Shift+M**, or the **Go** menu) skips all of that and takes you straight to your own `main`.
+
+When you read a function, use its call and ret to orient yourself:
+
+- the lines right before a `call` prepare the arguments;
+- the lines right after it use the result.
+
+Which registers carry those arguments and the result is fixed by a set of rules. That is the next lesson.
+'''
+success = '''
+You know how functions work at the machine level. Next: the rules that say where arguments and results go, so you can read any call in a real program.
+'''

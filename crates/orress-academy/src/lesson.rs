@@ -128,35 +128,35 @@ pub struct Lesson {
 pub const LEVELS: [(&str, &str); 8] = [
     (
         "Foundations",
-        "How computers run programs, binary and hex, signed numbers, text and memory, what a \n         compiler produces, executable files, a tour of ORRESS.",
+        "How computers run programs, binary and hex, signed numbers, text and memory, what a compiler produces, executable files, a tour of ORRESS.",
     ),
     (
         "Reading assembly",
-        "Registers, arithmetic and bits, jumps and loops, memory and the stack, calling \n         conventions, Rust patterns, your first two crackmes.",
+        "Registers, arithmetic and bits, jumps and loops, memory and the stack, calling conventions, Rust patterns, your first two crackmes.",
     ),
     (
         "Static analysis",
-        "File formats, finding main, names and comments, the graph view, the decompiler, \n         XOR-encoded passwords, keygens.",
+        "File formats, finding main, names and comments, the graph view, the decompiler, XOR-encoded passwords, keygens.",
     ),
     (
         "Dynamic analysis",
-        "Debuggers, breakpoints and stepping, reading and changing a running program, patching, \n         emulation, anti-debugging.",
+        "Watching a program run, and the debugger. Lessons on breakpoints, patching, emulation and anti-debugging come in a later version.",
     ),
     (
         "Intermediate CTF",
-        "The CTF workflow, encodings and the Workbench, recognising crypto, symbolic execution, \n         side channels, bytecode (.NET/Java/Python/WASM).",
+        "The CTF workflow, encodings and the Workbench, recognising crypto, symbolic execution, side channels, bytecode (.NET/Java/Python/WASM).",
     ),
     (
         "Advanced",
-        "Obfuscation, control-flow flattening, custom VMs, packers, self-modifying code, other \n         CPU architectures.",
+        "Obfuscation, control-flow flattening, custom VMs, packers, self-modifying code, other CPU architectures.",
     ),
     (
         "Malware analysis",
-        "What malware is, a safe lab, triage, decoding a config, behaviour, YARA rules, \n         reporting.",
+        "What malware is, a safe lab, triage, decoding a config, behaviour, YARA rules, reporting.",
     ),
     (
         "Expert",
-        "Time-travel debugging, binary diffing, drivers and rootkits, scripting ORRESS, and a \n         full-solve final project.",
+        "Time-travel debugging, binary diffing, drivers and rootkits, scripting ORRESS, and a full-solve final project.",
     ),
 ];
 

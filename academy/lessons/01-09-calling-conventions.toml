@@ -2,72 +2,378 @@ id = "l1-calling-conventions"
 level = 1
 order = 9
 title = "Calling conventions"
-summary = "Which registers hold the arguments and the result, on Windows and Linux."
+summary = "Which registers carry the arguments and the result on Windows and Linux, shadow space and saved registers."
+goals = [
+    "name the argument registers and the return register on Windows x64",
+    "know how Linux and macOS (System V) differ",
+    "write a function that follows the Windows convention",
+    "read the arguments and the result around a real `call`",
+    "explain shadow space and which registers a function must save",
+]
 
 [[steps]]
-title = "Where do the arguments go?"
+title = "Rules for calling"
+goal = "Know why calling conventions exist and the two you will meet."
 text = '''
-Caller and callee must agree where arguments are. That agreement is the **calling convention**:
+In the last lesson the argument and the result were both in `rax`, because we decided so. Real programs need fixed rules: a function compiled today must work with a caller compiled last year, maybe by a different compiler. The rules that say where arguments go, where the result comes back, and which registers a function may change, are called a **calling convention**.
 
-| | 1st | 2nd | 3rd | 4th | result |
-|---|---|---|---|---|---|
-| Windows x64 | `rcx` | `rdx` | `r8` | `r9` | `rax` |
-| Linux / macOS x64 | `rdi` | `rsi` | `rdx` | `rcx` | `rax` |
+Two conventions matter on x86-64:
 
-More arguments go on the stack. Rust uses these conventions for `extern "C"` functions, and in practice simple Rust functions follow them too.
+| | 1st | 2nd | 3rd | 4th | more | result |
+|---|---|---|---|---|---|---|
+| **Windows x64** | `rcx` | `rdx` | `r8` | `r9` | on the stack | `rax` |
+| **System V** (Linux, macOS) | `rdi` | `rsi` | `rdx` | `rcx` | `r8`, `r9`, then the stack | `rax` |
+
+So on Windows, a call to `f(a, b)` looks like this:
+
+```text
+mov rcx, a     ; first argument
+mov rdx, b     ; second argument
+call f
+               ; the result is now in rax
+```
+
+Smaller arguments use the smaller register names: a `u32` as first argument goes in `ecx`, a `bool` in `cl`. A `bool` or `u32` result comes back in `al` or `eax`.
+
+Rust guarantees these conventions only for `extern "C"` functions. Ordinary Rust functions use Rust's own, unstable convention. In practice it is very close: small arguments go in the same registers in the same order. So use the table as your first guess, and check it by looking at which registers are set before the call and used at the start of the function.
+
+The crackmes in this Academy are Windows programs, so the Windows column is the one you will use most.
+'''
+
+[[steps]]
+title = "Which register holds the first argument?"
+goal = "Apply the Windows convention to a Rust function."
+text = '''
+Look at this Rust function, compiled for Windows:
 
 ```rust
-fn f(a: u64, b: u64) -> u64 { a * 2 + b }
+fn f(a: u64, b: u64) -> u64 {
+    a * 2 + b
+}
 ```
+
+When `f` starts, its arguments are already in registers: the caller put them there just before the `call`. The compiled function might look like this:
+
+```text
+f:
+    lea rax, [rdx+rcx*2]    ; rax = b + a * 2  (lea used as a calculator, Lesson 6)
+    ret
+```
+
+A tiny function like this does not even need a stack frame. It reads the two argument registers, calculates the result straight into the return register, and returns.
+
+Reading functions like this is how you recover a function's **signature**: which registers it reads without setting them first are its arguments; what it leaves in `rax` before `ret` is its result.
 
 On Windows, which register holds `a` when `f` starts?
 '''
-check = { kind = "choice", options = ["rax", "rcx", "rdi", "rsp"], correct = 1 }
+check = { kind = "choice", options = ["rax", "rcx", "rdi", "rsp"], correct = 1, explain = [
+    "rax is where the result goes. It does not carry an argument.",
+    "On Windows x64 the first argument is in rcx, the second in rdx. The lea reads both.",
+    "rdi is the first argument on Linux and macOS (System V), not on Windows.",
+    "rsp is the stack pointer. It is never used for an argument.",
+] }
+hints = [
+    "Look at the Windows x64 row of the table on the previous page.",
+]
 
 [[steps]]
-title = "Linux"
+title = "The same function on Linux"
+goal = "Know the System V argument order."
 text = '''
-The same function compiled for Linux: which register holds `a`?
+Compile the same Rust function for Linux or macOS and the registers change, because those systems use the **System V** convention:
+
+```text
+f:
+    lea rax, [rsi+rdi*2]    ; rax = b + a * 2
+    ret
+```
+
+The instruction is the same, only the registers differ: `rdi` and `rsi` instead of `rcx` and `rdx`. The result is still in `rax`, as on Windows.
+
+A simple way to remember System V's order: "**Di**d **Si**r **D**on **C**ook?" for `rdi`, `rsi`, `rdx`, `rcx`, followed by `r8` and `r9`.
+
+So the first question when you reverse a function is: **which platform was it compiled for?** ORRESS's **Info** view tells you: a PE file is a Windows program (Windows convention), an ELF file is a Linux program (System V), and a Mach-O file is a macOS program (System V too). Getting this wrong makes you read the arguments in the wrong order.
+
+Compiled for Linux, which register holds `a` when `f` starts?
 '''
-check = { kind = "choice", options = ["rcx", "rsi", "rdi", "rdx"], correct = 2 }
-success = "So the first thing to check when you reverse a function: which platform? ORRESS's Info view tells you (PE is Windows, ELF is Linux)."
+check = { kind = "choice", options = ["rcx", "rsi", "rdi", "rdx"], correct = 2, explain = [
+    "rcx is the first argument on Windows. On Linux it is the fourth.",
+    "rsi is the second argument on Linux: here it holds b.",
+    "System V passes the first argument in rdi.",
+    "rdx is the third argument on Linux (and the second on Windows).",
+] }
+hints = [
+    "Did Si(r) ...: the first is Di.",
+]
 
 [[steps]]
-title = "Slices and &str take two registers"
+title = "Exercise: a Windows function"
+goal = "Write a function that follows the Windows x64 convention."
 text = '''
-A Rust slice (`&[u8]`) or `&str` is a pointer **and** a length, so it uses two argument registers:
+Write this Rust function the way a Windows compiler would:
 
 ```rust
-fn check_password(s: &[u8]) -> bool { /* ... */ }
+fn area(width: u64, height: u64) -> u64 {
+    width * height
+}
+
+let a = area(6, 7);
 ```
 
-On Windows, `rcx` is the pointer to the bytes and `rdx` their length. The second crackme's check function begins with:
+Following the Windows convention:
 
-```text
-cmp rdx, 7
-jne wrong
-```
+- the caller puts `width` in `rcx` and `height` in `rdx`, then calls;
+- the function computes the result in `rax`, then returns.
 
-What does that tell you?
+The simulator already contains the caller. You write the body of `area`. A good way: copy the first argument into `rax`, multiply `rax` by the second argument, return.
+
+Notice that the function must not change `rcx` or `rdx` to compute the result *in* them: the result must be in `rax`, because that is where the caller looks for it.
 '''
-check = { kind = "choice", options = [
-    "The password must be 7 characters long",
-    "The password must contain the digit 7",
-    "The function is called 7 times",
-    "The password starts at address 7",
-], correct = 0 }
-success = "Exactly. You already know something about the password without seeing it."
+instructions = [
+    "Click the **CPU Simulator** tab. The caller sets `rcx` to 6 and `rdx` to 7 and calls `area`.",
+    "Below `area:`, write `mov rax, rcx`, then `imul rax, rdx`, then `ret`.",
+    "Press **Run**. `rax` must be 42.",
+]
+spotlight = "sim.code"
+sim_code = '''
+    mov rcx, 6       ; 1st argument: width
+    mov rdx, 7       ; 2nd argument: height
+    call area
+    ret              ; the result is in rax
+area:
+    ; rax = rcx * rdx, then return
+'''
+check = { kind = "sim", expect = [["rax", 42]], requires = ["call", "imul"] }
+hints = [
+    "The result must end up in rax. Start with `mov rax, rcx`.",
+    "Then multiply by the second argument: `imul rax, rdx`.",
+    "Do not forget `ret` at the end of the function.",
+]
+solution = '''
+    mov rcx, 6
+    mov rdx, 7
+    call area
+    ret
+area:
+    mov rax, rcx
+    imul rax, rdx
+    ret
+'''
 
 [[steps]]
-title = "Return values"
+title = "Exercise: call a Linux function"
+goal = "Set up the arguments for the System V convention."
 text = '''
-The result comes back in `rax`, or a smaller part of it: a `bool` in `al`, a `u32` in `eax`. After a call you will typically see:
+Now the other side: you are the **caller**. The simulator contains a function that was written for Linux, so it follows System V. It reads its two arguments from `rdi` and `rsi`:
 
-```text
-call check_password
-test al, al        ; is the bool false (0)?
-je wrong           ; jump if it was false
+```rust
+fn diff(a: u64, b: u64) -> u64 {
+    a - b
+}
 ```
 
-`test al, al` sets ZF when `al` is 0, so `je` here means "if the function returned false". This exact pattern decides Correct or Wrong in most crackmes.
+```text
+diff:
+    mov rax, rdi     ; rax = a
+    sub rax, rsi     ; rax = a - b
+    ret
+```
+
+Your job: call `diff(50, 8)` so that `rax` ends as **42**. Put the arguments in the right registers before the `call`.
+
+Try it wrong first, if you like: put 50 in `rcx` and 8 in `rdx` (the Windows registers) and press **Run**. The function reads `rdi` and `rsi`, which are 0, and `rax` ends as 0. Mixing up conventions gives wrong results without any error message, which is why knowing the platform matters.
+'''
+instructions = [
+    "Click the **CPU Simulator** tab.",
+    "Replace the comment in the caller with `mov rdi, 50` and `mov rsi, 8`.",
+    "Press **Run**. `rax` must be 42.",
+]
+spotlight = "sim.code"
+sim_code = '''
+    ; set up the arguments for diff(50, 8) here
+    call diff
+    ret
+diff:                ; System V: a in rdi, b in rsi
+    mov rax, rdi
+    sub rax, rsi
+    ret
+'''
+check = { kind = "sim", expect = [["rax", 42], ["rdi", 50], ["rsi", 8]], requires = ["call"] }
+hints = [
+    "System V: first argument in rdi, second in rsi.",
+    "Before the call: `mov rdi, 50` and `mov rsi, 8`.",
+]
+solution = '''
+    mov rdi, 50
+    mov rsi, 8
+    call diff
+    ret
+diff:
+    mov rax, rdi
+    sub rax, rsi
+    ret
+'''
+
+[[steps]]
+title = "Arguments in a real program"
+goal = "Read the arguments before a real `call`."
+text = '''
+Here are two calls from crackme #1's `main`, as ORRESS shows them:
+
+```text
+140001250  lea  rcx, [0x140018428]   ; "Correct! You cracked your first program."
+140001257  mov  edx, 0x53
+14000125c  call sub_1400059b0
+```
+
+The lines before the `call` fill the argument registers: `rcx` gets the address of the message (first argument), `edx` a number (second argument; Rust's printing code uses it to describe the text, it is related to the text's length). So `sub_1400059b0` is the function that prints a message: `println!` in the Rust source.
+
+```text
+1400012cc  mov  ecx, 1
+1400012d1  call sub_140004f80
+1400012d6  ud2
+```
+
+Here only one argument is set. `ud2` after the call is an instruction that crashes on purpose: the compiler puts it after a call that **never returns**. A function that never returns and gets one small number... In the source it is `std::process::exit(1)`.
+
+This is the core skill of reading calls: look at which argument registers are set right before the `call`, and with what. Often that is enough to guess what an unnamed function does. Rename it (**N**) as soon as you know.
+
+What number does `main` pass as the first argument to `sub_140004f80`?
+'''
+instructions = [
+    "Find the line right before `call sub_140004f80`.",
+    "That line sets the first-argument register. Type the number it puts there and press **Check**.",
+]
+check = { kind = "answer", answers = ["1"], number = true }
+hints = [
+    "The first argument on Windows is rcx, here written as its 32-bit part ecx.",
+    "`mov ecx, 1` sets it to 1.",
+]
+success = '''
+1, the exit code: `exit(1)` tells Windows "the program failed". You read a function call without any names, only from the registers.
+'''
+
+[[steps]]
+title = "Return values: rax, eax and al"
+goal = "Read the result of a call, especially a `bool`."
+text = '''
+The result of a function comes back in `rax`, or in the part of `rax` that fits the type:
+
+| Rust return type | Register |
+|---|---|
+| `u64`, `usize`, a pointer, a reference | `rax` |
+| `u32`, `i32` | `eax` |
+| `bool`, `u8` | `al` |
+
+A `bool` is one byte: 0 for `false`, 1 for `true`. This is the pattern you will see in almost every crackme, right after the password check is called. From crackme #2's `main`:
+
+```text
+140001413  call sub_140001100     ; the password check, returns a bool in al
+140001418  test al, al            ; is al zero? (ZF = 1 if false)
+14000141a  je   loc_140001487     ; jump if it was false
+```
+
+`test al, al` (Lesson 4) sets ZF when `al` is 0. So `je` means "jump if the function returned `false`", and `loc_140001487` prints *Wrong password. Try again!*. The Rust was:
+
+```rust
+if check_password(line.as_bytes()) {
+    println!("Correct! ...");
+} else {
+    println!("Wrong password. Try again!");
+    std::process::exit(1);
+}
+```
+
+When does this code jump to `loc_140001487`?
+'''
+check = { kind = "choice", options = [
+    "When the check function returns true",
+    "When the check function returns false",
+    "Always, after the call",
+    "When al is 1",
+], correct = 1, explain = [
+    "If it returns true, al is 1, `test al, al` gives a non-zero result, ZF = 0 and `je` does not jump.",
+    "false is al = 0. `test al, al` sets ZF, and je jumps: to the Wrong password message.",
+    "je is conditional. It jumps only when ZF is 1.",
+    "al = 1 means true. Then ZF is 0 and je does not jump.",
+] }
+hints = [
+    "test al, al sets ZF exactly when al is 0.",
+]
+deep_dive = '''
+Results larger than 8 bytes but at most 16 often come back in two registers: `rax` and `rdx`. For example, `read_line` returns an `io::Result<usize>`, and in crackme #1 you can see `main` store both halves right after the call: `mov [rsp+0x50], rax` and `mov [rsp+0x58], rdx`. Larger results (big structs) are returned through memory: the caller passes a pointer to a free space as a hidden first argument, and the function writes the result there.
+'''
+
+[[steps]]
+title = "Which registers a function may change"
+goal = "Know volatile and non-volatile registers."
+text = '''
+A calling convention also says which registers a function may freely change, and which it must give back unchanged:
+
+- **Volatile** registers (also called **caller-saved**) may be changed by any function you call. On Windows: `rax`, `rcx`, `rdx`, `r8`, `r9`, `r10`, `r11`. If the caller still needs a value in one of these after the call, the caller must save it first.
+- **Non-volatile** registers (also called **callee-saved**) must have the same value when the function returns as when it was called. On Windows: `rbx`, `rbp`, `rdi`, `rsi`, `rsp`, `r12` to `r15`. A function that wants to use one of them must save it first (`push`) and restore it before returning (`pop`).
+
+This explains a lot of what you see at the start and end of functions. A function that pushes `rbx`, `rsi` and `rdi` in its prologue is telling you: "I am going to use these three registers for my own long-lived values". And after a `call`, values in `rbx` or `rsi` are still valid, while `rcx` and `rdx` are not.
+
+(On Linux, `rdi` and `rsi` are volatile, because they carry arguments there.)
+
+Crackme #1's `main` starts with `push rsi` and ends with `pop rsi`. Why?
+'''
+check = { kind = "choice", options = [
+    "rsi holds main's first argument",
+    "rsi is non-volatile on Windows: main uses it, so it must restore the caller's value",
+    "push rsi reserves room for the local variables",
+    "rsi holds the return value",
+], correct = 1, explain = [
+    "On Windows the first argument is in rcx. rsi is not an argument register on Windows.",
+    "main uses rsi (it keeps a pointer in it across several calls), so it saves the caller's rsi in the prologue and restores it in the epilogue.",
+    "Room for locals is reserved by `sub rsp, 0x60`, the next instruction.",
+    "The return value is in rax.",
+] }
+hints = [
+    "Is rsi in the volatile or in the non-volatile list on Windows?",
+]
+
+[[steps]]
+title = "Shadow space and more arguments"
+goal = "Understand `sub rsp, 0x28` and arguments on the stack."
+text = '''
+The Windows convention has one more rule that shows up in every function: **shadow space**. Before every `call`, the caller must leave 32 bytes (`0x20`) of free stack space right above the return address. The called function may use those 32 bytes to store its four argument registers if it wants to (for example, to free the registers for other work).
+
+That is why so many Windows functions start with `sub rsp, 0x28` or `sub rsp, 0x38`. Take the password check of crackme #2, which begins with `sub rsp, 0x38`:
+
+- `0x20` (32) bytes: shadow space for the functions *it* calls;
+- the rest: its own local variables, plus padding.
+
+The padding exists because of another rule: `rsp` must be a multiple of 16 at every `call`. The return address pushed by the call adds 8 bytes, so functions usually reserve "a multiple of 16, plus 8". `0x28` = 40 = 32 + 8, `0x38` = 56 = 48 + 8.
+
+**More than four arguments**: argument 5 and further go on the stack, just above the shadow space. Right before the call you see them stored at `[rsp+0x20]`, `[rsp+0x28]`, and so on:
+
+```text
+mov  qword ptr [rsp+0x20], rax   ; 5th argument
+mov  r9, ...                     ; 4th
+mov  r8, ...                     ; 3rd
+mov  rdx, ...                    ; 2nd
+mov  rcx, ...                    ; 1st
+call some_function
+```
+
+What are the 32 bytes right above the return address for?
+'''
+check = { kind = "choice", options = [
+    "The function's return value",
+    "Shadow space: room where the called function may store its four argument registers",
+    "The fifth argument",
+    "Nothing; it is a mistake of the compiler",
+], correct = 1, explain = [
+    "The return value comes back in rax, not on the stack.",
+    "That is the Windows shadow space: 0x20 bytes the caller reserves for the callee.",
+    "The fifth argument goes just above the shadow space, at [rsp+0x20] at the time of the call.",
+    "It is a rule of the Windows x64 calling convention. Every Windows program follows it.",
+] }
+hints = [
+    "The name of this space was on this page, in bold.",
+]
+success = '''
+You now know the full Windows x64 calling convention: rcx, rdx, r8, r9 for arguments, rax for the result, shadow space, and which registers survive a call. With this you can read any call in the crackmes. Next: what typical Rust code looks like in assembly.
 '''

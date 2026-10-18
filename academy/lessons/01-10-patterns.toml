@@ -1,75 +1,358 @@
 id = "l1-patterns"
 level = 1
 order = 10
-title = "Recognizing Rust code"
-summary = "if, loops, indexing and Rust's bounds checks in assembly."
+title = "Recognising Rust in assembly"
+summary = "Slices, String, bounds checks, panics, Option, Result and string comparison, in real crackme code."
+goals = [
+    "recognise a slice or `&str` as a pointer plus a length",
+    "spot Rust's bounds checks and panics, and know you can skip them",
+    "recognise a `String` and its three fields",
+    "read a string comparison: length first, then `memcmp`",
+    "see how `Option` and `Result` are tested",
+]
 
 [[steps]]
-title = "if/else in the graph"
+title = "Why Rust code looks the way it does"
+goal = "Know what extra code Rust adds, so it does not surprise you."
 text = '''
-In the **graph view**, an `if`/`else` looks like a diamond: one block ends with a comparison and splits into a green arrow (condition true, jump taken) and a red one (false), and both paths meet again below. An `if` without `else` is a triangle: one path skips a block.
+You can now read every instruction in the first two crackmes. What remains is recognising **patterns**: groups of instructions that together mean one Rust idea. Once you know them, a page of assembly turns into a few lines of Rust in your head.
 
-A block ends with `cmp eax, 0` and `je`. Which arrow does the program follow when eax is 0?
+Rust programs have some patterns that C programs do not have, because Rust adds safety and richer types:
+
+- **Fat pointers.** A slice `&[u8]`, a `&str` and a `&mut [T]` are not one address but two values: an address and a length.
+- **Bounds checks.** Every `s[i]` checks that `i` is smaller than the length, and panics if not.
+- **Panics.** Code that handles a panic never returns; it is marked with `ud2`.
+- **Enums like `Option` and `Result`.** Testing them often looks like a test for zero.
+- **`String` and `Vec`.** Three values: capacity, pointer and length.
+- **Drops.** At the end of a scope, the compiler frees heap memory: you see a check "capacity != 0?" and a call to the deallocation function.
+
+All the examples in this lesson come from the two crackmes you are about to crack, exactly as ORRESS shows them (with comments added). So this lesson is also a preview of what you will see.
+
+A tip before you start: you do not need to understand every line of a function. Reverse engineers skip what is clearly bookkeeping (bounds checks, drops, error handling) and look for the parts that matter, like the comparison that decides *Correct!* or *Wrong*.
 '''
-check = { kind = "choice", options = ["The green arrow (taken)", "The red arrow (not taken)"], correct = 0 }
-success = "je jumps when the values are equal (ZF = 1). eax == 0, so the jump is taken: green."
 
 [[steps]]
-title = "Loops have an arrow going up"
+title = "Slices: a pointer and a length"
+goal = "Recognise a slice argument in two registers."
 text = '''
-A loop shows up as an arrow that goes **back up** to an earlier block. Count how often this loop body runs:
+In Rust, a slice `&[u8]` or a `&str` is a **fat pointer**: two 8-byte values, the address of the first byte and the number of bytes. You can check this yourself in Rust: `std::mem::size_of::<&[u8]>()` is 16, twice the size of a normal pointer.
 
-```text
-    xor ecx, ecx       ; i = 0
-body:
-    ; ... loop body ...
-    add ecx, 2         ; i += 2
-    cmp ecx, 10
-    jb body            ; while i < 10
-```
+When a slice is passed to a function, it takes **two** argument registers. On Windows:
 
 ```rust
-let mut i = 0;
-while i < 10 { /* body */ i += 2; }
+fn check_password(s: &[u8]) -> bool { ... }
 ```
-'''
-check = { kind = "answer", answers = ["5"], number = true }
-hints = ["i takes the values 0, 2, 4, …"]
 
-[[steps]]
-title = "Indexing arrays"
-text = '''
-`array[i]` becomes an address computation: start + i × element size.
+- `rcx` = the address of the bytes (`s.as_ptr()`)
+- `rdx` = the length (`s.len()`)
 
-```rust
-let x = numbers[i];   // numbers: &[u64]
-```
+The password check of crackme #2 starts like this:
 
 ```text
-mov rax, [rcx+rdx*8]  ; rcx = start, rdx = i, 8 = size of a u64
+140001100  sub  rsp, 0x38
+140001104  cmp  rdx, 7
+140001108  jne  loc_14000125b
 ```
 
-The multiplier tells you the element type's size. In `mov eax, [rcx+rdx*4]`, how many bytes is each element?
+`rdx` is the second argument register, so it holds the slice's length. The function compares the length with 7 and, if it is not equal, jumps away. (`loc_14000125b` is `xor eax, eax` followed by a return: it returns `false`.)
+
+In Rust, this is:
+
+```rust
+if s.len() != 7 {
+    return false;
+}
+```
+
+What does this tell you about the password?
 '''
+check = { kind = "choice", options = [
+    "The password must be 7 characters long",
+    "The password must contain the digit 7",
+    "The function is called 7 times",
+    "The password starts at address 7",
+], correct = 0, explain = [
+    "rdx is the length of the slice. Any input that is not exactly 7 bytes is rejected at once.",
+    "The 7 is compared with rdx, the length, not with any character.",
+    "The length check runs once per call. Nothing here counts calls.",
+    "The address of the bytes is in rcx, not rdx.",
+] }
+hints = [
+    "rdx is the second register of the slice. Which half of a slice is that?",
+]
+success = '''
+The password is 7 characters long. You know something about it without seeing it. A length check at the very start of a check function is extremely common, and it is often the first clue.
+'''
+
+[[steps]]
+title = "Reading the bytes of a slice"
+goal = "Turn `byte ptr [rax+N]` into `s[N]`."
+text = '''
+To read `s[i]`, the code needs the slice's address in a register. In crackme #2 the address is first stored on the stack together with the length (`black_box` in the source forces this), and then loaded again:
+
+```text
+14000110e  mov  [rsp+0x28], rcx            ; store the slice: address ...
+140001113  mov  qword ptr [rsp+0x30], 7    ; ... and length (7)
+...
+1400011f0  mov  rax, [rsp+0x28]            ; rax = the address of the bytes
+1400011f5  cmp  byte ptr [rax+4], 0x72     ; compare s[?] with 0x72
+1400011f9  jne  loc_14000125b              ; not equal: return false
+```
+
+(The `...` hides the checks of the first four characters, which look the same.)
+
+Notice how the slice looks in memory: two 8-byte slots side by side, address first (`[rsp+0x28]`), length second (`[rsp+0x30]`). Whenever you see a pair like that, think "slice".
+
+`byte ptr [rax+4]` reads one byte, 4 bytes after the start of the slice. Since the first byte is at `[rax+0]`, this is the byte with **index 4**, `s[4]`. So the Rust is:
+
+```rust
+if s[?] != 0x72 { return false; }
+```
+
+0x72 is a character code (Level 0). You will look it up in the last lesson of this level.
+
+Which index does `cmp byte ptr [rax+4], 0x72` read?
+'''
+instructions = [
+    "Look at the offset inside the brackets of the `cmp` line.",
+    "Remember that `[rax+0]` is index 0.",
+    "Type the index in the answer box and press **Check**.",
+]
 check = { kind = "answer", answers = ["4"], number = true }
-success = "4 bytes: an array of u32 or i32 (or f32)."
+hints = [
+    "The byte at rax+0 is s[0], at rax+1 is s[1], ...",
+    "rax+4 is s[4].",
+]
+success = '''
+`s[4]`, the fifth character. For bytes the offset is the index. For bigger elements, divide the offset by the element size (Lesson 6): `[rax+0x10]` in a `[u64]` is index 2.
+'''
 
 [[steps]]
 title = "Bounds checks"
+goal = "Recognise Rust's index check and its panic call."
 text = '''
-Rust checks every index: `s[3]` panics if the slice is too short. The compiler turns that into a comparison before the access:
+Rust checks every index. `s[1]` panics with *index out of bounds* if the slice has fewer than 2 elements. The compiler writes that check as a comparison before the access:
 
 ```text
-cmp rdx, 4           ; is the length at least 4?
-jb  panic_bounds     ; jump to the panic if below
-mov al, [rcx+3]      ; s[3]
+14000114e  mov  rdx, [rsp+0x30]       ; rdx = s.len()
+140001153  cmp  rdx, 2                ; is the length at least 2?
+140001157  jb   loc_140001274         ; below 2 (unsigned): go and panic
+14000115d  mov  rax, [rsp+0x28]
+140001162  cmp  byte ptr [rax+1], 0x33  ; the actual check of s[1]
 ```
 
-C does not do this, so these checks are a sign of Rust code. When you see `cmp` with the length and a `jb` to code that never returns, you can mentally skip it: it is just safety. What does the `jb` jump to?
+and at `loc_140001274`:
+
+```text
+140001274  lea  r8, [0x140019400]     ; 3rd argument: where in the source the panic is
+14000127b  mov  ecx, 1                ; 1st argument: the index (1)
+140001280  call sub_140017e73         ; 2nd argument rdx: the length. Panic!
+140001285  ud2
+```
+
+Read it with the calling convention: the panic function gets the index in `ecx`, the length in `rdx` and a pointer to the source location (file `crackmes\crackme02.rs`, line and column) in `r8`. That is everything it needs to print *index out of bounds: the len is 7 but the index is 1*. The Strings view contains both texts.
+
+Here the check can never fail (the length was already checked to be 7), but because of `black_box` the compiler cannot know that. In most Rust programs you will see many of these checks. They are a strong sign that a program was written in Rust (C has no bounds checks), and you can **skip them** when reading: a `cmp` with a length, a `jb` or `jae` to a block that calls something and ends in `ud2`.
+
+What does the `jb loc_140001274` jump to?
 '''
 check = { kind = "choice", options = [
-    "The next character",
+    "The next character check",
     "Code that panics because the index is out of bounds",
-    "The start of the loop",
+    "The start of a loop",
     "The return address",
-], correct = 1 }
+], correct = 1, explain = [
+    "The next character check comes right after the jb, when the jump is NOT taken.",
+    "loc_140001274 calls the bounds-check panic with the index and the length, and never returns (ud2).",
+    "It is a forward jump to a block that ends in ud2, not a backward jump.",
+    "Only `ret` uses the return address. jb jumps to a label.",
+] }
+hints = [
+    "Look at what the code at loc_140001274 does, and how it ends.",
+]
+
+[[steps]]
+title = "Panics and ud2"
+goal = "Know that code ending in `ud2` never returns."
+text = '''
+`ud2` is an instruction that is **undefined on purpose**: if the CPU ever runs it, the program crashes. Compilers place it right after calls to functions that can never return, such as:
+
+- panics (`panic!`, `unwrap()` on `None`, bounds checks, overflow checks in debug builds),
+- `std::process::exit` and `std::process::abort`,
+- `unreachable!()`.
+
+Rust knows these functions have the return type `!` ("never"). The `ud2` is a safety net: there is no code after it, because there is nothing to come back to. ORRESS's decompiler even writes `unreachable!(); // execution stops here` for it.
+
+For you as a reader, `ud2` is a gift. It tells you: "the block that ends here is an error path". In a graph, those blocks are dead ends. When you look for the code that decides whether a password is right, you can ignore every block that ends in `ud2`. In crackme #2's check function, seven of its blocks are bounds-check panics like the one on the previous page, all ending in `ud2`: one for each index from 1 to 6, plus one for index 0 (in case the slice is empty).
+
+The Strings view helps here too. Rust programs contain many panic messages and source paths, like `index out of bounds: the len is` and `crackmes\crackme02.rs`. The code that uses them is error handling, not the logic you are looking for. The path also tells you the name of the source file the program was built from.
+'''
+
+[[steps]]
+title = "String: capacity, pointer, length"
+goal = "Recognise a `String` (or `Vec`) by its three fields."
+text = '''
+A `String` (and a `Vec<T>`) is three 8-byte values: the **capacity** (how many bytes are reserved on the heap), a **pointer** to those bytes, and the **length** (how many are used). Here is `let mut input = String::new();` from crackme #1's `main`:
+
+```text
+14000114f  mov  qword ptr [rsp+0x30], 0   ; capacity = 0
+140001158  mov  qword ptr [rsp+0x38], 1   ; pointer  = 1  (a placeholder, see below)
+140001161  mov  qword ptr [rsp+0x40], 0   ; length   = 0
+```
+
+Three values side by side on the stack: that is the `String`. An empty `String` has nothing on the heap, so Rust stores a placeholder pointer (here 1, an address that is never used) instead of a real one. Rust lays out the three fields in whatever order it prefers; in this program it is capacity, pointer, length.
+
+Later, after `read_line` filled the string, the code loads the pointer and the length into registers:
+
+```text
+1400011da  mov  rcx, [rsp+0x38]    ; rcx = input.as_ptr()
+1400011df  mov  r8,  [rsp+0x40]    ; r8  = input.len()
+```
+
+and at the end of `main` the string is **dropped**:
+
+```text
+140001261  mov  rdx, [rsp+0x30]    ; capacity
+140001266  test rdx, rdx           ; capacity == 0?
+140001269  je   loc_14000127c      ; nothing on the heap: nothing to free
+14000126b  mov  rcx, [rsp+0x38]    ; pointer
+140001270  mov  r8d, 1             ; alignment
+140001276  call sub_140001330      ; free the heap memory
+```
+
+Which stack slot holds the `String`'s pointer to its bytes?
+'''
+check = { kind = "choice", options = [
+    "[rsp+0x30]",
+    "[rsp+0x38]",
+    "[rsp+0x40]",
+    "[rsp+0x48]",
+], correct = 1, explain = [
+    "[rsp+0x30] is the capacity: the drop code tests it for 0 before freeing.",
+    "[rsp+0x38] is loaded into rcx before the input is used, and passed as the pointer to the free function.",
+    "[rsp+0x40] is the length: it starts at 0 and is loaded into r8 as a count.",
+    "[rsp+0x48] is not one of the String's three fields; the String uses 0x30, 0x38 and 0x40.",
+] }
+hints = [
+    "Which slot is passed in rcx to the function that frees the memory?",
+]
+
+[[steps]]
+title = "Comparing strings: length, then memcmp"
+goal = "Read the code behind `==` on two `&str`."
+text = '''
+How does Rust compile `line == "open_sesame_101"`? Two strings are equal when they have the same length **and** the same bytes. So the compiler checks the length first (cheap), and only then compares the bytes. From crackme #1:
+
+```text
+14000121a  lea  rdx, [0x1400183fe]          ; address of "open_sesame_101..."
+140001221  mov  [rsp+0x20], rdx             ; store the &str: address ...
+140001226  mov  qword ptr [rsp+0x28], 0xf   ; ... and length 15
+...
+140001234  cmp  r8, [rsp+0x28]              ; same length as the input?
+140001239  jne  loc_1400012a5               ; no: Wrong password
+14000123b  mov  rdx, [rsp+0x20]             ; 2nd argument: the password's bytes
+...                                         ; (rcx = your input's bytes, r8 = the length)
+140001247  call memcmp                      ; compare r8 bytes
+14000124c  test eax, eax                    ; memcmp returns 0 when equal
+14000124e  jne  loc_1400012a5               ; not 0: Wrong password
+```
+
+You already know every piece: a `&str` as an address and a length side by side on the stack, a length comparison, arguments in `rcx`, `rdx` and `r8`, and a result in `eax`.
+
+`memcmp` is a function from the C runtime library. Because the program imports it from a DLL, it keeps its name even though the program is stripped. It compares two blocks of memory and returns 0 if they are equal. (A negative or positive result says which one is "smaller", which `==` does not need.)
+
+So the program shows *Wrong password* if the lengths differ **or** if `memcmp` returns something other than 0.
+
+After `call memcmp`, the code does `test eax, eax` and `jne loc_1400012a5`. When is that jump taken?
+'''
+check = { kind = "choice", options = [
+    "When the two strings are equal",
+    "When the two strings are different",
+    "When the input is empty",
+    "Never",
+], correct = 1, explain = [
+    "Equal strings make memcmp return 0. test eax, eax then sets ZF, and jne does not jump.",
+    "Different bytes make memcmp return a non-zero value, ZF = 0, and jne jumps to the Wrong password message.",
+    "An empty input already failed the length check before memcmp was called.",
+    "jne jumps whenever eax is not zero, which happens for every wrong password of the right length.",
+] }
+hints = [
+    "memcmp returns 0 for equal. test eax, eax sets ZF when eax is 0.",
+]
+
+[[steps]]
+title = "Option and Result"
+goal = "See how `Option` and `Result` are tested."
+text = '''
+Rust's enums often compile to something very small. An `Option<&T>` needs no extra space at all: a reference is never 0, so Rust uses the value 0 to mean `None`. Testing it is a test for zero.
+
+Crackme #1 calls `strip_suffix('\n')`, which returns an `Option<&str>`. The compiler inlined it (put its code directly into `main`):
+
+```text
+1400011e4  xor   eax, eax                   ; result = None (0)
+1400011e6  test  r8, r8                     ; is the input empty?
+1400011e9  je    loc_1400011f5              ; then it stays None
+1400011eb  cmp   byte ptr [rcx+r8-1], 0xa   ; is the last byte '\n'?
+1400011f1  cmove rax, rcx                   ; if equal: result = Some(address)
+```
+
+There is one new instruction: `cmove` (conditional move) is a `mov` that only happens if ZF = 1, like a tiny `if` without a jump. And `[rcx+r8-1]` is "address + length - 1": the last byte. Afterwards the code tests `rax` for zero to see whether it got `Some`.
+
+A `Result` usually needs an explicit marker that says which variant it is. Right after `read_line`:
+
+```text
+140001194  call sub_1400092b0               ; stdin.read_line(&mut input)
+140001199  mov  [rsp+0x50], rax             ; the result, in two registers
+14000119e  mov  [rsp+0x58], rdx
+1400011a3  test rax, rax                    ; which variant?
+1400011a6  jne  loc_1400012b8               ; not 0: Err -> ... exit(1)
+```
+
+The Rust was `if stdin.read_line(&mut input).is_err() { exit(1) }`. In this program `rax` = 0 means `Ok`.
+
+In `strip_suffix`'s code above, what value of `rax` means `None`?
+'''
+check = { kind = "choice", options = [
+    "0",
+    "1",
+    "0xa",
+    "The length of the input",
+], correct = 0, explain = [
+    "None is 0. A real address is never 0, so Rust can use 0 for None without any extra field.",
+    "Here 1 has no special meaning. (It was the placeholder pointer of an empty String, a different thing.)",
+    "0xa is the character '\\n' that the code compares with.",
+    "The length is in r8 and stays there.",
+] }
+hints = [
+    "Look at the first line: `xor eax, eax` sets the starting value.",
+]
+
+[[steps]]
+title = "Your pattern cheat sheet"
+goal = "Have every pattern of this level in one place."
+text = '''
+Here is everything in one table. Come back to it while you crack the next two programs.
+
+| You see | It means |
+|---|---|
+| `xor eax, eax` | `= 0` |
+| `mov rax, rcx` + arithmetic on `rax` | one Rust expression on the first argument |
+| `cmp` / `test` + `jcc` | an `if` (with the condition inverted) |
+| a conditional jump back up | a loop |
+| `lea rcx, [0x...]  ; "text"` | a pointer to a string literal |
+| `lea rcx, [rsp+0x..]` before a call | passing a reference to a local variable |
+| `rcx`, `rdx`, `r8`, `r9` set before `call` | arguments 1 to 4 (Windows) |
+| `test al, al` + `je` after a call | `if !function(...)`: the function returned a `bool` |
+| two slots side by side: address, length | a slice or `&str` |
+| three slots: capacity, pointer, length | a `String` or `Vec` |
+| `cmp` with a length + `jb`/`jae` to a block ending in `ud2` | a bounds check: skip it |
+| `call ...` + `ud2` | a call that never returns (panic, exit) |
+| compare lengths, then `call memcmp`, `test eax, eax` | `a == b` on strings or slices |
+| `cmp byte ptr [rax+N], 0x..` | `s[N] == b'?'`: a character check |
+| `push` / `sub rsp` at the start, `add rsp` / `pop` / `ret` at the end | a function's prologue and epilogue |
+
+You do not have to learn this table by heart. You will recognise these patterns more and more by yourself, as you read more code. The next two lessons put it all to work on real programs.
+'''
+success = '''
+You know enough to crack your first programs. Next lesson: crackme #1.
+'''

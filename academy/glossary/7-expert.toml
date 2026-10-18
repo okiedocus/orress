@@ -1,0 +1,299 @@
+# Glossary terms introduced in Level 7 (Expert). Lower levels define the basics
+# (register, stack, basic block, keygen, XOR, emulator, decompiler, ...); this file
+# only adds the words this level brings in. Terms and aliases are unique across all
+# glossary files, so nothing here repeats a lower level's term.
+
+[[term]]
+term = "time-travel debugging"
+aliases = ["TTD", "time travel debugging", "reverse debugging", "debugging backward"]
+short = "Recording a program's execution once and then stepping backward and forward through the recording."
+text = '''
+A normal debugger only moves forward: to see an earlier moment you must restart the program. Time-travel debugging records every instruction of a run first, then lets you move to any point in that recording, backward as easily as forward. It is the fastest way to answer "which instruction caused this value?".
+'''
+see = ["execution trace", "deterministic replay", "step back"]
+
+[[term]]
+term = "execution trace"
+aliases = ["trace"]
+short = "The recording saved during a run: one entry per instruction, holding its address and the registers after it ran."
+text = '''
+A trace is produced during a single run. Each entry holds the address of the instruction that ran and the register values just after it. ORRESS saves registers, not memory, which keeps traces small. Moving through the trace is how time-travel debugging shows you the past without running the program again.
+'''
+see = ["time-travel debugging", "deterministic replay"]
+
+[[term]]
+term = "deterministic replay"
+aliases = ["deterministic"]
+short = "The property that a recorded run does exactly the same thing every time you look at it."
+text = '''
+Because the emulator is deterministic, a recorded run never changes: step 193 holds the same values no matter how often you jump away and come back. This is what makes time-travel debugging reliable, unlike re-running code that behaves differently each time. To see memory at a step (the trace keeps only registers), run the function again with the same input.
+'''
+see = ["execution trace", "time-travel debugging"]
+
+[[term]]
+term = "step back"
+aliases = ["stepping back", "step backward", "reverse step"]
+short = "Moving to the previous snapshot in a trace, so you see the state before an instruction ran."
+text = '''
+Stepping back shows an earlier entry of the recorded trace; nothing is executed in reverse. Following a wrong value backward, one step at a time, to the instruction that wrote it is the core move of root cause analysis.
+'''
+see = ["execution trace", "root cause"]
+
+[[term]]
+term = "root cause"
+aliases = ["root cause analysis"]
+short = "The first instruction or input that introduced a wrong value, found by tracing an effect back to its source."
+text = '''
+Root cause analysis starts at a symptom (a crash, a wrong return value) and works backward along the data: find where the bad value was written, then where its inputs came from, until you reach an input byte, a constant, or a table. Time-travel debugging makes this straightforward.
+'''
+see = ["step back", "time-travel debugging"]
+
+[[term]]
+term = "binary diffing"
+aliases = ["binary diff", "diffing"]
+short = "Comparing two related binaries function by function to see what is the same, changed, added or removed."
+text = '''
+Recompiling shifts addresses, so comparing two builds byte-for-byte is useless. Binary diffing instead matches functions by an address-independent signature and labels each one identical, changed, added or removed. It is how patches and malware variants are compared.
+'''
+see = ["function matching", "function signature", "patch diffing"]
+
+[[term]]
+term = "patch diffing"
+aliases = ["patch diff"]
+short = "Binary-diffing a program against its patched version to find exactly what a security update changed."
+text = '''
+The functions that come back "changed" (and any "added" helpers) are where the vendor altered something, very often a security fix. Defenders use patch diffing to judge how urgent an update is; attackers use it to exploit the bug before systems update.
+'''
+see = ["binary diffing", "1-day"]
+
+[[term]]
+term = "1-day"
+aliases = ["one-day", "1-days"]
+short = "A vulnerability that is already patched but still exploitable on systems that have not installed the update."
+text = '''
+Once a patch ships, anyone can diff it to learn the bug. Systems that have not applied the update yet are open to attack during that window. The bug is a "1-day" (as opposed to a 0-day, which has no patch yet).
+'''
+see = ["patch diffing"]
+
+[[term]]
+term = "function matching"
+short = "Pairing each function in one binary with its counterpart in another, by name, code or shape."
+text = '''
+ORRESS matches functions in rounds of decreasing certainty: by real name, then identical opcode hash, then identical shape, then the most similar remaining pair. Functions left unmatched are "added" or "removed".
+'''
+see = ["function signature", "similarity score", "binary diffing"]
+
+[[term]]
+term = "function signature"
+aliases = ["fingerprint"]
+short = "An address-independent description of a function: its shape plus an opcode hash."
+text = '''
+A signature captures what a function does, not where it lives: counts of instructions, basic blocks, edges and calls, plus an opcode hash that leaves out addresses. Two functions with the same signature are the same code even at different addresses.
+'''
+see = ["opcode hash", "function matching"]
+
+[[term]]
+term = "opcode hash"
+short = "A hash of a function's instructions with every address replaced by a placeholder."
+text = '''
+ORRESS feeds each mnemonic and its operands into a hash, but replaces jump targets, call targets, data references and large numbers with a placeholder. So relocating the code does not change the hash, while a real change (a different constant, jz becoming jnz) does.
+'''
+see = ["function signature"]
+
+[[term]]
+term = "similarity score"
+aliases = ["similarity"]
+short = "A number from 0 to 1 saying how alike two matched functions are (1 means identical code)."
+text = '''
+For a changed pair, ORRESS reports a similarity from the weighted comparison of their shapes (instructions 40%, blocks 30%, edges 20%, calls 10%). A high but not perfect score means a small change, which is often exactly the fix you are looking for.
+'''
+see = ["function matching"]
+
+[[term]]
+term = "user mode"
+short = "The limited privilege level where ordinary programs run, isolated from each other and the hardware."
+text = '''
+User-mode code (ring 3) cannot touch hardware, read other programs' memory, or change the system. When it tries, the CPU stops it. A crash there ends one program, not the machine. It is like safe Rust: the rules are enforced.
+'''
+see = ["kernel mode", "privilege ring", "system call"]
+
+[[term]]
+term = "kernel mode"
+aliases = ["kernel"]
+short = "The most privileged level, where the operating system core and drivers run with full control of the machine."
+text = '''
+Kernel-mode code (ring 0) can read and write any memory, talk to hardware and change any process. A mistake crashes the whole system (a blue screen). It is like one huge unsafe block that owns the computer, which is why rootkits want to get there.
+'''
+see = ["user mode", "ring 0", "driver", "rootkit"]
+
+[[term]]
+term = "privilege ring"
+aliases = ["ring", "rings", "privilege rings", "privilege level"]
+short = "A hardware privilege level on x86, numbered 0 (most) to 3 (least)."
+text = '''
+The CPU stores the current ring and blocks privileged instructions and kernel memory outside ring 0. Windows and Linux use only ring 0 (kernel) and ring 3 (user); rings 1 and 2 go unused.
+'''
+see = ["ring 0", "ring 3", "kernel mode", "user mode"]
+
+[[term]]
+term = "ring 0"
+short = "The most privileged CPU ring: kernel mode."
+text = '''
+"Running at ring 0" means having full control of the machine. The kernel and drivers run here.
+'''
+see = ["privilege ring", "kernel mode"]
+
+[[term]]
+term = "ring 3"
+short = "The least privileged CPU ring: user mode, where normal programs run."
+see = ["privilege ring", "user mode"]
+
+[[term]]
+term = "driver"
+aliases = ["drivers", "device driver"]
+short = "Kernel-mode code that controls a device or adds a system feature; on Windows a .sys file."
+text = '''
+Drivers run in ring 0 and are the legitimate way to extend the kernel. The kernel calls into a driver through its entry point (DriverEntry) and its request-handling (dispatch) routines. Bugs in a driver can hand an attacker kernel power.
+'''
+see = [".sys", "DriverEntry", "dispatch routine", "kernel mode"]
+
+[[term]]
+term = ".sys"
+aliases = ["sys file"]
+short = "The file extension of a Windows kernel driver (a PE file, like an .exe, but loaded into the kernel)."
+text = '''
+A .sys file is a normal PE file with tell-tale traits: the Native subsystem, a DriverEntry entry point, and imports from the kernel (ntoskrnl.exe, hal.dll) rather than user-mode DLLs.
+'''
+see = ["driver", "Native subsystem", "DriverEntry"]
+
+[[term]]
+term = "Native subsystem"
+aliases = ["Native (driver or boot program)"]
+short = "The PE subsystem value that marks a driver or boot program, instead of Console or GUI."
+text = '''
+ORRESS's "What Is This File?" view shows the subsystem. For a normal app it reads Console or GUI; for a driver it reads "Native (driver or boot program)", a quick way to tell you are looking at kernel-mode code.
+'''
+see = [".sys", "driver"]
+
+[[term]]
+term = "DriverEntry"
+short = "The entry point of a Windows driver, the first routine the kernel runs when the driver loads."
+text = '''
+Where a normal program starts at the C runtime startup before main, a driver starts at DriverEntry. It sets the driver up and registers the dispatch routines that will handle requests.
+'''
+see = ["driver", "dispatch routine"]
+
+[[term]]
+term = "IRP"
+aliases = ["IRPs", "I/O request packet"]
+short = "An I/O Request Packet: the structure the kernel uses to pass a request to a driver."
+text = '''
+When user-mode code asks a device to read, write or do something custom, the kernel packages the request as an IRP and hands it to the driver's matching dispatch routine. IRP handling is where a driver's real behaviour lives.
+'''
+see = ["driver", "dispatch routine"]
+
+[[term]]
+term = "dispatch routine"
+aliases = ["dispatch routines", "IRP dispatch"]
+short = "A driver function that handles one kind of request (one IRP type) from user mode."
+text = '''
+A driver registers dispatch routines in DriverEntry, one per request type (create, read, write, device control). They are the driver's interface to the rest of the system and the first place to read when reversing one.
+'''
+see = ["driver", "IRP", "DriverEntry"]
+
+[[term]]
+term = "SSDT"
+aliases = ["system-call table", "system call table"]
+short = "The System Service Descriptor Table: the kernel's list of which routine handles each system call."
+text = '''
+When a syscall arrives, the kernel looks up its number in the SSDT to find the routine to run. Overwriting an SSDT entry (an SSDT hook) lets a rootkit make the kernel run its code for a system call instead of the real one.
+'''
+see = ["system call", "hook", "rootkit"]
+
+[[term]]
+term = "hook"
+aliases = ["hooks", "hooking"]
+short = "Redirecting a call so your code runs in place of, or before, the original."
+text = '''
+A hook can overwrite an entry in a table (such as the SSDT) or patch the first bytes of a function to jump elsewhere. Rootkits hook the kernel's own routines so that queries like "list the processes" return doctored answers.
+'''
+see = ["SSDT", "rootkit", "DKOM"]
+
+[[term]]
+term = "DKOM"
+aliases = ["Direct Kernel Object Manipulation"]
+short = "Direct Kernel Object Manipulation: hiding things by editing the kernel's own data structures."
+text = '''
+Instead of hooking code, DKOM edits data: for example unlinking a process's record from the kernel's list of processes so tools that walk the list never see it. The process still runs; it just does not appear.
+'''
+see = ["rootkit", "hook"]
+
+[[term]]
+term = "rootkit"
+aliases = ["rootkits"]
+short = "Malware that loads into the kernel to hide itself and tamper with the system from underneath."
+text = '''
+A rootkit runs at ring 0, so it can hook kernel routines or use DKOM to make hidden processes, files and connections invisible to tools that run above it, including antivirus. Analysing one safely means static analysis first, and any dynamic work only in a disposable VM with kernel debugging.
+'''
+see = ["kernel mode", "hook", "DKOM", "SSDT", "blue screen"]
+
+[[term]]
+term = "blue screen"
+aliases = ["BSOD", "blue-screen", "bug check"]
+short = "The full-system crash Windows shows when kernel-mode code fails."
+text = '''
+A user-mode crash ends one program; a kernel-mode fault cannot be contained, so Windows stops the whole machine with a blue screen (a "bug check"). It is why kernel bugs are so serious and why kernel work is done in a throwaway VM.
+'''
+see = ["kernel mode", "ring 0"]
+
+[[term]]
+term = "analysis pass"
+aliases = ["pass", "passes", "analysis passes"]
+short = "A reusable, automated procedure that runs an analysis routine over one or many binaries."
+text = '''
+Instead of clicking through views for every file, you write the routine once (as a script, or a chain of MCP tool calls) and run it over a whole folder or feed. An analysis pass is how one analyst keeps up with many samples.
+'''
+see = ["Rhai", "MCP", "script"]
+
+[[term]]
+term = "script"
+aliases = ["scripts", "scripting"]
+short = "A short program you run against the open binary's analysis to automate a query or a transform."
+text = '''
+In ORRESS, scripts are written in Rhai and run in the Scripting console or from the command line. They read the analysis (functions, strings, bytes, disassembly) only, cannot touch your disk or network, and are stopped if they run too long.
+'''
+see = ["Rhai", "analysis pass"]
+
+[[term]]
+term = "Rhai"
+short = "The small, Rust-like scripting language ORRESS runs for its scripts."
+text = '''
+Rhai reads much like Rust without the types: let, if, for, functions, numbers, strings and arrays. ORRESS exposes its analysis to Rhai through a handful of built-in functions such as functions(), read(addr, len) and disasm(addr, n).
+'''
+see = ["script", "analysis pass"]
+
+[[term]]
+term = "MCP"
+aliases = ["Model Context Protocol"]
+short = "A simple text protocol that lets AI agents and tools call a program's features in a uniform way."
+text = '''
+ORRESS ships an MCP server (orress-mcp) that offers its analyses as tools (triage, strings, disassemble, detect_vm, binary_diff, deobfuscate_js, archive_list). Each takes a file path and returns structured results a program can read, so an agent or pipeline can drive ORRESS.
+'''
+see = ["AI Assistant", "analysis pass"]
+
+[[term]]
+term = "AI Assistant"
+short = "ORRESS's in-app helper that answers plain-language questions about the open binary."
+text = '''
+The Assistant drives the same analysis engine the MCP server exposes. It runs on your own Claude plan through the Claude Code tool (no API key), offers an offline static-only mode, and only sends the binary's context to the model if you opt in.
+'''
+see = ["MCP"]
+
+[[term]]
+term = "extension"
+aliases = ["extensions", "add-on"]
+short = "An add-on that gives ORRESS a new capability, loaded in a sandbox (including Zed-compatible add-ons)."
+text = '''
+ORRESS has an extension host that can load themes, syntax grammars and language-server adapters, including ones built for the Zed editor. Extension code runs confined to its own folder, so a bad or hostile extension cannot reach the rest of your system.
+'''
+see = []
