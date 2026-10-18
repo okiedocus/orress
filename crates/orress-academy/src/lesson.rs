@@ -128,35 +128,35 @@ pub struct Lesson {
 pub const LEVELS: [(&str, &str); 8] = [
     (
         "Foundations",
-        "Binary and hex, bytes and text, what a compiler does, a tour of ORRESS.",
+        "How computers run programs, binary and hex, signed numbers, text and memory, what a \n         compiler produces, executable files, a tour of ORRESS.",
     ),
     (
         "Reading assembly",
-        "Registers, flags, the stack, calling conventions, your first crackmes.",
+        "Registers, arithmetic and bits, jumps and loops, memory and the stack, calling \n         conventions, Rust patterns, your first two crackmes.",
     ),
     (
         "Static analysis",
-        "PE and ELF files, graph view, the decompiler, XOR-encoded passwords, keygens.",
+        "File formats, finding main, names and comments, the graph view, the decompiler, \n         XOR-encoded passwords, keygens.",
     ),
     (
         "Dynamic analysis",
-        "Debugging, patching, emulation, beating anti-debugging tricks.",
+        "Debuggers, breakpoints and stepping, reading and changing a running program, patching, \n         emulation, anti-debugging.",
     ),
     (
         "Intermediate CTF",
-        "Crypto recognition, z3, symbolic execution, side channels, .NET/Java/Python/WASM.",
+        "The CTF workflow, encodings and the Workbench, recognising crypto, symbolic execution, \n         side channels, bytecode (.NET/Java/Python/WASM).",
     ),
     (
         "Advanced",
-        "Packers, obfuscation, custom VMs, self-modifying code, other CPU architectures.",
+        "Obfuscation, control-flow flattening, custom VMs, packers, self-modifying code, other \n         CPU architectures.",
     ),
     (
         "Malware analysis",
-        "Safe lab setup, triage, behavior, YARA rules, reporting.",
+        "What malware is, a safe lab, triage, decoding a config, behaviour, YARA rules, \n         reporting.",
     ),
     (
         "Expert",
-        "Drivers and rootkits, time-travel debugging, binary diffing, your own analysis passes.",
+        "Time-travel debugging, binary diffing, drivers and rootkits, scripting ORRESS, and a \n         full-solve final project.",
     ),
 ];
 

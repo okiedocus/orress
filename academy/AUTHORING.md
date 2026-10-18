@@ -132,7 +132,10 @@ Never guess what the UI looks like or what a crackme contains.
 
 Write `academy/crackmes/crackmeNN.rs` (a small Rust program: start with a `//!` comment that says
 which lesson uses it and how it is solved), then run
-`powershell -ExecutionPolicy Bypass -File academy\crackmes\build.ps1`. Every source with a built
+`powershell -ExecutionPolicy Bypass -File academy\crackmes\build.ps1`. It builds only crackmes that
+have no `.exe` yet; `-Only crackmeNN` rebuilds one after its source changed (that changes the file
+hash, so learners lose names they saved for it, and addresses quoted in lessons must be rechecked).
+Every source with a built
 `bin/crackmeNN.exe` is embedded automatically and can be used with `open_crackme`. Keep the
 build flags from `build.ps1` (stripped, opt-level=1) so lessons match what learners see.
 Programs must be harmless: no network, no file changes outside their own folder, nothing that

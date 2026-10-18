@@ -592,7 +592,19 @@ mod tests {
     #[test]
     fn crackme_passwords_match_their_secrets() {
         let mut a = academy();
-        for password in ["open_sesame_101", "R3v3rs3"] {
+        // Every practice program's password, so a typo in a lesson's sha256 is caught.
+        for password in [
+            "open_sesame_101",
+            "R3v3rs3",
+            "ORRESS42",
+            "flag{te4_h4s_a_g0ld_k3y}",
+            "s0lv3_m3_n0w",
+            "unfl4tt3",
+            "vm_0wned",
+            "h4ckv3rs",
+            "r3g_v4lz",
+            "ORR-DIFF-7",
+        ] {
             let (l, s) = find_step(&a, |c| {
                 matches!(c, Check::Secret { sha256 } if *sha256 == {
                     let d = Sha256::digest(password.as_bytes());
