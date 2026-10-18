@@ -834,8 +834,13 @@ pub fn simulator(ui: &mut Ui, academy: &mut Academy) {
                      rax holds a function's result; rsp points at the top of the stack.",
                 );
                 egui::Grid::new("sim_regs").num_columns(3).spacing([10.0, 2.0]).striped(true).show(ui, |ui| {
-                    for (i, name) in sim::REGS.iter().enumerate().take(8) {
+                    // r8-r15 only when the program uses them, to keep the list short.
+                    let source = academy.sim.source.to_ascii_lowercase();
+                    for (i, name) in sim::REGS.iter().enumerate() {
                         let v = cpu.regs[i];
+                        if i >= 8 && v == 0 && !source.contains(name) {
+                            continue;
+                        }
                         let changed = cpu.changed.contains(&i);
                         let color = if changed { Color32::from_rgb(255, 200, 60) } else { ui.visuals().text_color() };
                         let explain = orress_arch::explain::register(orress_arch::Isa::X64, name).unwrap_or("A general-purpose register.");
