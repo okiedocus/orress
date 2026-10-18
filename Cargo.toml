@@ -30,6 +30,7 @@ orress-triage = { path = "crates/orress-triage" }
 orress-sandbox = { path = "crates/orress-sandbox" }
 orress-wasm = { path = "crates/orress-wasm" }
 orress-pyc = { path = "crates/orress-pyc" }
+orress-resources = { path = "crates/orress-resources" }
 orress-java = { path = "crates/orress-java" }
 orress-archive = { path = "crates/orress-archive" }
 orress-js = { path = "crates/orress-js" }

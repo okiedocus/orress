@@ -154,6 +154,16 @@ impl TabViewer for Viewer<'_, '_> {
             TabKind::Archive => {
                 orress_views::archive_view(ui, self.env.archive, self.env.docs);
             }
+            TabKind::Resources => {
+                let root = self.env.project_root.clone();
+                orress_views::resources_view(
+                    ui,
+                    self.env.resources,
+                    self.env.docs,
+                    root.as_deref(),
+                    &mut self.env.view_requests,
+                );
+            }
             TabKind::Js => {
                 orress_views::js_view(ui, self.env.js, self.env.docs);
             }

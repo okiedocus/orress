@@ -44,6 +44,7 @@ pub struct OrressApp {
     pyc: orress_views::PycView,
     java: orress_views::JavaView,
     archive: orress_views::ArchiveView,
+    resources: orress_views::ResourcesView,
     js: orress_views::JsView,
     dotnet: orress_views::DotNetView,
     assistant: orress_views::AssistantView,
@@ -167,6 +168,7 @@ impl OrressApp {
             pyc: orress_views::PycView::default(),
             java: orress_views::JavaView::default(),
             archive: orress_views::ArchiveView::default(),
+            resources: orress_views::ResourcesView::default(),
             js: orress_views::JsView::default(),
             dotnet: orress_views::DotNetView::default(),
             assistant: orress_views::AssistantView::default(),
@@ -391,9 +393,10 @@ impl OrressApp {
         self.open_file(path);
     }
 
-    /// Extracts an executable's resources into the project (implemented in the extractor stage).
-    fn extract_resources(&mut self, ctx: &Context, _path: &Path) {
-        self.notify(ctx, "Resource extraction is not available yet.", false);
+    /// Opens an executable and the Resources tab so its resources can be extracted.
+    fn extract_resources(&mut self, _ctx: &Context, path: &Path) {
+        self.open_file(path.to_path_buf());
+        self.workspace.open(TabKind::Resources);
     }
 
     /// Facts the Academy's lesson checks look at.
@@ -703,6 +706,7 @@ impl OrressApp {
             "view::Pyc" => self.workspace.open(TabKind::Pyc),
             "view::Java" => self.workspace.open(TabKind::Java),
             "view::Archive" => self.workspace.open(TabKind::Archive),
+            "view::Resources" => self.workspace.open(TabKind::Resources),
             "view::Js" => self.workspace.open(TabKind::Js),
             "view::DotNet" => self.workspace.open(TabKind::DotNet),
             "view::Assistant" => self.workspace.open(TabKind::Assistant),
@@ -977,6 +981,7 @@ impl OrressApp {
                             "view::Pyc",
                             "view::Java",
                             "view::Archive",
+                            "view::Resources",
                             "view::Js",
                             "view::DotNet",
                             "view::Assistant",
@@ -1366,6 +1371,7 @@ impl eframe::App for OrressApp {
             &mut self.pyc,
             &mut self.java,
             &mut self.archive,
+            &mut self.resources,
             &mut self.js,
             &mut self.dotnet,
             &mut self.assistant,
@@ -1415,6 +1421,7 @@ impl eframe::App for OrressApp {
                 ViewRequest::RevealInOs(path) => reveal_in_os(&path),
                 ViewRequest::NewNotesFile(dir) => self.new_notes_file(&ctx, &dir),
                 ViewRequest::ExtractResources(path) => self.extract_resources(&ctx, &path),
+                ViewRequest::SetProjectRoot(dir) => self.open_folder(dir),
             }
         }
         // Cross-file go-to-definition: stash the target line for the editor to consume,

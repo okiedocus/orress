@@ -286,6 +286,11 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
         "Browse an open ZIP/JAR/APK: its entries and JAR manifest, and open a .class member straight into the JVM disassembler (pure-Rust ZIP reader).",
     )
     .register(
+        "view::Resources",
+        "Open Resources View",
+        "Extract an open executable's contents: native resources (icons, manifest, version, strings, RCDATA), embedded files found by signature, each PE section, and overlay data — saved into the project folder.",
+    )
+    .register(
         "view::Js",
         "Open JavaScript View",
         "Deobfuscate the open JavaScript (decode \\xNN/fromCharCode/concatenation), extract its strings, and beautify minified code (pure-Rust, string-level transforms).",

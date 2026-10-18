@@ -22,6 +22,7 @@ mod extensions;
 mod find;
 mod folder;
 mod functions;
+mod resources;
 mod graph;
 mod graph_layout;
 pub mod hex;
@@ -74,6 +75,7 @@ pub use js::{JsView, js_view};
 pub use menu::{CommandEntry, set_commands};
 pub use folder::folder_tree;
 pub use project::project_tree;
+pub use resources::{ResourcesView, resources_view};
 pub use pyc::{PycView, pyc_view};
 pub use sandbox::{SandboxView, sandbox_view};
 pub use script::{ScriptView, script_view};
@@ -218,6 +220,8 @@ pub enum ViewRequest {
     NewNotesFile(PathBuf),
     /// Extract the resources of this executable into the project folder.
     ExtractResources(PathBuf),
+    /// Adopt this folder as the open project root (and persist it).
+    SetProjectRoot(PathBuf),
 }
 
 /// Per-tab state of a document view. Not saved between sessions.
