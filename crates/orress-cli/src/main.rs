@@ -89,6 +89,8 @@ enum Command {
         #[arg(long)]
         filter: Option<String>,
     },
+    /// Find one-shot execve("/bin/sh") gadgets in a libc.
+    OneGadget { file: PathBuf },
     /// Run a Workbench recipe, e.g. "from_base64 | xor key=0x41".
     Recipe {
         recipe: String,
@@ -233,6 +235,7 @@ fn main() -> Result<()> {
         Command::Script { file, script, eval } => run_script(&file, &script, eval),
         Command::Exploit { file, script, eval } => run_exploit(&file, &script, eval),
         Command::Gadgets { file, filter } => list_gadgets(&file, filter.as_deref()),
+        Command::OneGadget { file } => one_gadget(&file),
         Command::Disasm { file, target } => disasm(&file, target.as_deref().unwrap_or("main")),
         Command::Decompile { file, target } => {
             let (info, p) = analyze(&file)?;
@@ -595,6 +598,10 @@ fn exploit_ctx(
         .filter(|s| s.perms.execute)
         .filter_map(|s| Some((s.address, data.get(s.file_range()?)?.to_vec())))
         .collect();
+    let binsh = orress_bytes::search::Pattern::text("/bin/sh", false)
+        .ok()
+        .and_then(|p| p.find_from(data, 0))
+        .and_then(|off| info.offset_to_address(off as u64));
     orress_script::ExploitCtx {
         base: info.image_base,
         isa: program.isa,
@@ -602,7 +609,38 @@ fn exploit_ctx(
         got,
         plt,
         exec,
+        binsh,
     }
+}
+
+fn one_gadget(file: &PathBuf) -> Result<()> {
+    let data = Arc::new(read_input(Some(file))?);
+    let info = orress_loaders::triage(&data);
+    let strings = orress_bytes::strings::extract(&data, 4, 500_000);
+    let program = orress_analysis::Program::analyze(&info, Arc::clone(&data), &strings)
+        .with_context(|| format!("cannot analyze {}", file.display()))?;
+    let ctx = exploit_ctx(&info, &program, &data);
+    let Some(binsh) = ctx.binsh else {
+        anyhow::bail!("no \"/bin/sh\" string found in {}", file.display());
+    };
+    let execve: Vec<u64> = ["execve", "system"]
+        .iter()
+        .filter_map(|n| ctx.symbols.get(*n).copied())
+        .collect();
+    let sections: Vec<(u64, &[u8])> = ctx.exec.iter().map(|(a, b)| (*a, b.as_slice())).collect();
+    let gadgets = orress_pwn::find_one_gadgets(&sections, binsh, &execve, ctx.isa);
+    if gadgets.is_empty() {
+        println!("no one_gadgets found");
+    }
+    for g in gadgets {
+        let cons = if g.constraints.is_empty() {
+            "(no outstanding constraints)".to_string()
+        } else {
+            g.constraints.join(", ")
+        };
+        println!("{:#x}  {cons}", g.addr);
+    }
+    Ok(())
 }
 
 fn list_gadgets(file: &PathBuf, filter: Option<&str>) -> Result<()> {
