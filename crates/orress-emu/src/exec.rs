@@ -133,6 +133,83 @@ impl Emulator {
         Ok(())
     }
 
+    // --- SSE / 128-bit operands -------------------------------------------
+
+    /// Reads a 128-bit (xmmword) operand: a whole XMM register, or 16 bytes of memory.
+    fn read_xmm(&self, instr: &Instruction, i: u32) -> Result<u128, EmuError> {
+        match instr.op_kind(i) {
+            OpKind::Register => Ok(self.cpu.xmm(instr.op_register(i))),
+            OpKind::Memory => self.read128(self.ea(instr)),
+            _ => Ok(0),
+        }
+    }
+
+    /// Writes a 128-bit (xmmword) operand: a whole XMM register, or 16 bytes of memory.
+    fn write_xmm(&mut self, instr: &Instruction, i: u32, val: u128) -> Result<(), EmuError> {
+        match instr.op_kind(i) {
+            OpKind::Register => self.cpu.set_xmm(instr.op_register(i), val),
+            OpKind::Memory => self.write128(self.ea(instr), val)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Reads 16 bytes little-endian (an XMM-width memory load).
+    fn read128(&self, addr: u64) -> Result<u128, EmuError> {
+        let lo = self.mem.read(addr, 8)?;
+        let hi = self.mem.read(addr.wrapping_add(8), 8)?;
+        Ok((u128::from(hi) << 64) | u128::from(lo))
+    }
+
+    /// Writes 16 bytes little-endian (an XMM-width memory store).
+    fn write128(&mut self, addr: u64, val: u128) -> Result<(), EmuError> {
+        self.mem.write(addr, val as u64, 8)?;
+        self.mem.write(addr.wrapping_add(8), (val >> 64) as u64, 8)?;
+        Ok(())
+    }
+
+    /// Reads a scalar operand (`bytes` wide) that may be a GPR, an XMM register (its low bytes),
+    /// memory, or an immediate — for MOVD/MOVQ, which shuttle 4 or 8 bytes between an XMM and a
+    /// GPR, memory or another XMM.
+    fn read_scalar(&self, instr: &Instruction, i: u32, bytes: usize) -> Result<u64, EmuError> {
+        Ok(match instr.op_kind(i) {
+            OpKind::Register => {
+                let r = instr.op_register(i);
+                if r.is_xmm() {
+                    (self.cpu.xmm(r) as u64) & mask(bytes)
+                } else {
+                    self.cpu.reg(r) & mask(bytes)
+                }
+            }
+            OpKind::Memory => self.mem.read(self.ea(instr), bytes)?,
+            _ => instr.immediate(i) & mask(bytes),
+        })
+    }
+
+    /// Writes a scalar operand (`bytes` wide) that may be a GPR, an XMM register (zero-extending
+    /// the rest of the 128 bits), or memory — the destination side of MOVD/MOVQ.
+    fn write_scalar(
+        &mut self,
+        instr: &Instruction,
+        i: u32,
+        val: u64,
+        bytes: usize,
+    ) -> Result<(), EmuError> {
+        match instr.op_kind(i) {
+            OpKind::Register => {
+                let r = instr.op_register(i);
+                if r.is_xmm() {
+                    self.cpu.set_xmm(r, u128::from(val & mask(bytes))); // zero-extends xmm
+                } else {
+                    self.cpu.set_reg(r, val); // set_reg applies the register's own width rules
+                }
+            }
+            OpKind::Memory => self.mem.write(self.ea(instr), val & mask(bytes), bytes)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
     // --- stack ------------------------------------------------------------
 
     fn push(&mut self, val: u64) -> Result<(), EmuError> {
@@ -443,6 +520,51 @@ impl Emulator {
                 let v = self.pop()?;
                 self.cpu.set_reg(Register::RBP, v);
             }
+            // --- SSE2 (128-bit) ---
+            // Every 128-bit move is the same here: copy 16 bytes, reg or memory, either way.
+            // (Alignment is not enforced, so movdqa/movaps on unaligned memory do not fault.)
+            M::Movdqu | M::Movdqa | M::Movups | M::Movaps | M::Movupd | M::Movapd => {
+                let v = self.read_xmm(instr, 1)?;
+                self.write_xmm(instr, 0, v)?;
+            }
+            // MOVD moves 4 bytes, MOVQ 8, between an XMM register and a GPR, memory or XMM.
+            M::Movd | M::Movq => {
+                let bytes = if instr.mnemonic() == M::Movq { 8 } else { 4 };
+                let v = self.read_scalar(instr, 1, bytes)?;
+                self.write_scalar(instr, 0, v, bytes)?;
+            }
+            M::Pxor | M::Xorps | M::Xorpd => {
+                let r = self.read_xmm(instr, 0)? ^ self.read_xmm(instr, 1)?;
+                self.write_xmm(instr, 0, r)?;
+            }
+            M::Pand | M::Andps | M::Andpd => {
+                let r = self.read_xmm(instr, 0)? & self.read_xmm(instr, 1)?;
+                self.write_xmm(instr, 0, r)?;
+            }
+            M::Por | M::Orps | M::Orpd => {
+                let r = self.read_xmm(instr, 0)? | self.read_xmm(instr, 1)?;
+                self.write_xmm(instr, 0, r)?;
+            }
+            // PANDN: dest = (NOT dest) AND src.
+            M::Pandn => {
+                let r = !self.read_xmm(instr, 0)? & self.read_xmm(instr, 1)?;
+                self.write_xmm(instr, 0, r)?;
+            }
+            // Packed compare-equal: each lane becomes all-ones on a match, all-zeros otherwise.
+            M::Pcmpeqb => self.pcmpeq(instr, 1)?,
+            M::Pcmpeqw => self.pcmpeq(instr, 2)?,
+            M::Pcmpeqd => self.pcmpeq(instr, 4)?,
+            // PMOVMSKB: gather the top bit of each of the 16 bytes into a GPR.
+            M::Pmovmskb => {
+                let v = self.read_xmm(instr, 1)?;
+                let mut m = 0u64;
+                for k in 0..16 {
+                    if (v >> (k * 8 + 7)) & 1 == 1 {
+                        m |= 1u64 << k;
+                    }
+                }
+                self.write_op(instr, 0, m, size)?;
+            }
             M::Nop | M::Endbr64 | M::Endbr32 | M::Pause => {}
             other => {
                 return Err(EmuError::Unsupported {
@@ -468,6 +590,24 @@ impl Emulator {
     /// Reads both operands of a binary instruction (dst, src), at the operation width.
     fn two(&self, instr: &Instruction, size: usize) -> Result<(u64, u64), EmuError> {
         Ok((self.read_op(instr, 0, size)?, self.read_op(instr, 1, size)?))
+    }
+
+    /// Packed compare-equal over `lane`-byte lanes (PCMPEQB/W/D): each lane of the destination
+    /// becomes all-ones when the two lanes are equal, all-zeros otherwise.
+    fn pcmpeq(&mut self, instr: &Instruction, lane: usize) -> Result<(), EmuError> {
+        let a = self.read_xmm(instr, 0)?;
+        let b = self.read_xmm(instr, 1)?;
+        let lane_mask = (1u128 << (lane * 8)) - 1;
+        let mut res = 0u128;
+        let mut k = 0;
+        while k < 16 {
+            let shift = k * 8;
+            if (a >> shift) & lane_mask == (b >> shift) & lane_mask {
+                res |= lane_mask << shift;
+            }
+            k += lane;
+        }
+        self.write_xmm(instr, 0, res)
     }
 
     /// The width of the *source* operand (for MOVZX/MOVSX, where it differs from the dest).

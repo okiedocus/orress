@@ -34,6 +34,9 @@ impl Flags {
 pub struct Cpu {
     /// Indexed in iced-x86 order: rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8..r15.
     pub regs: [u64; 16],
+    /// The 128-bit SSE registers xmm0..xmm15 (enough for the SSE2 subset that Rust emits for
+    /// slice comparisons and small `memset`/`memcpy`). AVX (ymm/zmm) upper halves are not modelled.
+    pub xmm: [u128; 16],
     pub rip: u64,
     pub flags: Flags,
     /// The FS segment base (SysV thread pointer: `fs:[0x28]` is the stack canary).
@@ -66,6 +69,11 @@ fn gpr_index(full: Register) -> Option<usize> {
         // `use Register::*` brings `Register::None` into scope, so qualify the Option here.
         _ => return Option::None,
     })
+}
+
+/// The index (0..16) of an SSE register xmm0..xmm15, or `None` for anything else.
+fn xmm_index(r: Register) -> Option<usize> {
+    r.is_xmm().then(|| r.number())
 }
 
 /// The four legacy high-byte registers (bits 8..16 of their container).
@@ -121,6 +129,18 @@ impl Cpu {
                 _ => val,
             }
         };
+    }
+
+    /// Reads a 128-bit SSE register (xmm0..xmm15); 0 for anything that is not one.
+    pub fn xmm(&self, r: Register) -> u128 {
+        xmm_index(r).map_or(0, |i| self.xmm[i])
+    }
+
+    /// Writes a 128-bit SSE register (xmm0..xmm15); ignored for anything that is not one.
+    pub fn set_xmm(&mut self, r: Register, val: u128) {
+        if let Some(i) = xmm_index(r) {
+            self.xmm[i] = val;
+        }
     }
 
     // Named accessors for the registers the harness touches directly.

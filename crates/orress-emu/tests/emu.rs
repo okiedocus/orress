@@ -496,3 +496,48 @@ fn stub_for_maps_libc_names() {
     assert_eq!(orress_emu::stub_for("memmove"), Stub::Memcpy);
     assert_eq!(orress_emu::stub_for("puts"), Stub::Return(0));
 }
+
+/// SSE2: a 16-byte slice comparison, exactly the shape Rust emits for `a == b` on `[u8; 16]`
+/// (movdqu / pcmpeqb / pmovmskb). Equal buffers give al = 1, any difference gives 0.
+#[test]
+fn sse2_compares_sixteen_bytes() {
+    // fn eq16(a: *const u8, b: *const u8) -> bool  (SysV: a=rdi, b=rsi)
+    let code = asm(0x1000, |a| {
+        a.movdqu(xmm0, xmmword_ptr(rdi)).unwrap();
+        a.movdqu(xmm1, xmmword_ptr(rsi)).unwrap();
+        a.pcmpeqb(xmm1, xmm0).unwrap();
+        a.pmovmskb(eax, xmm1).unwrap();
+        a.cmp(eax, 0xffff).unwrap();
+        a.sete(al).unwrap();
+        a.movzx(eax, al).unwrap();
+        a.ret().unwrap();
+    });
+    let mut emu = Emulator::new();
+    emu.map(0x1000, &code);
+    emu.map(0x4000, b"n0_debugger_here"); // 16 bytes
+    emu.map(0x5000, b"n0_debugger_here");
+    emu.map(0x6000, b"n0_debugger_XXXX");
+    assert_eq!(emu.call(0x1000, &[0x4000, 0x5000], Abi::SysV).unwrap(), 1);
+    assert_eq!(emu.call(0x1000, &[0x4000, 0x6000], Abi::SysV).unwrap(), 0);
+}
+
+/// SSE2 moves and bitwise ops: pxor zeros a register, a 128-bit store/load round-trips, and
+/// movd/movq shuttle a scalar in and back out of an xmm register.
+#[test]
+fn sse2_move_xor_and_scalar() {
+    let code = asm(0x1000, |a| {
+        a.pxor(xmm0, xmm0).unwrap(); // xmm0 = 0
+        a.movdqu(xmmword_ptr(0x5000u64), xmm0).unwrap(); // store 16 zero bytes
+        a.movd(xmm1, edi).unwrap(); // xmm1.low32 = arg0
+        a.movq(rax, xmm1).unwrap(); // rax = xmm1.low64 (upper zero from movd)
+        a.ret().unwrap();
+    });
+    let mut emu = Emulator::new();
+    emu.map(0x1000, &code);
+    emu.mem.map_zeroed(0x5000, 16);
+    emu.mem.write_bytes(0x5000, &[0xff; 16]);
+    assert_eq!(emu.call(0x1000, &[0x1234_5678], Abi::SysV).unwrap(), 0x1234_5678);
+    // the pxor'd register was stored over the 0xff bytes, zeroing them
+    assert_eq!(emu.mem.read(0x5000, 8).unwrap(), 0);
+    assert_eq!(emu.mem.read(0x5008, 8).unwrap(), 0);
+}

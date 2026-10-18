@@ -11,6 +11,7 @@ goals = [
     "use the Triage report to recognise anti-debugging",
     "find the anti-debug branch and the password",
     "patch past the check so you can analyse freely",
+    "confirm the password by emulating the check, on any operating system",
 ]
 
 [[steps]]
@@ -198,7 +199,7 @@ A plan that works on most anti-debugging:
 4. **Neutralise it.** Usually one of:
    - **Patch and go.** NOP or invert the branch so it always takes the clean path (what you just did).
    - **Change a register.** Stop after the check and set its result to "no debugger", as in the changing-registers lesson.
-   - **Emulate** the routine you care about, where there is no real debugger and timing is deterministic. (Not every function emulates: crackme #4's password check uses an instruction the emulator does not yet handle, which is why you patched here instead.)
+   - **Emulate** the routine you care about, where there is no real debugger and timing is deterministic. For crackme #4 you can run `check_password` (`0x140001100`) in the Emulator (**F7**) with `n0_debugger_here` and **pass input length** ticked: it returns `1` in `al`, confirming the password on any operating system, with no debugger for the guard to detect.
 5. **Verify.** Confirm the program behaves the same debugged as not.
 
 Watch for **stacked** checks: a program can carry several, so find them all. That is exactly the next lesson, where crackme #12 stacks three different debugger checks and hides the real password behind them. Anti-debugging is a speed bump, not a wall.

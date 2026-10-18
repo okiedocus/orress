@@ -131,7 +131,7 @@ Put the emulator to work:
 2. **Run code you otherwise could not.** Wrong operating system, missing libraries: none of it stops the emulator from running a self-contained function. This is the Linux and macOS path through much of this level.
 3. **It powers the solvers.** The same engine underlies the side-channel and symbolic solvers and the time-travel recorder you meet in later levels. Emulation is the foundation they build on.
 
-Know the edges too. The emulator models a **subset** of instructions and almost none of the OS, so heavy system calls, threads or GUI code will not run. When it cannot proceed, it stops and tells you, for example an unsupported instruction or a memory fault. (You will meet exactly that limit in the next lesson, where crackme #4's check uses an instruction the emulator does not yet handle, so you reach for patching instead.) Aim it at **self-contained computation** and it rarely lets you down.
+Know the edges too. The emulator models a large but not complete set of instructions (integer, branch, stack, memory and the common SSE2 used for slice comparisons) and almost none of the OS, so heavy system calls, threads or GUI code will not run. When it cannot proceed, it stops and tells you, for example an unsupported instruction or a memory fault. Aim it at **self-contained computation** and it rarely lets you down.
 
 So: **debugger** for the whole program on a real CPU; **emulator** for one function on a simulated CPU. Reach for whichever fits the question.
 '''
