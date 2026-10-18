@@ -164,6 +164,9 @@ impl TabViewer for Viewer<'_, '_> {
                     &mut self.env.view_requests,
                 );
             }
+            TabKind::Exploit => {
+                orress_views::exploit_view(ui, self.env.exploit, self.env.docs);
+            }
             TabKind::Js => {
                 orress_views::js_view(ui, self.env.js, self.env.docs);
             }

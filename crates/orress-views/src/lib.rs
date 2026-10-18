@@ -18,6 +18,7 @@ mod dotnet;
 mod edit;
 mod editor;
 mod emulator;
+mod exploit;
 mod extensions;
 mod find;
 mod folder;
@@ -68,6 +69,7 @@ pub use editor::{
     set_grammar_queries, set_lsp_settings,
 };
 pub use emulator::{EmulatorView, emulator_view};
+pub use exploit::{ExploitView, exploit_view};
 pub use extensions::{extensions_panel, refresh_extensions, set_extensions_dir};
 pub use inspector::inspector;
 pub use java::{JavaView, java_view};

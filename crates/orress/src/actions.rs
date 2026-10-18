@@ -297,6 +297,11 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
         "Extract an open executable's contents: native resources (icons, manifest, version, strings, RCDATA), embedded files found by signature, each PE section, and overlay data — saved into the project folder.",
     )
     .register(
+        "view::Exploit",
+        "Open Exploit Console",
+        "Write and run a pwntools-style exploit script against the open binary: process/remote tubes, packing (p64/u64), cyclic patterns, shellcode assembly, symbol/GOT/PLT lookups and ROP gadget search.",
+    )
+    .register(
         "view::Js",
         "Open JavaScript View",
         "Deobfuscate the open JavaScript (decode \\xNN/fromCharCode/concatenation), extract its strings, and beautify minified code (pure-Rust, string-level transforms).",

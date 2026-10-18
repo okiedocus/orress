@@ -16,6 +16,8 @@ workspace = true
 rhai = { workspace = true }
 orress-analysis = { workspace = true }
 orress-arch = { workspace = true }
+orress-asm = { workspace = true }
+orress-pwn = { workspace = true }
 
 [dev-dependencies]
 orress-loaders = { workspace = true }

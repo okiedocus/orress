@@ -23,6 +23,9 @@ use orress_analysis::{Memory, Program};
 use orress_arch::Isa;
 use rhai::{Array, Dynamic, Engine};
 
+pub mod exploit;
+pub use exploit::{ExploitCtx, run_exploit};
+
 /// An owned, read-only snapshot of the analysis the script queries.
 struct Ctx {
     memory: Memory,
