@@ -101,21 +101,28 @@ fn glossary_page(ui: &mut Ui, academy: &mut Academy) {
                             .size(16.0),
                     );
                 }
+                // The term, then its one-line explanation wrapping below it in a narrow
+                // panel; click the term to open the full explanation.
                 let id = ui.make_persistent_id(("orress::glossary_term", i));
-                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-                    ui.ctx(),
-                    id,
-                    false,
-                );
+                let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
                 if focus == Some(i) {
-                    state.set_open(true);
+                    open = true;
                 }
-                let (header, _, _) = state
-                    .show_header(ui, |ui| {
-                        ui.label(RichText::new(&term.term).strong());
+                let header = ui
+                    .horizontal_wrapped(|ui| {
+                        let r = ui
+                            .selectable_label(open, RichText::new(&term.term).strong())
+                            .on_hover_text(if open { "Fold" } else { "Read more" });
                         ui.label(muted(&term.short));
+                        r
                     })
-                    .body(|ui| {
+                    .inner;
+                if header.clicked() {
+                    open = !open;
+                }
+                ui.data_mut(|d| d.insert_temp(id, open));
+                if open {
+                    ui.indent(id, |ui| {
                         if !term.aliases.is_empty() {
                             ui.label(muted(format!("Also written: {}", term.aliases.join(", "))));
                         }
@@ -133,6 +140,8 @@ fn glossary_page(ui: &mut Ui, academy: &mut Academy) {
                             });
                         }
                     });
+                }
+                ui.add_space(2.0);
                 if focus == Some(i) {
                     header.scroll_to_me(Some(egui::Align::TOP));
                 }
