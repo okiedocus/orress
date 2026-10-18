@@ -6,6 +6,29 @@ All notable changes to ORRESS are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-18
+
+The binary-exploitation release: enough that a student of a Linux pwn/RE course (such as
+the *nightmare* course) can work end to end inside ORRESS.
+
+### Added
+
+- **Linux native debugging**: the `ptrace` back end (breakpoints, stepping, registers,
+  stack and memory) is now offered in the Debugger panel on Linux (x86-64) as well as
+  Windows, and ELF executables are debuggable targets.
+- **Exploit-development toolkit** (`orress-pwn`): tubes that talk to a local process or a
+  remote TCP service (`send`/`recvuntil`/…), integer packing (`p8`–`p64`/`u*`), cyclic
+  (de Bruijn) patterns and offset recovery, a ROP gadget finder, and payload builders —
+  format-string writes (`fmtstr`), sigreturn frames (SROP), `execve("/bin/sh")` shellcode,
+  `one_gadget`, `ret2csu` and `ret2dlresolve`.
+- **Exploit console**: a pwntools-style scripting tab (Rhai) exposing all of the above
+  plus symbol/GOT/PLT lookups and gadget search, run on a worker thread with live output.
+- **Gadgets panel**: list and filter the binary's ROP gadgets and copy their addresses.
+- **glibc heap visualizer** (`orress-heap` + Heap panel): while a Linux program is stopped,
+  show the malloc chunks, the tcache, and (with `main_arena`, auto-located from the unsorted
+  bin) the fastbins and unsorted/small/large bins.
+- **CLI**: `exploit` (run a pwn script headless), `gadgets`, and `one-gadget` subcommands.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added
@@ -82,6 +105,7 @@ The first public release of ORRESS — the Okiedocus Rusty Reverse Engineering S
 - Dependencies are checked by `cargo deny` (RustSec advisories, licenses, sources) on every push
   and daily.
 
-[Unreleased]: https://github.com/okiedocus/orress/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/okiedocus/orress/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/okiedocus/orress/releases/tag/v1.2.0
 [1.1.0]: https://github.com/okiedocus/orress/releases/tag/v1.1.0
 [1.0.0]: https://github.com/okiedocus/orress/releases/tag/v1.0.0
