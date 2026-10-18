@@ -9,9 +9,14 @@
 //! title = "Number systems"
 //! summary = "Binary, hexadecimal and how computers store negative numbers."
 //!
+//! goals = ["Read and write hexadecimal numbers", "..."]   # shown when the lesson starts
+//!
 //! [[steps]]
 //! title = "Hexadecimal"
+//! goal = "Convert a hex number to decimal."   # one line: what this step is for
 //! text = """Markdown explanation..."""
+//! instructions = ["Click ...", "Type ... and press Check."]  # numbered "Do this" list
+//! deep_dive = """Optional extra depth, folded away under 'Learn more'."""
 //! widget = "number_converter"          # optional interactive tool
 //! spotlight = "palette"                # optional: highlight a part of the UI
 //! check = { kind = "answer", answers = ["42"], number = true }
@@ -40,10 +45,13 @@ pub enum Check {
         #[serde(default)]
         case_sensitive: bool,
     },
-    /// Pick one option.
+    /// Pick one option. `explain`, if given, has one entry per option: why that option is
+    /// right or wrong, shown when it is picked.
     Choice {
         options: Vec<String>,
         correct: usize,
+        #[serde(default)]
+        explain: Vec<String>,
     },
     /// Type a secret (a password). Only its SHA-256 is stored, so reading the lesson
     /// file does not spoil it.
@@ -65,7 +73,17 @@ pub enum Check {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Step {
     pub title: String,
+    /// One line: what the learner gets out of this step.
+    #[serde(default)]
+    pub goal: Option<String>,
     pub text: String,
+    /// Exactly what to do, one action per entry; shown as a numbered list. Required for
+    /// every step with a task other than a multiple-choice question.
+    #[serde(default)]
+    pub instructions: Vec<String>,
+    /// Optional extra depth, folded away under "Learn more".
+    #[serde(default)]
+    pub deep_dive: Option<String>,
     #[serde(default)]
     pub widget: Option<String>,
     #[serde(default)]
@@ -96,6 +114,9 @@ pub struct Lesson {
     pub order: u32,
     pub title: String,
     pub summary: String,
+    /// What the learner can do after the lesson; shown at its start.
+    #[serde(default)]
+    pub goals: Vec<String>,
     #[serde(default)]
     pub badge: Option<String>,
     /// Crackme whose source is shown after the lesson is completed.
@@ -139,52 +160,9 @@ pub const LEVELS: [(&str, &str); 8] = [
     ),
 ];
 
-macro_rules! lessons {
-    ($($file:literal),* $(,)?) => {
-        &[$(($file, include_str!(concat!("../../../academy/lessons/", $file)))),*]
-    };
-}
-
-/// Lesson files built into ORRESS.
-const BUILT_IN: &[(&str, &str)] = lessons![
-    "00-01-what-is-re.toml",
-    "00-02-numbers.toml",
-    "00-03-bytes-and-text.toml",
-    "00-04-compiling.toml",
-    "00-05-tour.toml",
-    "01-06-cpu.toml",
-    "01-07-instructions.toml",
-    "01-08-stack.toml",
-    "01-09-calling-conventions.toml",
-    "01-10-patterns.toml",
-    "01-11-crackme1.toml",
-    "01-12-crackme2.toml",
-    "02-13-static-analysis.toml",
-    "02-15-decompiler.toml",
-    "02-16-keygens.toml",
-    "03-19-debugger.toml",
-    "03-20-patching.toml",
-    "03-21-emulation.toml",
-    "03-22-anti-debugging.toml",
-    "04-24-symbolic-execution.toml",
-    "04-25-crypto-recognition.toml",
-    "04-26-side-channels.toml",
-    "04-27-managed-code.toml",
-    "05-30-vm-obfuscation.toml",
-    "05-31-packers.toml",
-    "05-32-self-modifying-code.toml",
-    "05-33-custom-vms.toml",
-    "05-34-other-architectures.toml",
-    "06-40-malware-triage.toml",
-    "06-41-safe-lab-setup.toml",
-    "06-42-yara-rules.toml",
-    "06-43-behavior-analysis.toml",
-    "06-44-reporting.toml",
-    "07-50-time-travel-debugging.toml",
-    "07-51-binary-diffing.toml",
-    "07-52-drivers-and-rootkits.toml",
-    "07-53-your-own-analysis-passes.toml",
-];
+// Every `academy/lessons/*.toml` file, as `BUILT_IN: &[(file name, source)]`, plus the
+// glossary files (see `build.rs`).
+include!(concat!(env!("OUT_DIR"), "/academy_files.rs"));
 
 pub fn parse(source: &str) -> Result<Lesson, String> {
     let lesson: Lesson = toml::from_str(source).map_err(|e| e.to_string())?;
@@ -202,8 +180,13 @@ fn validate(lesson: &Lesson) -> Result<(), String> {
             return Err(format!("{at}: at most 3 hints"));
         }
         match &step.check {
-            Check::Choice { options, correct } if *correct >= options.len() => {
+            Check::Choice { options, correct, .. } if *correct >= options.len() => {
                 return Err(format!("{at}: `correct` is out of range"));
+            }
+            Check::Choice { options, explain, .. }
+                if !explain.is_empty() && explain.len() != options.len() =>
+            {
+                return Err(format!("{at}: `explain` needs one entry per option"));
             }
             Check::Answer {
                 answers, number, ..
@@ -229,6 +212,12 @@ fn validate(lesson: &Lesson) -> Result<(), String> {
                 return Err(format!("{at}: unknown crackme `{name}`"));
             }
             _ => {}
+        }
+        let needs_instructions = !matches!(step.check, Check::Continue | Check::Choice { .. });
+        if needs_instructions && step.instructions.is_empty() {
+            return Err(format!(
+                "{at}: steps with a task need `instructions` that say exactly what to do"
+            ));
         }
         if let Some(code) = &step.sim_code {
             crate::sim::Cpu::new(code)
@@ -276,6 +265,22 @@ pub fn catalog() -> Vec<Lesson> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Checks every file on its own and lists all problems at once, so one broken file
+    /// does not hide the others.
+    #[test]
+    fn every_lesson_file_is_valid() {
+        let errors: Vec<String> = BUILT_IN
+            .iter()
+            .filter_map(|(file, source)| parse(source).err().map(|e| format!("{file}: {e}")))
+            .chain(crate::lesson::GLOSSARY_FILES.iter().filter_map(|(file, source)| {
+                crate::glossary::parse(source)
+                    .err()
+                    .map(|e| format!("glossary/{file}: {e}"))
+            }))
+            .collect();
+        assert!(errors.is_empty(), "invalid files:\n{}", errors.join("\n"));
+    }
 
     #[test]
     fn built_in_lessons_are_valid() {

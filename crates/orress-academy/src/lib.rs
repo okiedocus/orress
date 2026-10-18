@@ -7,6 +7,7 @@
 //! spotlight.
 
 pub mod crackmes;
+pub mod glossary;
 pub mod lesson;
 pub mod numbers;
 pub mod progress;
@@ -15,6 +16,7 @@ mod ui;
 
 use std::path::{Path, PathBuf};
 
+pub use glossary::Term;
 pub use lesson::{Check, LEVELS, Lesson, Step};
 pub use progress::Progress;
 use sha2::{Digest, Sha256};
@@ -47,6 +49,8 @@ pub enum Request {
     OpenFile(PathBuf),
     OpenSimulator,
     OpenLesson,
+    /// Show the Academy tab, on the glossary.
+    OpenGlossary,
     Message(String),
 }
 
@@ -97,8 +101,24 @@ impl SimState {
     }
 }
 
+/// Which page the Academy tab shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Page {
+    #[default]
+    Lessons,
+    Glossary,
+}
+
 pub struct Academy {
     pub lessons: Vec<Lesson>,
+    pub glossary: Vec<Term>,
+    /// Glossary terms mentioned in the current step (indices into `glossary`).
+    pub step_terms: Vec<usize>,
+    pub page: Page,
+    /// Search text on the glossary page.
+    pub glossary_filter: String,
+    /// Term to scroll to and open on the glossary page.
+    pub glossary_focus: Option<usize>,
     pub progress: Progress,
     progress_file: Option<PathBuf>,
     crackme_dir: Option<PathBuf>,
@@ -134,6 +154,11 @@ impl Academy {
             .map(|i| (i, first_open_step(&progress, &lessons[i])));
         let mut academy = Self {
             lessons,
+            glossary: glossary::catalog(),
+            step_terms: Vec::new(),
+            page: Page::default(),
+            glossary_filter: String::new(),
+            glossary_focus: None,
             progress,
             progress_file,
             crackme_dir: config_dir.map(|d| d.join("academy").join("crackmes")),
@@ -211,11 +236,34 @@ impl Academy {
         self.hints_shown = 0;
         self.answer.clear();
         self.feedback = None;
-        if let Some((_, _, step)) = self.current()
-            && let Some(code) = step.sim_code.clone()
-        {
+        self.step_terms.clear();
+        let Some((_, _, step)) = self.current() else {
+            return;
+        };
+        let mut text = format!("{}\n{}", step.title, step.text);
+        for line in step.instructions.iter().chain(&step.goal) {
+            text.push('\n');
+            text.push_str(line);
+        }
+        if let Check::Choice { options, .. } = &step.check {
+            text.push('\n');
+            text.push_str(&options.join("\n"));
+        }
+        let code = step.sim_code.clone();
+        self.step_terms = glossary::mentioned(&self.glossary, &text);
+        if let Some(code) = code {
             self.sim.load(&code);
         }
+    }
+
+    /// Opens the glossary page of the Academy tab, at `term` if given.
+    pub fn show_glossary(&mut self, term: Option<usize>) {
+        self.page = Page::Glossary;
+        self.glossary_focus = term;
+        if term.is_some() {
+            self.glossary_filter.clear();
+        }
+        self.requests.push(Request::OpenGlossary);
     }
 
     pub fn go_to_step(&mut self, step: usize) {
@@ -382,16 +430,22 @@ impl Academy {
         let Some((_, _, step)) = self.current() else {
             return;
         };
-        let Check::Choice { correct, .. } = &step.check else {
+        let Check::Choice {
+            correct, explain, ..
+        } = &step.check
+        else {
             return;
         };
         let ok = option == *correct;
+        let why = explain.get(option).map(|w| format!(" {w}")).unwrap_or_default();
         self.feedback = Some(Feedback {
             correct: ok,
             text: if ok {
-                "Correct!".into()
-            } else {
+                format!("Correct!{why}")
+            } else if why.is_empty() {
                 "Not that one. Read the text again, or take a hint.".into()
+            } else {
+                format!("Not that one.{why}")
             },
         });
         if ok {

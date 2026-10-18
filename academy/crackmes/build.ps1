@@ -12,7 +12,9 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 New-Item -ItemType Directory -Force (Join-Path $here "bin") | Out-Null
 
-foreach ($name in @("crackme01", "crackme02", "crackme03", "crackme04", "crackme05", "crackme06", "crackme07", "crackme08")) {
+# Every crackmeNN.rs here; ORRESS embeds each one that has a built bin\crackmeNN.exe.
+$names = Get-ChildItem (Join-Path $here "crackme*.rs") | ForEach-Object { $_.BaseName } | Sort-Object
+foreach ($name in $names) {
     $src = Join-Path $here "$name.rs"
     $exe = Join-Path $here "bin\$name.exe"
     rustc --edition 2024 -C opt-level=1 -C panic=abort -C debuginfo=0 -C strip=symbols `

@@ -5,7 +5,7 @@ use egui::{Color32, Context, RichText, Ui};
 use orress_ui::{ExplainExt as _, muted, spotlight};
 
 use crate::sim::{self, STACK_TOP};
-use crate::{Academy, Check, LEVELS, Request, numbers, progress};
+use crate::{Academy, Check, LEVELS, Page, Request, numbers, progress};
 
 fn markdown(ui: &mut Ui, academy: &mut Academy, text: &str) {
     let mut cache = std::mem::take(&mut academy.markdown);
@@ -35,13 +35,105 @@ fn success_color(ui: &Ui) -> Color32 {
     }
 }
 
-/// The Academy overview tab.
+/// The Academy tab: the lesson overview, or the glossary.
 pub fn overview(ui: &mut Ui, academy: &mut Academy) {
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut academy.page, Page::Lessons, RichText::new("Lessons").strong());
+        ui.selectable_value(&mut academy.page, Page::Glossary, RichText::new("Glossary").strong())
+            .explain(
+                "Glossary",
+                "Every technical word used in the lessons, explained in plain language.",
+            );
+    });
+    ui.separator();
+    match academy.page {
+        Page::Lessons => lessons_page(ui, academy),
+        Page::Glossary => glossary_page(ui, academy),
+    }
+}
+
+fn glossary_page(ui: &mut Ui, academy: &mut Academy) {
+    ui.horizontal(|ui| {
+        ui.label("Search:");
+        ui.add(
+            egui::TextEdit::singleline(&mut academy.glossary_filter)
+                .id_salt("orress::glossary_filter")
+                .hint_text("a word, e.g. stack")
+                .desired_width(240.0),
+        );
+        ui.label(muted(format!("{} words", academy.glossary.len())));
+    });
+    ui.add_space(4.0);
+    let filter = academy.glossary_filter.trim().to_lowercase();
+    let focus = academy.glossary_focus.take();
+    let mut jump = None;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let mut letter = None;
+        for i in 0..academy.glossary.len() {
+            let term = academy.glossary[i].clone();
+            let matches = filter.is_empty()
+                || term.term.to_lowercase().contains(&filter)
+                || term.aliases.iter().any(|a| a.to_lowercase().contains(&filter))
+                || term.short.to_lowercase().contains(&filter);
+            if !matches {
+                continue;
+            }
+            let first = term.term.chars().next().map(|c| c.to_ascii_uppercase());
+            if filter.is_empty() && first != letter {
+                letter = first;
+                ui.add_space(6.0);
+                ui.label(RichText::new(first.unwrap_or(' ').to_string()).strong().size(16.0));
+            }
+            let id = ui.make_persistent_id(("orress::glossary_term", i));
+            let mut state =
+                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+            if focus == Some(i) {
+                state.set_open(true);
+            }
+            let (header, _, _) = state
+                .show_header(ui, |ui| {
+                    ui.label(RichText::new(&term.term).strong());
+                    ui.label(muted(&term.short));
+                })
+                .body(|ui| {
+                    if !term.aliases.is_empty() {
+                        ui.label(muted(format!("Also written: {}", term.aliases.join(", "))));
+                    }
+                    if let Some(text) = &term.text {
+                        markdown(ui, academy, text);
+                    }
+                    if !term.see.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(muted("See also:"));
+                            for see in &term.see {
+                                if ui.link(see).clicked() {
+                                    jump = crate::glossary::find(&academy.glossary, see);
+                                }
+                            }
+                        });
+                    }
+                });
+            if focus == Some(i) {
+                header.scroll_to_me(Some(egui::Align::TOP));
+            }
+        }
+    });
+    if let Some(i) = jump {
+        academy.glossary_filter.clear();
+        academy.glossary_focus = Some(i);
+    }
+}
+
+fn lessons_page(ui: &mut Ui, academy: &mut Academy) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.heading("ORRESS Academy");
         ui.label(muted(
             "Learn reverse engineering step by step, from binary numbers to cracking programs. \
              Every lesson checks what you do in ORRESS itself, and the examples are written in Rust.",
+        ));
+        ui.label(muted(
+            "You only need to know some basic Rust. Everything else is taught here, and every \
+             technical word is explained in the Glossary (the tab above).",
         ));
         ui.add_space(8.0);
 
@@ -174,7 +266,16 @@ pub fn lesson_panel(ui: &mut Ui, academy: &mut Academy) {
         }
 
         ui.label(muted(format!("Level {} · {}", lesson.level, LEVELS[usize::from(lesson.level)].0)));
-        ui.label(RichText::new(&lesson.title).strong().size(16.0));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&lesson.title).strong().size(16.0));
+            if ui
+                .small_button("Glossary")
+                .on_hover_text("Look up any word in the Academy glossary.")
+                .clicked()
+            {
+                academy.show_glossary(None);
+            }
+        });
         // Step dots: click to jump to a step.
         ui.horizontal_wrapped(|ui| {
             for i in 0..lesson.steps.len() {
@@ -197,8 +298,27 @@ pub fn lesson_panel(ui: &mut Ui, academy: &mut Academy) {
         });
         ui.separator();
 
+        if step_index == 0 && !lesson.goals.is_empty() {
+            egui::Frame::group(ui.style()).inner_margin(8.0).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("In this lesson you will learn to").strong());
+                for goal in &lesson.goals {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("-");
+                        ui.label(goal);
+                    });
+                }
+            });
+            ui.add_space(4.0);
+        }
         ui.label(RichText::new(&step.title).strong().size(15.0));
+        if let Some(goal) = &step.goal {
+            ui.label(muted(format!("Goal: {goal}")));
+        }
         markdown(ui, academy, &step.text);
+        if let Some(deep) = &step.deep_dive {
+            ui.collapsing("Learn more", |ui| markdown(ui, academy, deep));
+        }
         if let Some(widget) = &step.widget {
             ui.add_space(4.0);
             egui::Frame::group(ui.style()).show(ui, |ui| match widget.as_str() {
@@ -210,6 +330,7 @@ pub fn lesson_panel(ui: &mut Ui, academy: &mut Academy) {
             });
         }
         ui.add_space(6.0);
+        instructions(ui, academy, &step, done);
         task(ui, academy, &step, done);
 
         if let Some(f) = &academy.feedback {
@@ -225,6 +346,7 @@ pub fn lesson_panel(ui: &mut Ui, academy: &mut Academy) {
         }
 
         hints(ui, academy, &step, done);
+        step_words(ui, academy);
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -274,6 +396,58 @@ pub fn lesson_panel(ui: &mut Ui, academy: &mut Academy) {
     });
 }
 
+/// The numbered "Do this" list: exactly what the learner has to do.
+fn instructions(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
+    if step.instructions.is_empty() {
+        return;
+    }
+    let accent = if done { success_color(ui) } else { ui.visuals().hyperlink_color };
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, accent))
+        .corner_radius(6.0)
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(if done { "Done:" } else { "Do this:" }).strong().color(accent));
+            for (i, line) in step.instructions.iter().enumerate() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(format!("{}.", i + 1)).strong());
+                    // Instructions may use **bold** and `code`.
+                    ui.vertical(|ui| markdown(ui, academy, line));
+                });
+            }
+        });
+    ui.add_space(4.0);
+}
+
+/// Glossary terms used in this step, folded away until needed.
+fn step_words(ui: &mut Ui, academy: &mut Academy) {
+    if academy.step_terms.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    let terms = academy.step_terms.clone();
+    let mut open = None;
+    ui.collapsing(format!("Words in this step ({})", terms.len()), |ui| {
+        for i in terms {
+            let term = &academy.glossary[i];
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .link(RichText::new(&term.term).strong())
+                    .on_hover_text("Open in the glossary")
+                    .clicked()
+                {
+                    open = Some(i);
+                }
+                ui.label(&term.short);
+            });
+        }
+    });
+    if let Some(i) = open {
+        academy.show_glossary(Some(i));
+    }
+}
+
 fn task(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
     let status = |ui: &mut Ui, text: &str| {
         let (mark, color) = if done {
@@ -288,8 +462,8 @@ fn task(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
     };
     match &step.check {
         Check::Continue => {}
-        Check::Action { .. } => status(ui, "do what the text above describes."),
-        Check::View { view } => status(ui, &format!("open the {view} view of the file.")),
+        Check::Action { .. } => status(ui, "follow the steps above. The lesson notices when you did it."),
+        Check::View { view } => status(ui, &format!("open the {view} view (see the steps above).")),
         Check::OpenCrackme { name } => {
             status(ui, &format!("open the practice program {name}."));
             if !done && ui.button(format!("Open {name}")).clicked() {
@@ -317,7 +491,7 @@ fn task(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
                 });
             }
         }
-        Check::Choice { options, correct } => {
+        Check::Choice { options, correct, .. } => {
             for (i, option) in options.iter().enumerate() {
                 let text = if done && i == *correct {
                     RichText::new(format!("{option}  (correct)")).color(success_color(ui))

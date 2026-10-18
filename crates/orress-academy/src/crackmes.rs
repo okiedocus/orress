@@ -1,5 +1,5 @@
 //! Practice programs built into ORRESS. Sources and the build script are in
-//! `academy/crackmes/`.
+//! `academy/crackmes/`; adding `crackmeNN.rs` and building it is enough to embed it.
 
 use std::path::{Path, PathBuf};
 
@@ -10,56 +10,8 @@ pub struct Crackme {
     pub source: &'static str,
 }
 
-pub const CRACKMES: &[Crackme] = &[
-    Crackme {
-        name: "crackme01",
-        file_name: "crackme01.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme01.exe"),
-        source: include_str!("../../../academy/crackmes/crackme01.rs"),
-    },
-    Crackme {
-        name: "crackme02",
-        file_name: "crackme02.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme02.exe"),
-        source: include_str!("../../../academy/crackmes/crackme02.rs"),
-    },
-    Crackme {
-        name: "crackme03",
-        file_name: "crackme03.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme03.exe"),
-        source: include_str!("../../../academy/crackmes/crackme03.rs"),
-    },
-    Crackme {
-        name: "crackme04",
-        file_name: "crackme04.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme04.exe"),
-        source: include_str!("../../../academy/crackmes/crackme04.rs"),
-    },
-    Crackme {
-        name: "crackme05",
-        file_name: "crackme05.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme05.exe"),
-        source: include_str!("../../../academy/crackmes/crackme05.rs"),
-    },
-    Crackme {
-        name: "crackme06",
-        file_name: "crackme06.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme06.exe"),
-        source: include_str!("../../../academy/crackmes/crackme06.rs"),
-    },
-    Crackme {
-        name: "crackme07",
-        file_name: "crackme07.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme07.exe"),
-        source: include_str!("../../../academy/crackmes/crackme07.rs"),
-    },
-    Crackme {
-        name: "crackme08",
-        file_name: "crackme08.exe",
-        bytes: include_bytes!("../../../academy/crackmes/bin/crackme08.exe"),
-        source: include_str!("../../../academy/crackmes/crackme08.rs"),
-    },
-];
+// Every `academy/crackmes/<name>.rs` with a built `bin/<name>.exe` (see `build.rs`).
+include!(concat!(env!("OUT_DIR"), "/crackme_files.rs"));
 
 pub fn find(name: &str) -> Option<&'static Crackme> {
     CRACKMES.iter().find(|c| c.name == name)
@@ -82,6 +34,7 @@ mod tests {
 
     #[test]
     fn crackmes_are_windows_programs() {
+        assert!(CRACKMES.len() >= 8);
         for c in CRACKMES {
             assert!(c.bytes.starts_with(b"MZ"), "{} is a PE file", c.name);
             assert!(c.source.contains("fn main"));

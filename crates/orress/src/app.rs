@@ -381,6 +381,7 @@ impl OrressApp {
                 orress_academy::Request::OpenFile(path) => self.open_file(path),
                 orress_academy::Request::OpenSimulator => self.workspace.open(TabKind::Simulator),
                 orress_academy::Request::OpenLesson => self.workspace.open(TabKind::Lesson),
+                orress_academy::Request::OpenGlossary => self.workspace.open(TabKind::Academy),
                 orress_academy::Request::Message(text) => self.notify(ctx, text, true),
             }
         }
