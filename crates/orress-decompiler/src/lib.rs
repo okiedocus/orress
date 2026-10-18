@@ -43,6 +43,9 @@ pub struct Output {
     pub entry: u64,
     pub name: String,
     pub lines: Vec<Line>,
+    /// Struct layouts recovered for this function's pointer parameters (from field-offset
+    /// access), so the UI can promote one into the user's type catalog.
+    pub structs: Vec<types::StructLayout>,
 }
 
 impl Output {
@@ -288,6 +291,18 @@ pub fn decompile_with(
 ) -> Result<Output, Error> {
     let mut d = run(program, addr, conv)?;
     types::apply_hints(&mut d.sig, d.entry, hints);
+    // Recovered struct layouts (pointer parameters accessed by constant field offsets), so the
+    // UI can offer to save one as a reusable user type.
+    let structs: Vec<types::StructLayout> = d
+        .sig
+        .params
+        .iter()
+        .chain(d.sig.ret.iter())
+        .filter_map(|t| match t {
+            types::Ty::Struct(layout, _) => Some(layout.clone()),
+            _ => None,
+        })
+        .collect();
     let mut lines = print::Printer::new(
         program,
         &d.sig,
@@ -322,6 +337,7 @@ pub fn decompile_with(
         entry: d.entry,
         name: d.name,
         lines,
+        structs,
     })
 }
 

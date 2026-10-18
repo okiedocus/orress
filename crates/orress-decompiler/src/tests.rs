@@ -1137,6 +1137,17 @@ fn struct_pointer_recovery() {
     );
 }
 
+#[test]
+fn output_exposes_recovered_structs() {
+    // Same getter: field_0 (u8 @0) + field_4 (u32 @4) => one struct, offered for promotion.
+    let getter: &[u8] = &[0x0F, 0xB6, 0x07, 0x8B, 0x57, 0x04, 0x01, 0xD0, 0xC3];
+    let p = program(&[("getter", getter)]);
+    let out = decompile(&p, BASE, Convention::SysV).expect("decompiles");
+    assert_eq!(out.structs.len(), 1, "one recovered struct");
+    let offsets: Vec<u64> = out.structs[0].fields.iter().map(|f| f.offset).collect();
+    assert_eq!(offsets, vec![0, 4]);
+}
+
 fn program_arm(funcs: &[(&str, &[u8])]) -> Program {
     let mut code = vec![0u8; 0x1000];
     let mut symbols = Vec::new();

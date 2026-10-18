@@ -272,8 +272,20 @@ fn panel(
     });
 
     let name = code::describe_address(doc, &program, func);
+    // Struct layouts the decompiler recovered for this function, offered for promotion into the
+    // user type catalog (skip ones already a user type by that name).
+    let recovered: Vec<orress_decompiler::types::StructLayout> = match &*result {
+        Ok(o) => o
+            .structs
+            .iter()
+            .filter(|s| !doc.annotations.types.contains_key(&s.name))
+            .cloned()
+            .collect(),
+        Err(_) => Vec::new(),
+    };
     let mode_id = egui::Id::new("orress::decompiler_mode");
     let mut port_mode: bool = ui.ctx().data(|d| d.get_temp(mode_id)).unwrap_or(false);
+    let mut promote: Option<orress_decompiler::types::StructLayout> = None;
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("Decompiled: {name}")).strong())
             .explain("Decompiler", EXPLAIN);
@@ -319,7 +331,28 @@ fn panel(
                 Some(crate::prototype::ProtoDraft::load(doc, func))
             };
         }
+        if !recovered.is_empty() {
+            ui.separator();
+            ui.menu_button("Save struct", |ui| {
+                ui.label(muted("Promote a recovered struct into a reusable type:"));
+                for layout in &recovered {
+                    let text = format!("{} ({} fields)", layout.name, layout.fields.len());
+                    if ui.button(text).clicked() {
+                        promote = Some(layout.clone());
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Turn a struct the decompiler recovered into a user type you can name and reuse");
+        }
     });
+    if let Some(layout) = promote {
+        let ty = promote_struct(&layout);
+        if doc.define_type(ty).is_ok() {
+            requests.push(ViewRequest::RunAction("view::Types".into()));
+        }
+    }
     crate::prototype::window(ui, &mut state.proto, doc, &name);
     if state.find.open {
         let bar = find::bar(ui, &mut state.find, "e.g. a1, while, 0x5a", FIND_EXPLAIN);
@@ -945,5 +978,42 @@ fn lower_ty(
             }
         },
         TypeRef::Named(_) => None,
+    }
+}
+
+/// Converts a struct layout the decompiler recovered into a user type, ready to save in the
+/// catalog. Each field becomes a fixed-width integer (by its access width and signedness),
+/// keeping any names already applied; the user renames fields in the Types view afterwards.
+fn promote_struct(
+    layout: &orress_decompiler::types::StructLayout,
+) -> orress_project::types::UserType {
+    use orress_project::types::{FieldDef, TypeRef, UserType};
+    let fields = layout
+        .fields
+        .iter()
+        .map(|f| FieldDef {
+            name: layout.field_name(f),
+            ty: TypeRef::Prim(prim_for(f.width.0, f.signed)),
+            count: 1,
+        })
+        .collect();
+    UserType::Struct {
+        name: layout.name.clone(),
+        fields,
+    }
+}
+
+/// The primitive for a recovered field's access width and signedness.
+fn prim_for(width: u8, signed: bool) -> orress_project::types::Prim {
+    use orress_project::types::Prim;
+    match (width, signed) {
+        (1, true) => Prim::I8,
+        (2, false) => Prim::U16,
+        (2, true) => Prim::I16,
+        (4, false) => Prim::U32,
+        (4, true) => Prim::I32,
+        (8, false) => Prim::U64,
+        (8, true) => Prim::I64,
+        _ => Prim::U8,
     }
 }
