@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::{FuncProto, TypeRef, UserType};
+
 pub const EXTENSION: &str = "orress";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,6 +29,12 @@ pub struct Annotations {
     pub bookmarks: BTreeSet<u64>,
     /// Patched bytes: file offset -> new value. Applied on top of the original file.
     pub patches: BTreeMap<u64, u8>,
+    /// User-defined types, by name.
+    pub types: BTreeMap<String, UserType>,
+    /// A type applied to a data address: "a value of this type lives here".
+    pub data_types: BTreeMap<u64, TypeRef>,
+    /// A function prototype pinned to a function address (consumed by the decompiler).
+    pub func_prototypes: BTreeMap<u64, FuncProto>,
 }
 
 impl Annotations {
@@ -70,6 +78,9 @@ impl Annotations {
             && self.comments.is_empty()
             && self.bookmarks.is_empty()
             && self.patches.is_empty()
+            && self.types.is_empty()
+            && self.data_types.is_empty()
+            && self.func_prototypes.is_empty()
     }
 }
 
@@ -116,6 +127,38 @@ mod tests {
             Annotations::load(&dir.join("missing.orress")).unwrap(),
             None
         );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn types_round_trip_and_v1_still_loads() {
+        use crate::types::{FieldDef, Prim, TypeRef, UserType};
+        let dir = std::env::temp_dir().join(format!("orress-types-{}", std::process::id()));
+        let path = Annotations::file_for(&dir, "t1");
+        let mut a = Annotations::new("t1", Path::new("C:/x.exe"));
+        a.types.insert(
+            "Packet".into(),
+            UserType::Struct {
+                name: "Packet".into(),
+                fields: vec![FieldDef {
+                    name: "magic".into(),
+                    ty: TypeRef::Prim(Prim::U32),
+                    count: 1,
+                }],
+            },
+        );
+        a.data_types
+            .insert(0x4040_60, TypeRef::Named("Packet".into()));
+        a.save(&path).unwrap();
+        assert_eq!(Annotations::load(&path).unwrap(), Some(a));
+
+        // A pre-types (v1) file has no type fields; `#[serde(default)]` fills them in.
+        let v1 = r#"{"version":1,"sha256":"old","names":{"4096":"main"}}"#;
+        let legacy = dir.join("old.orress");
+        std::fs::write(&legacy, v1).unwrap();
+        let loaded = Annotations::load(&legacy).unwrap().unwrap();
+        assert_eq!(loaded.names.get(&4096).map(String::as_str), Some("main"));
+        assert!(loaded.types.is_empty() && loaded.data_types.is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 

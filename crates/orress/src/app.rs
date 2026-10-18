@@ -56,6 +56,7 @@ pub struct OrressApp {
     diff: orress_views::DiffView,
     script: orress_views::ScriptView,
     challenge: orress_views::ChallengeWorkbenchView,
+    types: orress_views::TypesView,
     /// The startup splash, shown for a moment then dropped.
     splash: Option<crate::splash::Splash>,
     toasts: Vec<Toast>,
@@ -183,6 +184,7 @@ impl OrressApp {
             diff: orress_views::DiffView::default(),
             script: orress_views::ScriptView::default(),
             challenge: orress_views::ChallengeWorkbenchView::default(),
+            types: orress_views::TypesView::default(),
             splash: Some(crate::splash::Splash::new(&cc.egui_ctx)),
             docs: DocStore::new(
                 move || repaint.request_repaint(),
@@ -737,6 +739,7 @@ impl OrressApp {
             "view::Project" => self.workspace.open(TabKind::ProjectTree),
             "view::Explain" => self.workspace.open(TabKind::Explain),
             "view::Inspector" => self.workspace.open(TabKind::Inspector),
+            "view::Types" => self.workspace.open(TabKind::Types),
             "view::Extensions" => self.workspace.open(TabKind::Extensions),
             "view::Collaboration" => self.workspace.open(TabKind::Collaboration),
             "view::Diff" => self.workspace.open(TabKind::Diff),
@@ -1016,6 +1019,7 @@ impl OrressApp {
                             "view::Project",
                             "view::Explain",
                             "view::Inspector",
+                            "view::Types",
                             "view::Extensions",
                             "view::Collaboration",
                             "view::Diff",
@@ -1410,6 +1414,7 @@ impl eframe::App for OrressApp {
             &mut self.diff,
             &mut self.script,
             &mut self.challenge,
+            &mut self.types,
         );
         env.editor_save = editor_save;
         env.project_root = self.settings.project_root.clone();

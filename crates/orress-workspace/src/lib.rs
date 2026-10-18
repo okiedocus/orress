@@ -86,6 +86,8 @@ pub enum TabKind {
     ProjectTree,
     Explain,
     Inspector,
+    /// User-defined types: declare structs/unions/enums/typedefs and see their layout.
+    Types,
     /// Extension manager: installed extensions, install/uninstall.
     Extensions,
     /// Team collaboration: shared project over a relay, presence/follow, claims, chat, CTF.
@@ -160,6 +162,7 @@ impl TabKind {
             Self::ProjectTree => "Project".into(),
             Self::Explain => "Explain".into(),
             Self::Inspector => "Inspector".into(),
+            Self::Types => "Types".into(),
             Self::Extensions => "Extensions".into(),
             Self::Collaboration => "Collaboration".into(),
             Self::Diff => "Binary diff".into(),
@@ -309,6 +312,7 @@ pub struct TabEnv<'a> {
     pub diff: &'a mut orress_views::DiffView,
     pub script: &'a mut orress_views::ScriptView,
     pub challenge: &'a mut orress_views::ChallengeWorkbenchView,
+    pub types: &'a mut orress_views::TypesView,
 }
 
 impl<'a> TabEnv<'a> {
@@ -345,6 +349,7 @@ impl<'a> TabEnv<'a> {
         diff: &'a mut orress_views::DiffView,
         script: &'a mut orress_views::ScriptView,
         challenge: &'a mut orress_views::ChallengeWorkbenchView,
+        types: &'a mut orress_views::TypesView,
     ) -> Self {
         Self {
             registry,
@@ -384,6 +389,7 @@ impl<'a> TabEnv<'a> {
             diff,
             script,
             challenge,
+            types,
         }
     }
 }

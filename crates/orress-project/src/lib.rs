@@ -6,11 +6,15 @@
 //! a string or a section moves the hex view and updates the inspector.
 
 mod annotations;
+pub mod types;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub use annotations::{Annotations, validate_name};
+pub use types::{
+    FieldDef, FuncProto, LaidField, Prim, TypeCatalog, TypeRef, UserType, references,
+};
 pub use orress_analysis::Program;
 use orress_bytes::Endian;
 use orress_bytes::strings::FoundString;
@@ -309,6 +313,45 @@ impl Document {
             self.annotations.comments.insert(addr, text.to_owned());
         }
         self.save_annotations();
+    }
+
+    /// The user's type catalog, with the pointer size set from this binary's bitness.
+    pub fn type_catalog(&self) -> TypeCatalog {
+        let bits = self.analysis.get().and_then(|a| a.info.bits);
+        TypeCatalog::new(self.annotations.types.clone(), bits)
+    }
+
+    /// Defines or replaces a user type. Validated against the current catalog.
+    pub fn define_type(&mut self, ty: UserType) -> Result<(), String> {
+        self.type_catalog().validate(&ty)?;
+        self.annotations
+            .types
+            .insert(ty.name().to_owned(), ty);
+        self.save_annotations();
+        Ok(())
+    }
+
+    /// Removes a user type by name, and any data applications that referenced it.
+    pub fn remove_type(&mut self, name: &str) {
+        if self.annotations.types.remove(name).is_some() {
+            self.annotations
+                .data_types
+                .retain(|_, t| !references(t, name));
+            self.save_annotations();
+        }
+    }
+
+    /// Applies a type to a data address.
+    pub fn apply_data_type(&mut self, addr: u64, ty: TypeRef) {
+        self.annotations.data_types.insert(addr, ty);
+        self.save_annotations();
+    }
+
+    /// Removes any type applied at `addr`.
+    pub fn clear_data_type(&mut self, addr: u64) {
+        if self.annotations.data_types.remove(&addr).is_some() {
+            self.save_annotations();
+        }
     }
 
     pub fn toggle_bookmark(&mut self, addr: u64) {

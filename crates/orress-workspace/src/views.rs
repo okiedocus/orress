@@ -80,6 +80,7 @@ impl TabViewer for Viewer<'_, '_> {
                 orress_views::project_tree(ui, self.env.docs, &mut self.env.view_requests);
             }
             TabKind::Inspector => orress_views::inspector(ui, self.env.docs),
+            TabKind::Types => orress_views::types_view(ui, self.env.types, self.env.docs),
             TabKind::Collaboration => orress_views::collab_panel(ui, self.env.collab),
             TabKind::Diff => orress_views::diff_panel(ui, self.env.diff, self.env.docs),
             TabKind::Script => orress_views::script_view(ui, self.env.script, self.env.docs),

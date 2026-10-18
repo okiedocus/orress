@@ -8,6 +8,11 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **User-defined types**: a Types view to declare `struct`/`union`/`enum`/`typedef` with a
+  form builder (field name, type, array count, pointer), with a live C-layout preview
+  (offsets, sizes, padding). Apply a type to a data address from the hex view's right-click
+  menu and the Inspector lays the bytes out as named, typed fields. Types persist per
+  binary alongside names and comments.
 - **Symbol demangling** (`orress-demangle`): mangled linker names in the imports, exports
   and function-symbol lists are now shown readable — Rust (legacy `_ZN…E` and v0 `_R…`),
   C++ Itanium (`_Z…`) and MSVC (`?…`). Pure Rust, no C `__cxa_demangle`. GOT/PLT slot

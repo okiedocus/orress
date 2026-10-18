@@ -972,6 +972,33 @@ fn context_menu(
         }
         crate::menu::command(ui, cx.requests, "view::Decompiler");
     }
+    // Apply a user-defined type to the data at the cursor (needs a loaded address).
+    if let Some(addr) = doc.cursor_address() {
+        let names: Vec<String> = doc.type_catalog().types.keys().cloned().collect();
+        let applied = doc.annotations.data_types.get(&addr).cloned();
+        ui.separator();
+        ui.menu_button("Apply type", |ui| {
+            if names.is_empty() {
+                ui.label(orress_ui::muted("No types yet — define one in the Types view."));
+                crate::menu::command(ui, cx.requests, "view::Types");
+            }
+            for name in &names {
+                if ui.button(name).clicked() {
+                    doc.apply_data_type(addr, orress_project::TypeRef::Named(name.clone()));
+                    ui.close();
+                }
+            }
+        });
+        if let Some(ty) = applied
+            && ui
+                .button(format!("Clear type ({})", ty.label()))
+                .clicked()
+        {
+            doc.clear_data_type(addr);
+            ui.close();
+        }
+    }
+    ui.separator();
     crate::menu::command(ui, cx.requests, "view::Inspector");
     crate::menu::views_and_commands(ui, cx.requests);
 }
