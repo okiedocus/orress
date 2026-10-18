@@ -294,21 +294,28 @@ fn start_screen(ui: &mut Ui, session: &mut DebugSession, doc: &mut Document) {
         .map(|a| {
             matches!(
                 a.info.format,
-                orress_loaders::Format::Pe | orress_loaders::Format::Coff
+                orress_loaders::Format::Pe
+                    | orress_loaders::Format::Coff
+                    | orress_loaders::Format::Elf
             )
         })
         .unwrap_or(false);
 
-    if !cfg!(windows) {
+    if !cfg!(all(
+        any(target_os = "windows", target_os = "linux"),
+        target_arch = "x86_64"
+    )) {
         ui.colored_label(
             ui.visuals().warn_fg_color,
-            "Native debugging is available on Windows. ptrace (Linux) and GDB-remote back ends are planned.",
+            "Native debugging is available on Windows and Linux (x86-64). A macOS back end, and a \
+             GDB-remote back end for other targets, are planned.",
         );
         return;
     }
     if !is_exe {
         ui.label(muted(
-            "Open a Windows program (.exe) to debug it. Other formats come with later back ends.",
+            "Open a native program (a Windows .exe or a Linux ELF) to debug it. Other formats come \
+             with later back ends.",
         ));
     }
 
