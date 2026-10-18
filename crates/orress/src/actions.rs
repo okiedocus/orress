@@ -302,6 +302,11 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
         "Write and run a pwntools-style exploit script against the open binary: process/remote tubes, packing (p64/u64), cyclic patterns, shellcode assembly, symbol/GOT/PLT lookups and ROP gadget search.",
     )
     .register(
+        "view::Heap",
+        "Open Heap View",
+        "Inspect a stopped Linux program's glibc heap: the malloc chunks and the tcache bins (GEF-style). Start the program in the Debugger and break, then open this.",
+    )
+    .register(
         "view::Gadgets",
         "Open Gadgets View",
         "Find the ROP gadgets in the open binary (sequences ending in ret/syscall), filter them by text and copy their addresses for a chain.",

@@ -69,6 +69,8 @@ pub enum TabKind {
     Resources,
     /// Exploit console: pwntools-style scripting over the open binary.
     Exploit,
+    /// glibc heap visualizer (chunks and bins).
+    Heap,
     /// ROP gadget finder.
     Gadgets,
     /// JavaScript deobfuscation / beautify / string extraction.
@@ -148,6 +150,7 @@ impl TabKind {
             Self::Archive => "Archive".into(),
             Self::Resources => "Resources".into(),
             Self::Exploit => "Exploit".into(),
+            Self::Heap => "Heap".into(),
             Self::Gadgets => "Gadgets".into(),
             Self::Js => "JavaScript".into(),
             Self::DotNet => ".NET".into(),
@@ -296,6 +299,7 @@ pub struct TabEnv<'a> {
     pub archive: &'a mut orress_views::ArchiveView,
     pub resources: &'a mut orress_views::ResourcesView,
     pub exploit: &'a mut orress_views::ExploitView,
+    pub heap: &'a mut orress_views::HeapView,
     pub gadgets: &'a mut orress_views::GadgetsView,
     pub js: &'a mut orress_views::JsView,
     pub dotnet: &'a mut orress_views::DotNetView,
@@ -331,6 +335,7 @@ impl<'a> TabEnv<'a> {
         archive: &'a mut orress_views::ArchiveView,
         resources: &'a mut orress_views::ResourcesView,
         exploit: &'a mut orress_views::ExploitView,
+        heap: &'a mut orress_views::HeapView,
         gadgets: &'a mut orress_views::GadgetsView,
         js: &'a mut orress_views::JsView,
         dotnet: &'a mut orress_views::DotNetView,
@@ -369,6 +374,7 @@ impl<'a> TabEnv<'a> {
             archive,
             resources,
             exploit,
+            heap,
             gadgets,
             js,
             dotnet,

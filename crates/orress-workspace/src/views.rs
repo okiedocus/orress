@@ -167,6 +167,9 @@ impl TabViewer for Viewer<'_, '_> {
             TabKind::Exploit => {
                 orress_views::exploit_view(ui, self.env.exploit, self.env.docs);
             }
+            TabKind::Heap => {
+                orress_views::heap_view(ui, self.env.heap, self.env.debugger);
+            }
             TabKind::Gadgets => {
                 orress_views::gadgets_view(ui, self.env.gadgets, self.env.docs);
             }

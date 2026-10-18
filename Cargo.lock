@@ -4567,6 +4567,7 @@ dependencies = [
  "orress-editor",
  "orress-emu",
  "orress-ext",
+ "orress-heap",
  "orress-java",
  "orress-js",
  "orress-loaders",
