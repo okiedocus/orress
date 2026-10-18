@@ -13,7 +13,7 @@ use orress_ui::ExplainExt as _;
 use crate::code::{self, Style, Target};
 use crate::edit::{self, EditPopup};
 use crate::graph_layout::{self, Layout};
-use crate::{DocView, ViewCtx, ViewRequest};
+use crate::{DocView, ViewCtx, ViewRequest, menu};
 
 const MIN_ZOOM: f32 = 0.04;
 const MAX_ZOOM: f32 = 2.5;
@@ -34,6 +34,8 @@ pub struct GraphState {
     last_cursor: Option<u64>,
     popup: Option<EditPopup>,
     fit: bool,
+    /// The right-clicked instruction and the address under the pointer, if any.
+    menu: Option<(u64, Option<u64>)>,
 }
 
 impl Default for GraphState {
@@ -45,6 +47,7 @@ impl Default for GraphState {
             last_cursor: None,
             popup: None,
             fit: false,
+            menu: None,
         }
     }
 }
@@ -365,6 +368,27 @@ pub fn graph_view(ui: &mut Ui, doc: &mut Document, state: &mut GraphState, cx: &
         }
     }
 
+    // Right click: move the cursor to that instruction, then show what can be done there.
+    if response.secondary_clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+        && let Some((addr, span)) = hit_at(pos)
+    {
+        if let Some(offset) = program.memory.offset_of(addr) {
+            doc.go_to(offset);
+            state.last_cursor = Some(doc.cursor);
+        }
+        let target = match span.map(|s| s.target) {
+            Some(Target::Address(a)) => Some(a),
+            _ => None,
+        };
+        state.menu = Some((addr, target));
+    }
+    response.context_menu(|ui| {
+        if let Some((addr, target)) = state.menu {
+            context_menu(ui, doc, &program, function, state, addr, target, cx);
+        }
+    });
+
     if focused {
         keyboard(ui, doc, &program, function, state, cx);
     }
@@ -425,6 +449,86 @@ fn toolbar(
                 .small(),
         );
     });
+}
+
+/// The right-click menu of an instruction in the graph.
+#[allow(clippy::too_many_arguments)]
+fn context_menu(
+    ui: &mut Ui,
+    doc: &mut Document,
+    program: &Program,
+    f: &Function,
+    state: &mut GraphState,
+    addr: u64,
+    target: Option<u64>,
+    cx: &mut ViewCtx<'_>,
+) {
+    ui.set_min_width(220.0);
+    let shortcut = |label: &str, keys: &str| egui::Button::new(label).shortcut_text(keys);
+    if let Some(a) = target {
+        let name = code::describe_address(doc, program, a);
+        if ui.button(format!("Go to {name}")).clicked() {
+            doc.navigate_to_address(a);
+            ui.close();
+        }
+        if ui.button(format!("Rename {name}…")).clicked() {
+            state.popup = Some(EditPopup::rename(doc, a));
+            ui.close();
+        }
+        ui.separator();
+    }
+    let name = code::describe_address(doc, program, f.entry);
+    if ui.add(shortcut(&format!("Rename {name}…"), "N")).clicked() {
+        state.popup = Some(EditPopup::rename(doc, f.entry));
+        ui.close();
+    }
+    if ui.add(shortcut("Comment…", ";")).clicked() {
+        state.popup = Some(EditPopup::comment(doc, addr));
+        ui.close();
+    }
+    if ui
+        .add(shortcut(&format!("Cross-references to {name}"), "X"))
+        .clicked()
+    {
+        doc.xref_target = Some(f.entry);
+        cx.requests.push(ViewRequest::ShowXrefs);
+        ui.close();
+    }
+    let has = cx.debugger.breakpoints().contains(&addr);
+    if ui
+        .button(if has {
+            "Remove breakpoint"
+        } else {
+            "Set breakpoint"
+        })
+        .clicked()
+    {
+        cx.debugger.toggle_breakpoint(addr);
+        ui.close();
+    }
+    crate::disasm::patch_menu(ui, doc, program, addr, cx);
+    ui.menu_button("Copy", |ui| {
+        menu::copy_item(ui, "Address", format!("0x{addr:x}"));
+        if let Some(len) = program.insns.get(&addr)
+            && let Some(bytes) = program.memory.read(addr, usize::from(*len))
+        {
+            let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+            menu::copy_item(ui, "Instruction bytes", hex.join(" "));
+        }
+        menu::copy_item(ui, "Function name", name.clone());
+    });
+    ui.separator();
+    if ui.add(shortcut("Show in disassembly", "Space")).clicked() {
+        cx.requests
+            .push(ViewRequest::Open(doc.path.clone(), DocView::Disassembly));
+        ui.close();
+    }
+    menu::command(ui, cx.requests, "view::Decompiler");
+    if ui.button("Fit the whole function").clicked() {
+        state.fit = true;
+        ui.close();
+    }
+    menu::views_and_commands(ui, cx.requests);
 }
 
 fn keyboard(

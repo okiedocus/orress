@@ -2,7 +2,8 @@
 //!
 //! It follows the cursor of the active file: move through the disassembly and the
 //! panel shows (and highlights) the matching line. Clicking a line moves the
-//! disassembly there; clicking a function name goes to that function.
+//! disassembly there; clicking a function name goes to that function. Ctrl+F searches
+//! the function's code; a right click shows what can be done with a line or name.
 
 use std::sync::{Arc, Weak};
 
@@ -10,10 +11,12 @@ use egui::text::LayoutJob;
 use egui::{Align, Color32, FontId, RichText, Sense, Ui};
 use orress_analysis::Program;
 use orress_decompiler::{Output, TokKind};
-use orress_project::DocStore;
+use orress_project::{DocStore, Document};
 use orress_ui::{ExplainExt as _, muted};
 
-use crate::{ViewRequest, code};
+use crate::edit::{self, EditPopup};
+use crate::find::{self, FindInput, FindStep};
+use crate::{ViewCommand, ViewRequest, code, menu};
 
 type Cached = Arc<Result<Output, String>>;
 type PortCached = Arc<Result<String, String>>;
@@ -135,7 +138,74 @@ fn code_actions(ui: &mut Ui, requests: &mut Vec<ViewRequest>, name: &str, code: 
     }
 }
 
-pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<ViewRequest>) {
+/// Per-panel state that lives between frames: the find bar, the right-click target and a
+/// rename/comment popup.
+#[derive(Clone, Default)]
+struct PanelState {
+    find: FindInput,
+    /// Index of the current match in this frame's match list.
+    current: Option<usize>,
+    /// What the matches belong to: (function, Rust port mode, query). When it changes the
+    /// current match starts over.
+    matched: Option<(u64, bool, String)>,
+    /// The right-clicked line and the address under the pointer.
+    menu: Option<(usize, Option<u64>)>,
+    popup: Option<EditPopup>,
+}
+
+fn state_id() -> egui::Id {
+    egui::Id::new("orress::decompiler_panel")
+}
+
+/// Something picked in the right-click menu, done after the code is drawn.
+enum MenuAction {
+    GoTo(u64),
+    Rename(u64),
+    Comment(u64),
+    Xrefs(u64),
+    Mode(bool),
+    Find,
+}
+
+const FIND_EXPLAIN: &str = "Search the decompiled code of this function, ignoring upper/lower \
+    case: a variable (a1), a function name, a number (0x5a), a keyword (while). F3 finds the \
+    next match, Shift+F3 the previous one. To search the whole program, use Find in the \
+    Disassembly view.";
+
+pub fn decompiler_panel(
+    ui: &mut Ui,
+    docs: &mut DocStore,
+    requests: &mut Vec<ViewRequest>,
+    commands: Vec<ViewCommand>,
+) {
+    let mut state: PanelState = ui
+        .ctx()
+        .data(|d| d.get_temp(state_id()))
+        .unwrap_or_default();
+    let mut step = None;
+    for command in commands {
+        match command {
+            ViewCommand::FindNext if state.find.needle().is_some() => step = Some(FindStep::Next),
+            ViewCommand::FindPrevious if state.find.needle().is_some() => {
+                step = Some(FindStep::Previous);
+            }
+            ViewCommand::Find | ViewCommand::FindNext | ViewCommand::FindPrevious => {
+                state.find.show();
+            }
+            _ => {}
+        }
+    }
+    panel(ui, docs, requests, &mut state, step);
+    ui.ctx().data_mut(|d| d.insert_temp(state_id(), state));
+}
+
+fn panel(
+    ui: &mut Ui,
+    docs: &mut DocStore,
+    requests: &mut Vec<ViewRequest>,
+    state: &mut PanelState,
+    mut step: Option<FindStep>,
+) {
     let Some(doc) = docs.active_mut() else {
         ui.label(
             "Open a program and put the cursor in a function: its decompiled code appears here.",
@@ -196,8 +266,37 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
         {
             port_mode = true;
         }
+        ui.separator();
+        if ui
+            .selectable_label(state.find.open, "Find…")
+            .on_hover_text("Search this function's code (Ctrl+F)")
+            .clicked()
+        {
+            if state.find.open {
+                state.find.open = false;
+            } else {
+                state.find.show();
+            }
+        }
     });
-    ui.ctx().data_mut(|d| d.insert_temp(mode_id, port_mode));
+    if state.find.open {
+        let bar = find::bar(ui, &mut state.find, "e.g. a1, while, 0x5a", FIND_EXPLAIN);
+        if bar.changed {
+            state.current = None;
+        }
+        step = bar.step.or(step);
+    }
+    let needle = state.find.open.then(|| state.find.needle()).flatten();
+    let key = (func, port_mode, needle.clone().unwrap_or_default());
+    if state.matched.as_ref() != Some(&key) {
+        state.matched = Some(key);
+        state.current = None;
+        if step.is_none() {
+            state.find.status = None;
+        }
+    }
+
+    let mut action: Option<MenuAction> = None;
 
     // --- Rust port mode: a compilable scaffold rather than reading pseudocode. -----
     if port_mode {
@@ -264,17 +363,69 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
                     });
                     job
                 });
+                let starts = needle
+                    .as_deref()
+                    .map(|n| find::matches(s, n))
+                    .unwrap_or_default();
+                let stepped = step.is_some();
+                if let (Some(step), Some(n)) = (step, needle.as_deref()) {
+                    state.current = find::step_index(starts.len(), state.current, step);
+                    state.find.status = Some(match state.current {
+                        Some(i) => Ok(format!("{} of {} in this function", i + 1, starts.len())),
+                        None => Err(format!("`{n}` is not in this function")),
+                    });
+                }
+                let len = needle.as_ref().map_or(0, String::len);
+                let job = if starts.is_empty() {
+                    (*job).clone()
+                } else {
+                    mark_matches(&job, &starts, len, state.current)
+                };
+                let galley = ui.fonts_mut(|f| f.layout_job(job));
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
                     .id_salt("port-scroll")
                     .show(ui, |ui| {
-                        ui.add(egui::Label::new((*job).clone()).selectable(true));
+                        let response =
+                            ui.add(egui::Label::new(Arc::clone(&galley)).selectable(true));
+                        if stepped && let Some(i) = state.current {
+                            let char_index = s[..starts[i]].chars().count();
+                            let at = galley
+                                .pos_from_cursor(egui::text::CCursor::new(char_index))
+                                .translate(response.rect.min.to_vec2());
+                            ui.scroll_to_rect(at, Some(Align::Center));
+                        }
+                        response.context_menu(|ui| {
+                            ui.set_min_width(220.0);
+                            menu::copy_item(ui, "Copy the code", s.clone());
+                            if ui.button("Open in editor").clicked() {
+                                requests.push(ViewRequest::OpenInEditor {
+                                    name: format!("{}.rs", file_stem(&name)),
+                                    contents: s.clone(),
+                                });
+                                ui.close();
+                            }
+                            if ui.button("Show pseudocode").clicked() {
+                                action = Some(MenuAction::Mode(false));
+                                ui.close();
+                            }
+                            if ui
+                                .add(egui::Button::new("Find…").shortcut_text("Ctrl+F"))
+                                .clicked()
+                            {
+                                action = Some(MenuAction::Find);
+                                ui.close();
+                            }
+                            menu::views_and_commands(ui, requests);
+                        });
                     });
             }
             Err(e) => {
                 ui.label(e.as_str());
             }
         }
+        apply(ui, doc, requests, state, action, &mut port_mode);
+        ui.ctx().data_mut(|d| d.insert_temp(mode_id, port_mode));
         return;
     }
 
@@ -282,6 +433,7 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
         Ok(out) => out,
         Err(e) => {
             ui.label(e.as_str());
+            ui.ctx().data_mut(|d| d.insert_temp(mode_id, port_mode));
             return;
         }
     };
@@ -294,6 +446,41 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
     });
     ui.separator();
 
+    // The text of each line as drawn (with the user's names), for searching.
+    let line_text = |line: &orress_decompiler::Line| -> String {
+        line.spans
+            .iter()
+            .map(|span| match (span.kind, span.target) {
+                (TokKind::Function, Some(a)) => doc.name_of(a).unwrap_or_else(|| span.text.clone()),
+                _ => span.text.clone(),
+            })
+            .collect()
+    };
+    let hits: Vec<usize> = match needle.as_deref() {
+        Some(n) => out
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| line_text(l).to_ascii_lowercase().contains(n))
+            .map(|(i, _)| i)
+            .collect(),
+        None => Vec::new(),
+    };
+    let stepped = step.is_some();
+    if let (Some(step), Some(n)) = (step, needle.as_deref()) {
+        state.current = find::step_index(hits.len(), state.current, step);
+        state.find.status = Some(match state.current {
+            Some(i) => Ok(format!(
+                "line {} · {} of {} matching lines in this function",
+                hits[i] + 1,
+                i + 1,
+                hits.len()
+            )),
+            None => Err(format!("`{n}` is not in this function")),
+        });
+    }
+    let current_hit = state.current.and_then(|i| hits.get(i).copied());
+
     let current = cursor.and_then(|a| out.line_for(a));
     // Scroll to the current line only when the cursor moved.
     let moved_key = egui::Id::new("orress::decompiler_cursor");
@@ -304,6 +491,7 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
     let text = ui.visuals().text_color();
     let font = FontId::monospace(13.0);
     let highlight = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
+    let found = Color32::from_rgb(230, 180, 40);
     let mut go: Option<u64> = None;
     egui::ScrollArea::both()
         .auto_shrink([false, false])
@@ -336,8 +524,18 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
                     .with_max_x(ui.clip_rect().right().max(row.response.rect.right()));
                 if Some(i) == current {
                     ui.painter().rect_filled(rect, 2.0, highlight);
-                    if moved {
+                    if moved && !stepped {
                         // Only scroll vertically: keep the start of the line in view.
+                        let left =
+                            egui::Rect::from_min_size(rect.min, egui::vec2(1.0, rect.height()));
+                        ui.scroll_to_rect(left, Some(Align::Center));
+                    }
+                }
+                if hits.binary_search(&i).is_ok() {
+                    let strength = if Some(i) == current_hit { 0.45 } else { 0.18 };
+                    ui.painter()
+                        .rect_filled(rect, 2.0, found.gamma_multiply(strength));
+                    if stepped && Some(i) == current_hit {
                         let left =
                             egui::Rect::from_min_size(rect.min, egui::vec2(1.0, rect.height()));
                         ui.scroll_to_rect(left, Some(Align::Center));
@@ -348,20 +546,195 @@ pub fn decompiler_panel(ui: &mut Ui, docs: &mut DocStore, requests: &mut Vec<Vie
                 let pointer = r.hover_pos();
                 let on_target = pointer
                     .and_then(|p| targets.iter().find(|(t, _)| t.contains(p)).map(|(_, a)| *a));
+                if r.secondary_clicked() {
+                    state.menu = Some((i, on_target));
+                }
                 if let Some(a) = on_target {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     if r.clicked() {
                         go = Some(a);
                     }
-                    r.on_hover_text(format!("Go to 0x{a:x}"));
                 } else if r.clicked() {
                     go = line.addr;
+                }
+                r.context_menu(|ui| {
+                    if let Some((at, target)) = state.menu
+                        && at == i
+                    {
+                        let text = line_text(line);
+                        let picked =
+                            line_menu(ui, doc, &program, requests, func, line, target, &text);
+                        if picked.is_some() {
+                            action = picked;
+                        }
+                    }
+                });
+                if let Some(a) = on_target {
+                    r.on_hover_text(format!("Go to 0x{a:x}"));
                 }
             }
         });
     if let Some(a) = go {
         doc.navigate_to_address(a);
     }
+    apply(ui, doc, requests, state, action, &mut port_mode);
+    ui.ctx().data_mut(|d| d.insert_temp(mode_id, port_mode));
+}
+
+/// The right-click menu of a pseudocode line. `target` is the function or address under
+/// the pointer.
+#[allow(clippy::too_many_arguments)]
+fn line_menu(
+    ui: &mut Ui,
+    doc: &Document,
+    program: &Program,
+    requests: &mut Vec<ViewRequest>,
+    func: u64,
+    line: &orress_decompiler::Line,
+    target: Option<u64>,
+    text: &str,
+) -> Option<MenuAction> {
+    ui.set_min_width(220.0);
+    let mut action = None;
+    let mut pick = |ui: &mut Ui, label: String, a: MenuAction| {
+        if ui.button(label).clicked() {
+            action = Some(a);
+            ui.close();
+        }
+    };
+    if let Some(a) = target {
+        let name = code::describe_address(doc, program, a);
+        pick(ui, format!("Go to {name}"), MenuAction::GoTo(a));
+        pick(ui, format!("Rename {name}…"), MenuAction::Rename(a));
+        pick(
+            ui,
+            format!("Cross-references to {name}"),
+            MenuAction::Xrefs(a),
+        );
+        ui.separator();
+    }
+    if let Some(addr) = line.addr {
+        pick(
+            ui,
+            format!("Show this line in the disassembly (0x{addr:x})"),
+            MenuAction::GoTo(addr),
+        );
+        pick(ui, "Comment this line…".into(), MenuAction::Comment(addr));
+    }
+    if target != Some(func) {
+        let name = code::describe_address(doc, program, func);
+        pick(
+            ui,
+            format!("Rename this function ({name})…"),
+            MenuAction::Rename(func),
+        );
+        pick(
+            ui,
+            "Cross-references to this function".into(),
+            MenuAction::Xrefs(func),
+        );
+    }
+    ui.menu_button("Copy", |ui| {
+        menu::copy_item(ui, "Line", text.trim().to_owned());
+        if let Some(addr) = line.addr {
+            menu::copy_item(ui, "Address", format!("0x{addr:x}"));
+        }
+        menu::copy_item(
+            ui,
+            "Function name",
+            code::describe_address(doc, program, func),
+        );
+    });
+    ui.separator();
+    pick(ui, "Show Rust port".into(), MenuAction::Mode(true));
+    if ui
+        .add(egui::Button::new("Find…").shortcut_text("Ctrl+F"))
+        .clicked()
+    {
+        action = Some(MenuAction::Find);
+        ui.close();
+    }
+    menu::command(ui, requests, "view::Graph");
+    menu::views_and_commands(ui, requests);
+    action
+}
+
+/// Does what was picked in a right-click menu, and shows the rename/comment popup.
+fn apply(
+    ui: &mut Ui,
+    doc: &mut Document,
+    requests: &mut Vec<ViewRequest>,
+    state: &mut PanelState,
+    action: Option<MenuAction>,
+    port_mode: &mut bool,
+) {
+    match action {
+        Some(MenuAction::GoTo(a)) => {
+            if !doc.navigate_to_address(a) {
+                requests.push(ViewRequest::Message(format!(
+                    "0x{a:x} is not inside the file."
+                )));
+            }
+        }
+        Some(MenuAction::Rename(a)) => state.popup = Some(EditPopup::rename(doc, a)),
+        Some(MenuAction::Comment(a)) => state.popup = Some(EditPopup::comment(doc, a)),
+        Some(MenuAction::Xrefs(a)) => {
+            doc.xref_target = Some(a);
+            requests.push(ViewRequest::ShowXrefs);
+        }
+        Some(MenuAction::Mode(port)) => *port_mode = port,
+        Some(MenuAction::Find) => state.find.show(),
+        None => {}
+    }
+    if let Some(popup) = &mut state.popup
+        && !edit::show(ui, doc, popup)
+    {
+        state.popup = None;
+    }
+}
+
+/// `job` with the matches (byte offsets `starts`, each `len` long) given a background; the
+/// `current` one stronger.
+fn mark_matches(
+    job: &LayoutJob,
+    starts: &[usize],
+    len: usize,
+    current: Option<usize>,
+) -> LayoutJob {
+    let found = Color32::from_rgb(230, 180, 40);
+    let mut out = job.clone();
+    out.sections.clear();
+    for section in &job.sections {
+        let (start, end): (usize, usize) = (
+            section.byte_range.start.into(),
+            section.byte_range.end.into(),
+        );
+        let mut cuts = vec![start, end];
+        for &m in starts {
+            for b in [m, m + len] {
+                if b > start && b < end {
+                    cuts.push(b);
+                }
+            }
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        for (k, w) in cuts.windows(2).enumerate() {
+            let mut format = section.format.clone();
+            // The match this piece belongs to: the last one starting at or before it.
+            let i = starts.partition_point(|&m| m <= w[0]);
+            if i > 0 && w[1] <= starts[i - 1] + len {
+                let strength = if current == Some(i - 1) { 0.6 } else { 0.25 };
+                format.background = found.gamma_multiply(strength);
+            }
+            out.sections.push(egui::text::LayoutSection {
+                leading_space: if k == 0 { section.leading_space } else { 0.0 },
+                byte_range: w[0].into()..w[1].into(),
+                format,
+            });
+        }
+    }
+    out
 }
 
 /// The Rust-port "does this compile?" affordance (behind the `compile-check` feature): a

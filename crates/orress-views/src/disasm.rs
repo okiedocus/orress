@@ -14,7 +14,8 @@ use orress_ui::ExplainExt as _;
 
 use crate::code::{self, Rendered, Style, Target};
 use crate::edit::{self, EditPopup};
-use crate::{DocView, ViewCommand, ViewCtx, ViewRequest};
+use crate::find::{self, FindInput, FindStep};
+use crate::{DocView, ViewCommand, ViewCtx, ViewRequest, menu};
 
 #[derive(Default)]
 pub struct DisasmState {
@@ -26,28 +27,21 @@ pub struct DisasmState {
     popup: Option<EditPopup>,
     goto: Option<GotoBar>,
     find: FindBar,
+    /// What was right-clicked: the line and the address under the pointer, if any.
+    menu: Option<(usize, Option<u64>)>,
 }
 
 /// Search in the listing: matches the text of each line as shown (address, mnemonic,
 /// operands, names, comments, string notes), ignoring case.
 #[derive(Default)]
 struct FindBar {
-    open: bool,
-    query: String,
-    focus: bool,
-    status: Option<Result<String, String>>,
+    input: FindInput,
     /// Line of the last match and the cursor it left, so "next" continues after it even when
     /// several lines share an address (a function header and its first instruction).
     last: Option<(usize, u64)>,
     /// Match count per (query, document generation, number of names and comments): counting
     /// renders every line, so it runs once per query.
     count: Option<((String, u64, usize), usize)>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FindStep {
-    Next,
-    Previous,
 }
 
 /// Stop counting matches after this many (the count is shown as "10000+").
@@ -78,16 +72,15 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
                     focus: true,
                 });
             }
-            ViewCommand::FindNext if !state.find.query.trim().is_empty() => {
+            ViewCommand::FindNext if !state.find.input.query.trim().is_empty() => {
                 find_step = Some(FindStep::Next);
             }
-            ViewCommand::FindPrevious if !state.find.query.trim().is_empty() => {
+            ViewCommand::FindPrevious if !state.find.input.query.trim().is_empty() => {
                 find_step = Some(FindStep::Previous);
             }
             // Find, or F3 before anything was searched: open the bar.
             ViewCommand::Find | ViewCommand::FindNext | ViewCommand::FindPrevious => {
-                state.find.open = true;
-                state.find.focus = true;
+                state.find.input.show();
             }
             _ => {}
         }
@@ -98,7 +91,7 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
     if state.goto.is_some() {
         goto_bar(ui, doc, &program, state);
     }
-    if state.find.open {
+    if state.find.input.open {
         find_step = find_bar(ui, &mut state.find).or(find_step);
     }
 
@@ -184,8 +177,12 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
             }
         }
     }
-    let needle = (state.find.open && !state.find.query.trim().is_empty())
-        .then(|| state.find.query.trim().to_lowercase());
+    let needle = state
+        .find
+        .input
+        .open
+        .then(|| state.find.input.needle())
+        .flatten();
 
     // Debugger overlay: the current instruction and breakpoints (file virtual addresses).
     let dbg_rip = cx.debugger.current_file_rip(&doc.path);
@@ -330,6 +327,30 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
     if focused {
         keyboard(ui, doc, &program, state, cursor_line, visible, max_top, cx);
     }
+
+    // Right click: move the cursor to that line, then show what can be done there.
+    if response.secondary_clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+        && let Some((index, span)) = span_under(pos)
+    {
+        if let Some(offset) = program.memory.offset_of(program.lines[index].addr) {
+            doc.go_to(offset);
+            state.last_cursor = Some(doc.cursor);
+        }
+        let target = match span {
+            Some(code::Span {
+                target: Target::Address(a),
+                ..
+            }) => Some(a),
+            _ => operand_address(&program, index),
+        };
+        state.menu = Some((index, target));
+    }
+    response.context_menu(|ui| {
+        if let Some((index, target)) = state.menu {
+            context_menu(ui, doc, &program, state, &style, index, target, cx);
+        }
+    });
 
     if let Some(popup) = &mut state.popup
         && !edit::show(ui, doc, popup)
@@ -525,15 +546,193 @@ fn goto_bar(ui: &mut Ui, doc: &mut Document, program: &Arc<Program>, state: &mut
     }
 }
 
-/// Character columns where `needle` (already lowercase) starts in `text`, ignoring case.
-fn match_columns(text: &str, needle: &str) -> Vec<usize> {
-    let hay = text.to_lowercase();
-    if needle.is_empty() || hay.len() != text.len() {
-        // Lowercasing changed the length (rare non-ASCII text): skip highlighting.
-        return Vec::new();
+/// The right-click menu of a line. `target` is the address under the pointer (or the
+/// line's address operand).
+#[allow(clippy::too_many_arguments)]
+fn context_menu(
+    ui: &mut Ui,
+    doc: &mut Document,
+    program: &Program,
+    state: &mut DisasmState,
+    style: &Style,
+    index: usize,
+    target: Option<u64>,
+    cx: &mut ViewCtx<'_>,
+) {
+    let Some(line) = program.lines.get(index).cloned() else {
+        return;
+    };
+    ui.set_min_width(220.0);
+    let shortcut = |label: &str, keys: &str| egui::Button::new(label).shortcut_text(keys);
+    if let Some(addr) = target {
+        let name = code::describe_address(doc, program, addr);
+        if ui.button(format!("Go to {name}")).clicked() {
+            if !doc.navigate_to_address(addr) {
+                cx.requests.push(ViewRequest::Message(format!(
+                    "0x{addr:x} is not inside the file."
+                )));
+            }
+            ui.close();
+        }
     }
-    hay.match_indices(needle)
-        .map(|(at, _)| hay[..at].chars().count())
+    if let Some(addr) = rename_target(program, index) {
+        let name = code::describe_address(doc, program, addr);
+        if ui.add(shortcut(&format!("Rename {name}…"), "N")).clicked() {
+            state.popup = Some(EditPopup::rename(doc, addr));
+            ui.close();
+        }
+        if ui
+            .add(shortcut(&format!("Cross-references to {name}"), "X"))
+            .clicked()
+        {
+            doc.xref_target = Some(addr);
+            cx.requests.push(ViewRequest::ShowXrefs);
+            ui.close();
+        }
+    }
+    if ui.add(shortcut("Comment…", ";")).clicked() {
+        state.popup = Some(EditPopup::comment(doc, line.addr));
+        ui.close();
+    }
+    let bookmarked = doc.annotations.bookmarks.contains(&line.addr);
+    if ui
+        .add(shortcut(
+            if bookmarked {
+                "Remove bookmark"
+            } else {
+                "Bookmark"
+            },
+            "B",
+        ))
+        .clicked()
+    {
+        doc.toggle_bookmark(line.addr);
+        ui.close();
+    }
+    if line.kind == LineKind::Insn {
+        let has = cx.debugger.breakpoints().contains(&line.addr);
+        if ui
+            .add(shortcut(
+                if has {
+                    "Remove breakpoint"
+                } else {
+                    "Set breakpoint"
+                },
+                "F9",
+            ))
+            .clicked()
+        {
+            cx.debugger.toggle_breakpoint(line.addr);
+            ui.close();
+        }
+        patch_menu(ui, doc, program, line.addr, cx);
+    }
+    ui.menu_button("Copy", |ui| {
+        menu::copy_item(ui, "Address", format!("0x{:x}", line.addr));
+        let text = code::render_line(doc, program, &line, style).job.text;
+        menu::copy_item(ui, "Line", text.trim().to_owned());
+        if line.kind == LineKind::Insn
+            && let Some(len) = program.insns.get(&line.addr)
+            && let Some(bytes) = program.memory.read(line.addr, usize::from(*len))
+        {
+            let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+            menu::copy_item(ui, "Instruction bytes", hex.join(" "));
+        }
+        if let Some(f) = program.function_containing(line.addr) {
+            menu::copy_item(
+                ui,
+                "Function name",
+                code::describe_address(doc, program, f.entry),
+            );
+        }
+    });
+    ui.separator();
+    if program.function_containing(line.addr).is_some() {
+        menu::command(ui, cx.requests, "view::Decompiler");
+    }
+    if ui.add(shortcut("Show in graph", "Space")).clicked() {
+        cx.requests
+            .push(ViewRequest::Open(doc.path.clone(), DocView::Graph));
+        ui.close();
+    }
+    if ui.button("Show in hex").clicked() {
+        cx.requests
+            .push(ViewRequest::Open(doc.path.clone(), DocView::Hex));
+        ui.close();
+    }
+    if ui.add(shortcut("Find…", "Ctrl+F")).clicked() {
+        state.find.input.show();
+        ui.close();
+    }
+    if ui
+        .add(shortcut("Go to address or name…", "Ctrl+G"))
+        .clicked()
+    {
+        state.goto = Some(GotoBar {
+            text: String::new(),
+            error: None,
+            focus: true,
+        });
+        ui.close();
+    }
+    menu::views_and_commands(ui, cx.requests);
+}
+
+/// The Patch submenu for the instruction at `addr`: the same patches as the patch bar.
+pub(crate) fn patch_menu(
+    ui: &mut Ui,
+    doc: &mut Document,
+    program: &Program,
+    addr: u64,
+    cx: &mut ViewCtx<'_>,
+) {
+    let (Some(insn), Some(offset)) = (program.decode(addr), program.memory.offset_of(addr)) else {
+        return;
+    };
+    let Some(bytes) = program
+        .memory
+        .read(addr, usize::from(insn.len))
+        .map(<[u8]>::to_vec)
+    else {
+        return;
+    };
+    let isa = program.isa;
+    let mut options: Vec<(&str, Vec<u8>)> = Vec::new();
+    if let Some(nops) = orress_arch::patch::try_nop(isa, bytes.len()) {
+        options.push(("NOP (skip this instruction)", nops));
+    }
+    if let Some(inverted) = orress_arch::patch::invert(isa, &bytes) {
+        options.push(("Invert jump", inverted));
+    }
+    if let Some(forced) = orress_arch::patch::force(isa, &bytes) {
+        options.push(("Always jump", forced));
+    }
+    if (offset..offset + bytes.len() as u64).any(|o| doc.is_patched(o)) {
+        let original: Vec<u8> = (offset..offset + bytes.len() as u64)
+            .filter_map(|o| doc.original_byte(o))
+            .collect();
+        options.push(("Undo patch", original));
+    }
+    if options.is_empty() {
+        return;
+    }
+    ui.menu_button("Patch", |ui| {
+        for (label, patch) in options {
+            if ui.button(label).clicked() {
+                if let Err(e) = doc.patch(offset, &patch) {
+                    cx.requests.push(ViewRequest::Message(e));
+                }
+                ui.close();
+            }
+        }
+    });
+}
+
+/// Character columns where `needle` (lowercase ASCII) starts in `text`, ignoring case.
+fn match_columns(text: &str, needle: &str) -> Vec<usize> {
+    find::matches(text, needle)
+        .into_iter()
+        .map(|at| text[..at].chars().count())
         .collect()
 }
 
@@ -548,7 +747,7 @@ fn line_matches(
         code::render_line(doc, program, line, style)
             .job
             .text
-            .to_lowercase()
+            .to_ascii_lowercase()
             .contains(needle)
     })
 }
@@ -563,11 +762,10 @@ fn find(
     current: usize,
     step: FindStep,
 ) -> Option<usize> {
-    let needle = bar.query.trim().to_lowercase();
-    if needle.is_empty() {
-        bar.status = Some(Err("type something to search for".into()));
+    let Some(needle) = bar.input.needle() else {
+        bar.input.status = Some(Err("type something to search for".into()));
         return None;
-    }
+    };
     let total = program.lines.len();
     // Continue from the last match if the cursor has not moved since.
     let from = match bar.last {
@@ -580,7 +778,7 @@ fn find(
             FindStep::Previous => (from + total - i) % total,
         })
         .find(|&i| line_matches(doc, program, style, i, &needle));
-    bar.status = Some(match found {
+    bar.input.status = Some(match found {
         Some(line) => {
             let key = (
                 needle.clone(),
@@ -621,56 +819,19 @@ fn find(
 
 /// The find bar. Returns the search to run this frame, if any.
 fn find_bar(ui: &mut Ui, bar: &mut FindBar) -> Option<FindStep> {
-    let mut step = None;
-    ui.horizontal(|ui| {
-        ui.label("Find").explain(
-            "Find in the disassembly",
-            "Search the listing for text, ignoring upper/lower case: a mnemonic (xor), a \
-             register (rcx), a number (0x5a), a function or label name, an address, or words \
-             in comments and string notes (Correct). F3 finds the next match, Shift+F3 the \
-             previous one. To search the file's raw bytes, use Find in the Hex view.",
-        );
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut bar.query)
-                .id_salt("orress::disasm_find")
-                .hint_text("e.g. xor, call, 0x5a, Correct")
-                .desired_width(260.0)
-                .font(egui::TextStyle::Monospace),
-        );
-        if bar.focus {
-            edit.request_focus();
-            bar.focus = false;
-        }
-        if edit.changed() {
-            bar.status = None;
-            bar.last = None;
-        }
-        let submit = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        if ui.button("Next").on_hover_text("F3").clicked() || submit {
-            step = Some(FindStep::Next);
-            if submit {
-                bar.focus = true;
-            }
-        }
-        if ui.button("Previous").on_hover_text("Shift+F3").clicked() {
-            step = Some(FindStep::Previous);
-        }
-        if ui.button("×").on_hover_text("Close (Esc)").clicked()
-            || (edit.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)))
-        {
-            bar.open = false;
-        }
-        match &bar.status {
-            Some(Ok(s)) => {
-                ui.label(RichText::new(s).weak());
-            }
-            Some(Err(e)) => {
-                ui.colored_label(ui.visuals().warn_fg_color, e);
-            }
-            None => {}
-        }
-    });
-    step
+    let result = find::bar(
+        ui,
+        &mut bar.input,
+        "e.g. xor, call, 0x5a, Correct",
+        "Search the listing for text, ignoring upper/lower case: a mnemonic (xor), a register \
+         (rcx), a number (0x5a), a function or label name, an address, or words in comments \
+         and string notes (Correct). F3 finds the next match, Shift+F3 the previous one. To \
+         search the file's raw bytes, use Find in the Hex view.",
+    );
+    if result.changed {
+        bar.last = None;
+    }
+    result.step
 }
 
 fn hover_span(

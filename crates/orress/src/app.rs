@@ -327,6 +327,8 @@ impl OrressApp {
         if self.applied.as_ref() != Some(&wanted) {
             self.current_theme().apply(ctx);
             orress_views::set_syntax(ctx, self.current_theme().syntax.clone());
+            // The right-click menus list every command, with its shortcut.
+            orress_views::set_commands(ctx, self.command_entries(ctx));
             ctx.set_zoom_factor(self.settings.ui_scale);
             self.applied = Some(wanted);
         }
@@ -390,6 +392,14 @@ impl OrressApp {
     /// Sends a command to the focused view if it handles it, otherwise to the hex view of
     /// the current file (opening it if needed).
     fn hex_command(&mut self, ctx: &Context, command: ViewCommand) {
+        let find = matches!(
+            command,
+            ViewCommand::Find | ViewCommand::FindNext | ViewCommand::FindPrevious
+        );
+        if find && self.workspace.decompiler_focused() {
+            self.workspace.send(command);
+            return;
+        }
         let focused = self.workspace.focused_doc().map(|(_, view)| view);
         let handles = match focused {
             Some(DocView::Hex) => true,
@@ -761,6 +771,22 @@ impl OrressApp {
                     .keystroke_for(&a.id, context)
                     .map(|k| k.label(ctx)),
                 explain: a.explain.clone(),
+            })
+            .collect()
+    }
+
+    /// Every command with its shortcut, for the views' right-click menus.
+    fn command_entries(&self, ctx: &Context) -> Vec<orress_views::CommandEntry> {
+        self.registry
+            .iter()
+            .map(|action| orress_views::CommandEntry {
+                id: action.id.as_str().to_owned(),
+                title: action.title.clone(),
+                explain: action.explain.clone(),
+                shortcut: self
+                    .keymap
+                    .keystroke_anywhere(&action.id, KeyContext::Workspace)
+                    .map(|(k, _)| k.label(ctx)),
             })
             .collect()
     }
@@ -1331,6 +1357,7 @@ impl eframe::App for OrressApp {
                 }
                 ViewRequest::InstallExtension(source) => self.install_extension(&ctx, &source),
                 ViewRequest::UninstallExtension(id) => self.uninstall_extension(&ctx, &id),
+                ViewRequest::RunAction(id) => pending.push(ActionId::from(id.as_str())),
             }
         }
         // Cross-file go-to-definition: stash the target line for the editor to consume,

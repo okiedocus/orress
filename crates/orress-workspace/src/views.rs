@@ -102,7 +102,17 @@ impl TabViewer for Viewer<'_, '_> {
             TabKind::Explain => explain_panel(ui),
             TabKind::Decompiler => {
                 orress_ui::spotlight::mark(ui.ctx(), "view.Decompiler", ui.max_rect());
-                orress_views::decompiler_panel(ui, self.env.docs, &mut self.env.view_requests);
+                let commands = if self.focused_tab == Some(tab.id) {
+                    std::mem::take(&mut self.commands)
+                } else {
+                    Vec::new()
+                };
+                orress_views::decompiler_panel(
+                    ui,
+                    self.env.docs,
+                    &mut self.env.view_requests,
+                    commands,
+                );
             }
             TabKind::Debugger => {
                 orress_ui::spotlight::mark(ui.ctx(), "view.Debugger", ui.max_rect());

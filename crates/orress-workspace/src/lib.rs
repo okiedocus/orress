@@ -726,6 +726,12 @@ impl Workspace {
         }
     }
 
+    /// Whether the decompiler panel has focus (it takes Find commands).
+    pub fn decompiler_focused(&mut self) -> bool {
+        self.active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::Decompiler))
+    }
+
     /// The file view shown in the main (center) area, even when keyboard focus is in a
     /// dock such as the lesson panel.
     pub fn center_doc(&self) -> Option<(PathBuf, DocView)> {

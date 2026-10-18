@@ -9,6 +9,7 @@ pub enum EditKind {
     Comment,
 }
 
+#[derive(Clone)]
 pub struct EditPopup {
     pub kind: EditKind,
     pub addr: u64,

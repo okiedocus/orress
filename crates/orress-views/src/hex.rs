@@ -252,6 +252,20 @@ pub fn hex_view(ui: &mut Ui, doc: &mut Document, state: &mut HexState, cx: &mut 
         };
     }
 
+    // Right click: on a byte outside the selection, move the cursor there first.
+    if response.secondary_clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let byte = byte_at(pos, state.top_row);
+        let inside = doc.selection.is_some_and(|(a, b)| (a..b).contains(&byte));
+        if !inside {
+            doc.cursor = byte;
+            doc.selection = None;
+            state.anchor = Some(byte);
+        }
+    }
+    response.context_menu(|ui| context_menu(ui, doc, &data, state, cx));
+
     // Keyboard
     if focused {
         keyboard(ui, doc, state, &geo, len);
@@ -885,6 +899,80 @@ fn minimap_ui(
             orress_bytes::entropy::describe(e)
         ));
     }
+}
+
+/// The right-click menu: copy, go to, find, edit, and the matching code.
+fn context_menu(
+    ui: &mut Ui,
+    doc: &mut Document,
+    data: &[u8],
+    state: &mut HexState,
+    cx: &mut ViewCtx<'_>,
+) {
+    ui.set_min_width(220.0);
+    let what = if doc.selection.is_some() {
+        "selection"
+    } else {
+        "byte"
+    };
+    ui.menu_button(format!("Copy {what}"), |ui| {
+        for (label, format) in [
+            ("As hex", ViewCommand::CopyHex),
+            ("As C array", ViewCommand::CopyCArray),
+            ("As Python bytes", ViewCommand::CopyPython),
+        ] {
+            if ui.button(label).clicked() {
+                copy_selection(ui, doc, data, format);
+                ui.close();
+            }
+        }
+        crate::menu::copy_item(ui, "Offset", format!("0x{:X}", doc.cursor));
+    });
+    let shortcut = |label: &str, keys: &str| egui::Button::new(label).shortcut_text(keys);
+    if ui
+        .add(shortcut("Go to offset or address…", "Ctrl+G"))
+        .clicked()
+    {
+        state.goto.open = true;
+        state.goto.focus = true;
+        state.find.open = false;
+        ui.close();
+    }
+    if ui.add(shortcut("Find…", "Ctrl+F")).clicked() {
+        state.find.open = true;
+        state.find.focus = true;
+        state.goto.open = false;
+        ui.close();
+    }
+    if ui
+        .button(if state.edit {
+            "Stop editing bytes"
+        } else {
+            "Edit bytes"
+        })
+        .clicked()
+    {
+        state.edit = !state.edit;
+        ui.close();
+    }
+    let in_code = doc.program().is_some_and(|p| {
+        p.memory
+            .address_of(doc.cursor)
+            .is_some_and(|a| p.insn_start(a).is_some())
+    });
+    if in_code {
+        ui.separator();
+        if ui.button("Show in disassembly").clicked() {
+            cx.requests.push(crate::ViewRequest::Open(
+                doc.path.clone(),
+                crate::DocView::Disassembly,
+            ));
+            ui.close();
+        }
+        crate::menu::command(ui, cx.requests, "view::Decompiler");
+    }
+    crate::menu::command(ui, cx.requests, "view::Inspector");
+    crate::menu::views_and_commands(ui, cx.requests);
 }
 
 fn copy_selection(ui: &Ui, doc: &Document, data: &[u8], format: ViewCommand) {

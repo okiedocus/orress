@@ -19,6 +19,7 @@ mod edit;
 mod editor;
 mod emulator;
 mod extensions;
+mod find;
 mod functions;
 mod graph;
 mod graph_layout;
@@ -28,6 +29,7 @@ mod info;
 mod inspector;
 mod java;
 mod js;
+mod menu;
 mod project;
 mod pyc;
 mod sandbox;
@@ -68,6 +70,7 @@ pub use extensions::{extensions_panel, refresh_extensions, set_extensions_dir};
 pub use inspector::inspector;
 pub use java::{JavaView, java_view};
 pub use js::{JsView, js_view};
+pub use menu::{CommandEntry, set_commands};
 pub use project::project_tree;
 pub use pyc::{PycView, pyc_view};
 pub use sandbox::{SandboxView, sandbox_view};
@@ -202,6 +205,8 @@ pub enum ViewRequest {
     InstallExtension(String),
     /// Uninstall the extension with this id.
     UninstallExtension(String),
+    /// Run an app command (action id), e.g. from a right-click menu.
+    RunAction(String),
 }
 
 /// Per-tab state of a document view. Not saved between sessions.
