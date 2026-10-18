@@ -356,7 +356,8 @@ mod tests {
         let mut m = Builder::new(base);
         m.put_u64(entries_off, u0);
         m.put_u64((u0 - base) as usize, u1 ^ (u0 >> 12));
-        m.put_u64((u1 - base) as usize, 0 ^ (u1 >> 12));
+        // Last entry: fd is 0 (end of list), so its mangled value is just 0 ^ (addr>>12).
+        m.put_u64((u1 - base) as usize, u1 >> 12);
         let bins = parse_tcache(&m.bytes, base, true);
         assert_eq!(bins[0].entries, vec![c0, c1]);
     }
@@ -388,7 +389,10 @@ mod tests {
         let mut heap = Builder::new(base);
         heap.put_u64((c0 - base) as usize + 16, bin_chunk); // c0.fd -> back to bin head
         let bins = parse_arena_bins(&arena.bytes, arena_addr, &heap.bytes, base);
-        let unsorted: Vec<_> = bins.iter().filter(|b| b.kind == BinKind::Unsorted).collect();
+        let unsorted: Vec<_> = bins
+            .iter()
+            .filter(|b| b.kind == BinKind::Unsorted)
+            .collect();
         assert_eq!(unsorted.len(), 1);
         assert_eq!(unsorted[0].entries, vec![c0]);
     }

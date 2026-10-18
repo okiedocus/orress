@@ -41,7 +41,9 @@ pub fn gadgets_view(ui: &mut Ui, view: &mut GadgetsView, docs: &DocStore) {
         return;
     };
     if doc.program().is_none() {
-        ui.label(muted("Analysis is still running (or this file has no code)."));
+        ui.label(muted(
+            "Analysis is still running (or this file has no code).",
+        ));
         return;
     }
     view.ensure(doc);
@@ -96,8 +98,7 @@ pub fn gadgets_view(ui: &mut Ui, view: &mut GadgetsView, docs: &DocStore) {
 
 /// Scans the open binary's executable sections for gadgets.
 fn scan(doc: &orress_project::Document) -> Vec<Gadget> {
-    let (Some(analysis), Some(program), Some(bytes)) =
-        (doc.analysis(), doc.program(), doc.bytes())
+    let (Some(analysis), Some(program), Some(bytes)) = (doc.analysis(), doc.program(), doc.bytes())
     else {
         return Vec::new();
     };

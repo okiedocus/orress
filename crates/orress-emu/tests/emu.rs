@@ -536,7 +536,10 @@ fn sse2_move_xor_and_scalar() {
     emu.map(0x1000, &code);
     emu.mem.map_zeroed(0x5000, 16);
     emu.mem.write_bytes(0x5000, &[0xff; 16]);
-    assert_eq!(emu.call(0x1000, &[0x1234_5678], Abi::SysV).unwrap(), 0x1234_5678);
+    assert_eq!(
+        emu.call(0x1000, &[0x1234_5678], Abi::SysV).unwrap(),
+        0x1234_5678
+    );
     // the pxor'd register was stored over the 0xff bytes, zeroing them
     assert_eq!(emu.mem.read(0x5000, 8).unwrap(), 0);
     assert_eq!(emu.mem.read(0x5008, 8).unwrap(), 0);

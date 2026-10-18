@@ -46,7 +46,9 @@ pub fn inspector(ui: &mut Ui, docs: &mut DocStore) {
     });
 
     // A type applied to this address: lay its fields out over the bytes.
-    if let Some(addr) = analysis.as_ref().and_then(|a| a.info.offset_to_address(offset))
+    if let Some(addr) = analysis
+        .as_ref()
+        .and_then(|a| a.info.offset_to_address(offset))
         && let Some(applied) = doc.annotations.data_types.get(&addr).cloned()
     {
         let catalog = doc.type_catalog();
@@ -105,7 +107,10 @@ fn applied_type(
         TypeRef::Named(n) => n.clone(),
         other => {
             ui.label(RichText::new("Applied type").strong());
-            ui.label(muted(format!("{} (apply a struct/union to see fields)", other.label())));
+            ui.label(muted(format!(
+                "{} (apply a struct/union to see fields)",
+                other.label()
+            )));
             ui.separator();
             return;
         }
@@ -122,7 +127,11 @@ fn applied_type(
                 .spacing([12.0, 3.0])
                 .show(ui, |ui| {
                     for f in &fields {
-                        ui.label(RichText::new(format!("+0x{:X}", f.offset)).monospace().weak());
+                        ui.label(
+                            RichText::new(format!("+0x{:X}", f.offset))
+                                .monospace()
+                                .weak(),
+                        );
                         ui.label(&f.path);
                         let tylabel = if f.count > 1 {
                             format!("{}[{}]", f.ty.label(), f.count)
@@ -143,7 +152,9 @@ fn applied_type(
             ui.label(muted("(no fields — enum or typedef)"));
         }
         None => {
-            ui.label(muted("layout unavailable (unknown or self-referential member)"));
+            ui.label(muted(
+                "layout unavailable (unknown or self-referential member)",
+            ));
         }
     }
     ui.separator();
@@ -167,7 +178,13 @@ fn field_value(
             let text: String = raw
                 .iter()
                 .take_while(|&&b| b != 0)
-                .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+                .map(|&b| {
+                    if (0x20..0x7f).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
             return format!("\"{text}\"");
         }
@@ -190,7 +207,11 @@ fn scalar_value(ty: &TypeRef, bytes: &[u8], endian: Endian) -> String {
                 return "—".into();
             }
             buf.copy_from_slice(&bytes[..N]);
-            let v = if le { <$t>::from_le_bytes(buf) } else { <$t>::from_be_bytes(buf) };
+            let v = if le {
+                <$t>::from_le_bytes(buf)
+            } else {
+                <$t>::from_be_bytes(buf)
+            };
             v.to_string()
         }};
     }
@@ -209,7 +230,11 @@ fn scalar_value(ty: &TypeRef, bytes: &[u8], endian: Endian) -> String {
                 return "—".into();
             }
             buf.copy_from_slice(&bytes[..4]);
-            let v = if le { f32::from_le_bytes(buf) } else { f32::from_be_bytes(buf) };
+            let v = if le {
+                f32::from_le_bytes(buf)
+            } else {
+                f32::from_be_bytes(buf)
+            };
             format!("{v}")
         }
         TypeRef::Prim(Prim::F64) => {
@@ -218,11 +243,19 @@ fn scalar_value(ty: &TypeRef, bytes: &[u8], endian: Endian) -> String {
                 return "—".into();
             }
             buf.copy_from_slice(&bytes[..8]);
-            let v = if le { f64::from_le_bytes(buf) } else { f64::from_be_bytes(buf) };
+            let v = if le {
+                f64::from_le_bytes(buf)
+            } else {
+                f64::from_be_bytes(buf)
+            };
             format!("{v}")
         }
         TypeRef::Prim(Prim::Bool) => {
-            if bytes.first() == Some(&0) { "false".into() } else { "true".into() }
+            if bytes.first() == Some(&0) {
+                "false".into()
+            } else {
+                "true".into()
+            }
         }
         TypeRef::Prim(Prim::Char) => {
             let b = bytes.first().copied().unwrap_or(0);

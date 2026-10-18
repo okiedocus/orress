@@ -131,12 +131,8 @@ pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
                         .collect::<Vec<_>>()
                         .join(" -> ");
                     ui.label(
-                        RichText::new(format!(
-                            "{} {}{size}: {chain}",
-                            bin.kind.label(),
-                            bin.index
-                        ))
-                        .monospace(),
+                        RichText::new(format!("{} {}{size}: {chain}", bin.kind.label(), bin.index))
+                            .monospace(),
                     );
                 }
             }
@@ -176,7 +172,6 @@ pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
                     }
                 });
         });
-
 }
 
 fn recompute(view: &mut HeapView, pid: u32, arena_addr: Option<u64>) {
@@ -211,7 +206,9 @@ fn recompute(view: &mut HeapView, pid: u32, arena_addr: Option<u64>) {
         let libc = libc_range(&map)?;
         let chunks = orress_heap::walk_chunks(&bytes, heap_base);
         let found = orress_heap::guess_main_arena(&chunks, libc)?;
-        auto_note = Some(format!("main_arena auto-located at {found:#x} (set the field to override)."));
+        auto_note = Some(format!(
+            "main_arena auto-located at {found:#x} (set the field to override)."
+        ));
         Some(found)
     });
 

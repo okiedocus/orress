@@ -49,13 +49,22 @@ pub fn find_gadgets(sections: &[(u64, &[u8])], isa: Isa, max_insns: usize) -> Ve
 fn terminators(bytes: &[u8]) -> Vec<Terminator> {
     let mut t: Vec<Terminator> = Vec::new();
     for off in memchr::memchr_iter(0xc3, bytes) {
-        t.push(Terminator { offset: off, len: 1 });
+        t.push(Terminator {
+            offset: off,
+            len: 1,
+        });
     }
     for off in memchr::memchr_iter(0xc2, bytes) {
-        t.push(Terminator { offset: off, len: 3 });
+        t.push(Terminator {
+            offset: off,
+            len: 3,
+        });
     }
     for off in memchr::memmem::find_iter(bytes, &[0x0f, 0x05]) {
-        t.push(Terminator { offset: off, len: 2 });
+        t.push(Terminator {
+            offset: off,
+            len: 2,
+        });
     }
     t
 }

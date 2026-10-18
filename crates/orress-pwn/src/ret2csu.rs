@@ -69,8 +69,12 @@ fn find_sequence(
                 return Some(addr);
             }
             // advance by one decoded instruction (fall back to 1 byte)
-            let step = decode(isa, &bytes[off..(off + 15).min(bytes.len())], base + off as u64)
-                .map_or(1, |i| usize::from(i.len).max(1));
+            let step = decode(
+                isa,
+                &bytes[off..(off + 15).min(bytes.len())],
+                base + off as u64,
+            )
+            .map_or(1, |i| usize::from(i.len).max(1));
             off += step;
         }
     }
@@ -87,13 +91,21 @@ fn matches_here(
 ) -> Option<u64> {
     let mut off = start;
     for want in prefix {
-        let insn = decode(isa, &bytes[off..(off + 15).min(bytes.len())], base + off as u64)?;
+        let insn = decode(
+            isa,
+            &bytes[off..(off + 15).min(bytes.len())],
+            base + off as u64,
+        )?;
         if insn.len == 0 || &insn.text() != want {
             return None;
         }
         off += usize::from(insn.len);
     }
-    let insn = decode(isa, &bytes[off..(off + 15).min(bytes.len())], base + off as u64)?;
+    let insn = decode(
+        isa,
+        &bytes[off..(off + 15).min(bytes.len())],
+        base + off as u64,
+    )?;
     if last(&insn) {
         Some(base + start as u64)
     } else {

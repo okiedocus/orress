@@ -16,7 +16,12 @@ pub struct OneGadget {
 
 /// Finds candidate one_gadgets in `exec` (each `(virtual base, bytes)`). `binsh` is the address of
 /// the `"/bin/sh"` string; `execve` lists the addresses of `execve` (direct call targets) to match.
-pub fn find_one_gadgets(exec: &[(u64, &[u8])], binsh: u64, execve: &[u64], isa: Isa) -> Vec<OneGadget> {
+pub fn find_one_gadgets(
+    exec: &[(u64, &[u8])],
+    binsh: u64,
+    execve: &[u64],
+    isa: Isa,
+) -> Vec<OneGadget> {
     let mut out = Vec::new();
     for &(base, bytes) in exec {
         let mut off = 0usize;
@@ -24,8 +29,11 @@ pub fn find_one_gadgets(exec: &[(u64, &[u8])], binsh: u64, execve: &[u64], isa: 
         let mut rsi_null = false;
         let mut rdx_null = false;
         while off < bytes.len() {
-            let Some(insn) = decode(isa, &bytes[off..(off + 15).min(bytes.len())], base + off as u64)
-            else {
+            let Some(insn) = decode(
+                isa,
+                &bytes[off..(off + 15).min(bytes.len())],
+                base + off as u64,
+            ) else {
                 off += 1;
                 continue;
             };
@@ -57,9 +65,7 @@ pub fn find_one_gadgets(exec: &[(u64, &[u8])], binsh: u64, execve: &[u64], isa: 
                 Flow::Call(t) => execve.contains(&t),
                 _ => insn.mnemonic == "syscall",
             };
-            if reaches_execve
-                && let Some(g) = gadget.take()
-            {
+            if reaches_execve && let Some(g) = gadget.take() {
                 let mut constraints = Vec::new();
                 if !rsi_null {
                     constraints.push("rsi (argv) == NULL".into());
@@ -125,7 +131,11 @@ mod tests {
         let gadgets = find_one_gadgets(&[(base, &bytes)], binsh, &[], Isa::X64);
         assert_eq!(gadgets.len(), 1, "gadgets: {gadgets:?}");
         assert_eq!(gadgets[0].addr, base);
-        assert!(gadgets[0].constraints.is_empty(), "{:?}", gadgets[0].constraints);
+        assert!(
+            gadgets[0].constraints.is_empty(),
+            "{:?}",
+            gadgets[0].constraints
+        );
     }
 
     #[test]

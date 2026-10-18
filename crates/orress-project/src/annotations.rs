@@ -148,7 +148,7 @@ mod tests {
             },
         );
         a.data_types
-            .insert(0x4040_60, TypeRef::Named("Packet".into()));
+            .insert(0x0040_4060, TypeRef::Named("Packet".into()));
         a.save(&path).unwrap();
         assert_eq!(Annotations::load(&path).unwrap(), Some(a));
 

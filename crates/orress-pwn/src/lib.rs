@@ -1,5 +1,5 @@
 //! The ORRESS exploit-development toolkit: the pwntools-style primitives for writing exploits —
-//! integer [`pack`]ing, [`cyclic`] (de Bruijn) patterns, [`rop`] gadget search, and [`tube`]s that
+//! integer [`mod@pack`]ing, [`mod@cyclic`] (de Bruijn) patterns, [`rop`] gadget search, and [`tube`]s that
 //! talk to a local process or a remote service. Pure logic with no UI; the Exploit console and the
 //! Gadgets panel in `orress-views` drive it, and `orress-script` exposes it to Rhai scripts.
 

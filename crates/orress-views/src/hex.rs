@@ -979,7 +979,9 @@ fn context_menu(
         ui.separator();
         ui.menu_button("Apply type", |ui| {
             if names.is_empty() {
-                ui.label(orress_ui::muted("No types yet — define one in the Types view."));
+                ui.label(orress_ui::muted(
+                    "No types yet — define one in the Types view.",
+                ));
                 crate::menu::command(ui, cx.requests, "view::Types");
             }
             for name in &names {
@@ -990,9 +992,7 @@ fn context_menu(
             }
         });
         if let Some(ty) = applied
-            && ui
-                .button(format!("Clear type ({})", ty.label()))
-                .clicked()
+            && ui.button(format!("Clear type ({})", ty.label())).clicked()
         {
             doc.clear_data_type(addr);
             ui.close();
