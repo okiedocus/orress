@@ -7,6 +7,7 @@ pub mod cyclic;
 pub mod fmtstr;
 pub mod one_gadget;
 pub mod pack;
+pub mod ret2csu;
 pub mod rop;
 pub mod srop;
 pub mod tube;

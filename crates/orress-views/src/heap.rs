@@ -81,7 +81,7 @@ pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
         ui.label("main_arena");
         ui.add(
             egui::TextEdit::singleline(&mut view.arena_input)
-                .hint_text("0x… (optional, for fastbins/unsorted/small/large)")
+                .hint_text("0x… (auto-located from the unsorted bin; set to override)")
                 .desired_width(260.0),
         )
         .on_hover_text(
@@ -196,19 +196,48 @@ fn recompute(view: &mut HeapView, pid: u32, arena_addr: Option<u64>) {
         );
         return;
     };
-    let bytes = match orress_debug::read_mem(pid, region.base, region.size as usize) {
+    let heap_base = region.base;
+    let bytes = match orress_debug::read_mem(pid, heap_base, region.size as usize) {
         Ok(b) => b,
         Err(e) => {
             view.error = Some(format!("Could not read the heap: {e}"));
             return;
         }
     };
-    // When the user supplies main_arena, read it too so the arena bins show.
+
+    // Use the user's main_arena, or auto-locate it from a chunk in the unsorted bin.
+    let mut auto_note = None;
+    let arena_addr = arena_addr.or_else(|| {
+        let libc = libc_range(&map)?;
+        let chunks = orress_heap::walk_chunks(&bytes, heap_base);
+        let found = orress_heap::guess_main_arena(&chunks, libc)?;
+        auto_note = Some(format!("main_arena auto-located at {found:#x} (set the field to override)."));
+        Some(found)
+    });
+
     let arena = arena_addr.and_then(|addr| {
         orress_debug::read_mem(pid, addr, 0x900)
             .ok()
             .map(|b| (b, addr))
     });
     let arena_ref = arena.as_ref().map(|(b, a)| (b.as_slice(), *a));
-    view.heap = Some(orress_heap::parse(&bytes, region.base, arena_ref, view.mangled));
+    let mut heap = orress_heap::parse(&bytes, heap_base, arena_ref, view.mangled);
+    if let Some(note) = auto_note {
+        heap.notes.insert(0, note);
+    }
+    view.heap = Some(heap);
+}
+
+/// The address range spanned by libc's mappings (lowest base .. highest end).
+fn libc_range(map: &[orress_debug::MapRegion]) -> Option<std::ops::Range<u64>> {
+    let libc: Vec<&orress_debug::MapRegion> = map
+        .iter()
+        .filter(|r| {
+            let n = r.name.rsplit(['/', '\\']).next().unwrap_or(&r.name);
+            n.starts_with("libc.so") || n.starts_with("libc-")
+        })
+        .collect();
+    let lo = libc.iter().map(|r| r.base).min()?;
+    let hi = libc.iter().map(|r| r.base + r.size).max()?;
+    Some(lo..hi)
 }

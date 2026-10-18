@@ -246,6 +246,20 @@ pub fn parse_arena_bins(arena: &[u8], arena_addr: u64, heap: &[u8], heap_base: u
     out
 }
 
+/// The unsorted-bin "fake chunk" head offset within `main_arena` (glibc >= 2.27, x86-64).
+const UNSORTED_BIN_OFFSET: u64 = 0x60;
+
+/// Best-effort `main_arena` address from a free chunk sitting alone in the unsorted bin: such a
+/// chunk's `fd == bk` points at the unsorted-bin head (`main_arena + 0x60`), which lies in libc's
+/// data. `libc` is the libc mapping's address range. Reliable for the common "one freed chunk in
+/// the unsorted bin" setup; returns `None` otherwise (the user can supply the address).
+pub fn guess_main_arena(chunks: &[Chunk], libc: std::ops::Range<u64>) -> Option<u64> {
+    chunks.iter().find_map(|c| {
+        (!c.in_use && c.fd != 0 && c.fd == c.bk && libc.contains(&c.fd))
+            .then(|| c.fd - UNSORTED_BIN_OFFSET)
+    })
+}
+
 /// Parses a whole heap: chunks + tcache, plus the arena bins when the arena snapshot is given.
 pub fn parse(heap: &[u8], heap_base: u64, arena: Option<(&[u8], u64)>, mangled: bool) -> Heap {
     let chunks = walk_chunks(heap, heap_base);
@@ -377,6 +391,37 @@ mod tests {
         let unsorted: Vec<_> = bins.iter().filter(|b| b.kind == BinKind::Unsorted).collect();
         assert_eq!(unsorted.len(), 1);
         assert_eq!(unsorted[0].entries, vec![c0]);
+    }
+
+    #[test]
+    fn guesses_main_arena_from_unsorted_chunk() {
+        let libc_base = 0x7f_0000_0000u64;
+        let arena = libc_base + 0x1000;
+        // A free chunk whose fd == bk points at the unsorted-bin head (arena + 0x60).
+        let chunks = vec![
+            Chunk {
+                addr: 0x5000,
+                size: 0x30,
+                prev_inuse: true,
+                is_mmapped: false,
+                non_main_arena: false,
+                in_use: false,
+                fd: arena + UNSORTED_BIN_OFFSET,
+                bk: arena + UNSORTED_BIN_OFFSET,
+            },
+            Chunk {
+                addr: 0x5030,
+                size: 0x30,
+                prev_inuse: true,
+                is_mmapped: false,
+                non_main_arena: false,
+                in_use: true,
+                fd: 0,
+                bk: 0,
+            },
+        ];
+        let got = guess_main_arena(&chunks, libc_base..libc_base + 0x200000);
+        assert_eq!(got, Some(arena));
     }
 
     #[test]
