@@ -1,0 +1,15 @@
+[package]
+name = "orress-heap"
+description = "glibc heap parser: walk malloc chunks and the tcache/fastbin/unsorted/small/large bins from a memory snapshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
