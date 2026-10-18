@@ -8,14 +8,7 @@ use orress_project::types::{FieldDef, Prim, TypeRef, UserType};
 use orress_project::{DocStore, TypeCatalog};
 use orress_ui::muted;
 
-/// A field type the dropdown can produce: a base (primitive or named type) optionally
-/// wrapped in a single pointer. One pointer level is enough for the form; deeper nesting
-/// is out of scope.
-#[derive(Clone, PartialEq, Eq)]
-enum Base {
-    Prim(Prim),
-    Named(String),
-}
+use crate::typepick::{Base, base_combo, from_typeref, to_typeref};
 
 #[derive(Clone)]
 struct FieldDraft {
@@ -36,7 +29,7 @@ impl FieldDraft {
     }
 
     fn from_def(f: &FieldDef) -> Self {
-        let (base, pointer) = base_of(&f.ty);
+        let (base, pointer) = from_typeref(&f.ty);
         Self {
             name: f.name.clone(),
             base,
@@ -46,37 +39,11 @@ impl FieldDraft {
     }
 
     fn to_def(&self) -> FieldDef {
-        let base = match &self.base {
-            Base::Prim(p) => TypeRef::Prim(*p),
-            Base::Named(n) => TypeRef::Named(n.clone()),
-        };
-        let ty = if self.pointer {
-            TypeRef::Pointer(Box::new(base))
-        } else {
-            base
-        };
         FieldDef {
             name: self.name.trim().to_owned(),
-            ty,
+            ty: to_typeref(&self.base, self.pointer),
             count: self.count.trim().parse().unwrap_or(1).max(1),
         }
-    }
-}
-
-/// Splits a type reference into its base and whether it is behind a pointer.
-fn base_of(ty: &TypeRef) -> (Base, bool) {
-    match ty {
-        TypeRef::Prim(p) => (Base::Prim(*p), false),
-        TypeRef::Named(n) => (Base::Named(n.clone()), false),
-        TypeRef::Pointer(inner) => match inner.as_ref() {
-            TypeRef::Prim(p) => (Base::Prim(*p), true),
-            TypeRef::Named(n) => (Base::Named(n.clone()), true),
-            // Nested pointer: collapse to its innermost base (one-level form).
-            TypeRef::Pointer(_) => {
-                let (b, _) = base_of(inner);
-                (b, true)
-            }
-        },
     }
 }
 
@@ -142,7 +109,7 @@ impl Draft {
             }
             UserType::Typedef { target, .. } => {
                 d.kind = Kind::Typedef;
-                let (b, p) = base_of(target);
+                let (b, p) = from_typeref(target);
                 d.typedef_base = b;
                 d.typedef_pointer = p;
             }
@@ -170,20 +137,10 @@ impl Draft {
                     .map(|(n, v)| (n.trim().to_owned(), v.trim().parse().unwrap_or(0)))
                     .collect(),
             },
-            Kind::Typedef => {
-                let base = match &self.typedef_base {
-                    Base::Prim(p) => TypeRef::Prim(*p),
-                    Base::Named(n) => TypeRef::Named(n.clone()),
-                };
-                UserType::Typedef {
-                    name,
-                    target: if self.typedef_pointer {
-                        TypeRef::Pointer(Box::new(base))
-                    } else {
-                        base
-                    },
-                }
-            }
+            Kind::Typedef => UserType::Typedef {
+                name,
+                target: to_typeref(&self.typedef_base, self.typedef_pointer),
+            },
         }
     }
 }
@@ -463,28 +420,6 @@ fn typedef_editor(ui: &mut Ui, draft: &mut Draft, names: &[String]) {
         base_combo(ui, usize::MAX, &mut draft.typedef_base, names);
         ui.checkbox(&mut draft.typedef_pointer, "pointer");
     });
-}
-
-/// A dropdown over every primitive and every named type. `salt` disambiguates rows.
-fn base_combo(ui: &mut Ui, salt: usize, base: &mut Base, names: &[String]) {
-    let text = match base {
-        Base::Prim(p) => p.label().to_owned(),
-        Base::Named(n) => n.clone(),
-    };
-    ComboBox::from_id_salt(("base_combo", salt))
-        .selected_text(text)
-        .width(130.0)
-        .show_ui(ui, |ui| {
-            for p in Prim::ALL {
-                ui.selectable_value(base, Base::Prim(p), p.label());
-            }
-            if !names.is_empty() {
-                ui.separator();
-                for n in names {
-                    ui.selectable_value(base, Base::Named(n.clone()), n);
-                }
-            }
-        });
 }
 
 fn kind_word(kind: Kind) -> &'static str {
