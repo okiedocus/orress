@@ -4,11 +4,15 @@
 //! Gadgets panel in `orress-views` drive it, and `orress-script` exposes it to Rhai scripts.
 
 pub mod cyclic;
+pub mod fmtstr;
 pub mod pack;
 pub mod rop;
+pub mod srop;
 pub mod tube;
 
 pub use cyclic::{cyclic, cyclic_find};
+pub use fmtstr::fmtstr_payload;
 pub use pack::{Endian, pack, unpack};
 pub use rop::{Gadget, find_gadgets};
+pub use srop::sigreturn_frame;
 pub use tube::Tube;
