@@ -252,12 +252,15 @@ fn validate(lesson: &Lesson) -> Result<(), String> {
     Ok(())
 }
 
-/// All built-in lessons, sorted by level and order.
+/// All built-in lessons, sorted by level and order. A broken file is left out (and
+/// reported) rather than taking the app down; the tests reject broken files.
 pub fn catalog() -> Vec<Lesson> {
     let mut lessons: Vec<Lesson> = BUILT_IN
         .iter()
-        .map(|(file, source)| {
-            parse(source).unwrap_or_else(|e| panic!("built-in lesson {file}: {e}"))
+        .filter_map(|(file, source)| {
+            parse(source)
+                .map_err(|e| eprintln!("built-in lesson {file} skipped: {e}"))
+                .ok()
         })
         .collect();
     lessons.sort_by_key(|l| (l.level, l.order));

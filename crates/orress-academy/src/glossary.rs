@@ -42,12 +42,16 @@ pub fn parse(source: &str) -> Result<Vec<Term>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// All built-in terms, sorted alphabetically (case-insensitive).
+/// All built-in terms, sorted alphabetically (case-insensitive). A broken file is left
+/// out (and reported); the tests reject broken files.
 pub fn catalog() -> Vec<Term> {
     let mut terms: Vec<Term> = crate::lesson::GLOSSARY_FILES
         .iter()
         .flat_map(|(file, source)| {
-            parse(source).unwrap_or_else(|e| panic!("built-in glossary {file}: {e}"))
+            parse(source).unwrap_or_else(|e| {
+                eprintln!("built-in glossary {file} skipped: {e}");
+                Vec::new()
+            })
         })
         .collect();
     terms.sort_by_key(|t| t.term.to_lowercase());
