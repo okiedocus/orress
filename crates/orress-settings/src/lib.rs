@@ -20,6 +20,10 @@ pub struct Settings {
     pub explain_mode: bool,
     /// Last opened files, newest first.
     pub recent_files: Vec<PathBuf>,
+    /// The open project folder (Zed-style), if any. Restored on startup so the folder tree
+    /// reappears. `None` when no folder is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<PathBuf>,
     /// Per-language-server configuration, keyed by server name/id. Mirrors Zed's `lsp` settings
     /// section, so it both configures ORRESS's own LSP client and is handed to Zed language
     /// extensions (via `get-settings`) when they resolve a server. Empty by default.
@@ -34,6 +38,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             explain_mode: true,
             recent_files: Vec::new(),
+            project_root: None,
             lsp: BTreeMap::new(),
         }
     }

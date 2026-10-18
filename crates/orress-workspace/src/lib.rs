@@ -256,6 +256,9 @@ pub struct TabEnv<'a> {
     pub registry: &'a ActionRegistry,
     pub keymap: &'a Keymap,
     pub recent_files: &'a [PathBuf],
+    /// The open project folder (Zed-style), shown as a tree at the top of the left dock. Set by
+    /// the app after construction; `None` when no folder is open.
+    pub project_root: Option<PathBuf>,
     /// Actions triggered from inside a view (e.g. a button on the welcome page).
     pub emitted: Vec<ActionId>,
     /// Files the user asked to open from inside a view.
@@ -327,6 +330,7 @@ impl<'a> TabEnv<'a> {
             registry,
             keymap,
             recent_files,
+            project_root: None,
             emitted: Vec::new(),
             open_requests: Vec::new(),
             docs,

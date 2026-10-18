@@ -35,6 +35,12 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          binary. You can also drag a file onto the window.",
     )
     .register(
+        "workspace::OpenFolder",
+        "Open Folder…",
+        "Open a project folder: its files and subfolders show as a tree in the left panel, so one \
+         folder can hold a target's binary, source, notes, patches and extracted resources.",
+    )
+    .register(
         "workspace::NewNotes",
         "New Notes Tab",
         "Open an empty notes tab. Writing down what you learn is half of reverse engineering.",

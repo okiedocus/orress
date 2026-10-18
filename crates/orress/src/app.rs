@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use egui::{Context, RichText, Ui};
 use orress_actions::{ActionId, ActionRegistry, KeyContext, Keymap};
@@ -353,6 +353,49 @@ impl OrressApp {
             .handle(&orress_academy::Event::FileOpened(path));
     }
 
+    /// Opens a project folder (Zed-style): roots the folder tree at `dir` and persists it so the
+    /// tree reappears next session.
+    fn open_folder(&mut self, dir: PathBuf) {
+        self.settings.project_root = Some(dir);
+        self.save_settings();
+        // Make sure the left panel (with the tree) is visible.
+        self.workspace.open(TabKind::ProjectTree);
+    }
+
+    /// Saves settings immediately (the eframe `save` hook also does this periodically, but a
+    /// folder/project change is worth persisting at once).
+    fn save_settings(&self) {
+        if let Some(paths) = &self.paths
+            && let Err(e) = self.settings.save(&paths.settings_file())
+        {
+            tracing::error!("saving settings: {e:#}");
+        }
+    }
+
+    /// Creates a new notes file in `dir` (prompting for a name) and opens it in the editor.
+    fn new_notes_file(&mut self, ctx: &Context, dir: &Path) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("New notes file")
+            .set_directory(dir)
+            .set_file_name("notes.md")
+            .save_file()
+        else {
+            return;
+        };
+        if !path.exists()
+            && let Err(e) = std::fs::write(&path, "")
+        {
+            self.notify(ctx, format!("Could not create {}: {e}", path.display()), true);
+            return;
+        }
+        self.open_file(path);
+    }
+
+    /// Extracts an executable's resources into the project (implemented in the extractor stage).
+    fn extract_resources(&mut self, ctx: &Context, _path: &Path) {
+        self.notify(ctx, "Resource extraction is not available yet.", false);
+    }
+
     /// Facts the Academy's lesson checks look at.
     fn academy_poll(&mut self) -> orress_academy::PollState {
         let focused_view = self
@@ -556,6 +599,14 @@ impl OrressApp {
                     for file in files {
                         self.open_file(file);
                     }
+                }
+            }
+            "workspace::OpenFolder" => {
+                if let Some(dir) = rfd::FileDialog::new()
+                    .set_title("Open a project folder")
+                    .pick_folder()
+                {
+                    self.open_folder(dir);
                 }
             }
             "file::NewFile" => self.workspace.open(TabKind::Editor {
@@ -829,6 +880,7 @@ impl OrressApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     self.menu_entry(ui, "workspace::Open", &mut clicked);
+                    self.menu_entry(ui, "workspace::OpenFolder", &mut clicked);
                     ui.menu_button("Open Recent", |ui| {
                         if self.settings.recent_files.is_empty() {
                             ui.label(RichText::new("No recent files").weak());
@@ -1324,6 +1376,7 @@ impl eframe::App for OrressApp {
             &mut self.challenge,
         );
         env.editor_save = editor_save;
+        env.project_root = self.settings.project_root.clone();
         self.workspace.show(ui, &mut env);
         let TabEnv {
             emitted,
@@ -1358,6 +1411,10 @@ impl eframe::App for OrressApp {
                 ViewRequest::InstallExtension(source) => self.install_extension(&ctx, &source),
                 ViewRequest::UninstallExtension(id) => self.uninstall_extension(&ctx, &id),
                 ViewRequest::RunAction(id) => pending.push(ActionId::from(id.as_str())),
+                ViewRequest::OpenPath(path) => self.open_file(path),
+                ViewRequest::RevealInOs(path) => reveal_in_os(&path),
+                ViewRequest::NewNotesFile(dir) => self.new_notes_file(&ctx, &dir),
+                ViewRequest::ExtractResources(path) => self.extract_resources(&ctx, &path),
             }
         }
         // Cross-file go-to-definition: stash the target line for the editor to consume,
@@ -1477,6 +1534,33 @@ fn load_extensions(
             }
             Err(e) => messages.push((format!("Extension {} ignored: {e}", path.display()), true)),
         }
+    }
+}
+
+/// Opens the operating system's file manager with `path` revealed (selected where supported).
+fn reveal_in_os(path: &Path) {
+    #[cfg(target_os = "windows")]
+    let cmd = std::process::Command::new("explorer")
+        .arg("/select,")
+        .arg(path)
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let cmd = std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let cmd = {
+        // Most Linux file managers do not take a "select" flag portably; open the parent folder.
+        let target = if path.is_dir() {
+            path
+        } else {
+            path.parent().unwrap_or(path)
+        };
+        std::process::Command::new("xdg-open").arg(target).spawn()
+    };
+    if let Err(e) = cmd {
+        tracing::warn!("reveal in file manager failed: {e}");
     }
 }
 

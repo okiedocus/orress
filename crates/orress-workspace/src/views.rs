@@ -66,6 +66,17 @@ impl TabViewer for Viewer<'_, '_> {
                 orress_views::show(ui, self.env.docs, path, *view, state, &mut cx);
             }
             TabKind::ProjectTree => {
+                // The project folder tree (if a folder is open) sits on top; the open-files list
+                // with each file's analysis views stays below it.
+                if let Some(root) = self.env.project_root.clone() {
+                    orress_views::folder_tree(
+                        ui,
+                        &root,
+                        self.env.docs,
+                        &mut self.env.view_requests,
+                    );
+                    ui.separator();
+                }
                 orress_views::project_tree(ui, self.env.docs, &mut self.env.view_requests);
             }
             TabKind::Inspector => orress_views::inspector(ui, self.env.docs),

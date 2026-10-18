@@ -20,6 +20,7 @@ mod editor;
 mod emulator;
 mod extensions;
 mod find;
+mod folder;
 mod functions;
 mod graph;
 mod graph_layout;
@@ -71,6 +72,7 @@ pub use inspector::inspector;
 pub use java::{JavaView, java_view};
 pub use js::{JsView, js_view};
 pub use menu::{CommandEntry, set_commands};
+pub use folder::folder_tree;
 pub use project::project_tree;
 pub use pyc::{PycView, pyc_view};
 pub use sandbox::{SandboxView, sandbox_view};
@@ -207,6 +209,15 @@ pub enum ViewRequest {
     UninstallExtension(String),
     /// Run an app command (action id), e.g. from a right-click menu.
     RunAction(String),
+    /// Open an arbitrary file path (from the folder tree), routed the usual way: source/text to
+    /// the editor, binaries to analysis.
+    OpenPath(PathBuf),
+    /// Reveal a path in the operating system's file manager.
+    RevealInOs(PathBuf),
+    /// Create a new notes file in this directory (prompting for a name), then open it.
+    NewNotesFile(PathBuf),
+    /// Extract the resources of this executable into the project folder.
+    ExtractResources(PathBuf),
 }
 
 /// Per-tab state of a document view. Not saved between sessions.
