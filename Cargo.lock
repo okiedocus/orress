@@ -4416,6 +4416,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "orress-pwn"
+version = "1.1.0"
+dependencies = [
+ "memchr",
+ "orress-arch",
+ "orress-asm",
+]
+
+[[package]]
 name = "orress-pyc"
 version = "1.1.0"
 
