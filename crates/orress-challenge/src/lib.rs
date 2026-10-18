@@ -304,8 +304,8 @@ mod tests {
         assert!(builtin.contains("challenge-kit = {"));
         assert!(builtin.contains(r#"path = "challenge-kit""#));
         assert!(builtin.contains("[workspace]"));
-        // No stray reference to the private platform repo.
-        assert!(!builtin.contains("capture_the_flag"));
+        // The built-in kit is vendored by path: it must not pull in any git repository.
+        assert!(!builtin.contains("git ="));
 
         let external = cargo_toml(KitSource::External(r#"git = "https://x/y""#.into()).dep_spec());
         assert!(external.contains(r#"git = "https://x/y""#));
