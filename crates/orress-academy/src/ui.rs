@@ -38,12 +38,20 @@ fn success_color(ui: &Ui) -> Color32 {
 /// The Academy tab: the lesson overview, or the glossary.
 pub fn overview(ui: &mut Ui, academy: &mut Academy) {
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut academy.page, Page::Lessons, RichText::new("Lessons").strong());
-        ui.selectable_value(&mut academy.page, Page::Glossary, RichText::new("Glossary").strong())
-            .explain(
-                "Glossary",
-                "Every technical word used in the lessons, explained in plain language.",
-            );
+        ui.selectable_value(
+            &mut academy.page,
+            Page::Lessons,
+            RichText::new("Lessons").strong(),
+        );
+        ui.selectable_value(
+            &mut academy.page,
+            Page::Glossary,
+            RichText::new("Glossary").strong(),
+        )
+        .explain(
+            "Glossary",
+            "Every technical word used in the lessons, explained in plain language.",
+        );
     });
     ui.separator();
     match academy.page {
@@ -67,57 +75,69 @@ fn glossary_page(ui: &mut Ui, academy: &mut Academy) {
     let filter = academy.glossary_filter.trim().to_lowercase();
     let focus = academy.glossary_focus.take();
     let mut jump = None;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        let mut letter = None;
-        for i in 0..academy.glossary.len() {
-            let term = academy.glossary[i].clone();
-            let matches = filter.is_empty()
-                || term.term.to_lowercase().contains(&filter)
-                || term.aliases.iter().any(|a| a.to_lowercase().contains(&filter))
-                || term.short.to_lowercase().contains(&filter);
-            if !matches {
-                continue;
-            }
-            let first = term.term.chars().next().map(|c| c.to_ascii_uppercase());
-            if filter.is_empty() && first != letter {
-                letter = first;
-                ui.add_space(6.0);
-                ui.label(RichText::new(first.unwrap_or(' ').to_string()).strong().size(16.0));
-            }
-            let id = ui.make_persistent_id(("orress::glossary_term", i));
-            let mut state =
-                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
-            if focus == Some(i) {
-                state.set_open(true);
-            }
-            let (header, _, _) = state
-                .show_header(ui, |ui| {
-                    ui.label(RichText::new(&term.term).strong());
-                    ui.label(muted(&term.short));
-                })
-                .body(|ui| {
-                    if !term.aliases.is_empty() {
-                        ui.label(muted(format!("Also written: {}", term.aliases.join(", "))));
-                    }
-                    if let Some(text) = &term.text {
-                        markdown(ui, academy, text);
-                    }
-                    if !term.see.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(muted("See also:"));
-                            for see in &term.see {
-                                if ui.link(see).clicked() {
-                                    jump = crate::glossary::find(&academy.glossary, see);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let mut letter = None;
+            for i in 0..academy.glossary.len() {
+                let term = academy.glossary[i].clone();
+                let matches = filter.is_empty()
+                    || term.term.to_lowercase().contains(&filter)
+                    || term
+                        .aliases
+                        .iter()
+                        .any(|a| a.to_lowercase().contains(&filter))
+                    || term.short.to_lowercase().contains(&filter);
+                if !matches {
+                    continue;
+                }
+                let first = term.term.chars().next().map(|c| c.to_ascii_uppercase());
+                if filter.is_empty() && first != letter {
+                    letter = first;
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(first.unwrap_or(' ').to_string())
+                            .strong()
+                            .size(16.0),
+                    );
+                }
+                let id = ui.make_persistent_id(("orress::glossary_term", i));
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    id,
+                    false,
+                );
+                if focus == Some(i) {
+                    state.set_open(true);
+                }
+                let (header, _, _) = state
+                    .show_header(ui, |ui| {
+                        ui.label(RichText::new(&term.term).strong());
+                        ui.label(muted(&term.short));
+                    })
+                    .body(|ui| {
+                        if !term.aliases.is_empty() {
+                            ui.label(muted(format!("Also written: {}", term.aliases.join(", "))));
+                        }
+                        if let Some(text) = &term.text {
+                            markdown(ui, academy, text);
+                        }
+                        if !term.see.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(muted("See also:"));
+                                for see in &term.see {
+                                    if ui.link(see).clicked() {
+                                        jump = crate::glossary::find(&academy.glossary, see);
+                                    }
                                 }
-                            }
-                        });
-                    }
-                });
-            if focus == Some(i) {
-                header.scroll_to_me(Some(egui::Align::TOP));
+                            });
+                        }
+                    });
+                if focus == Some(i) {
+                    header.scroll_to_me(Some(egui::Align::TOP));
+                }
             }
-        }
-    });
+        });
     if let Some(i) = jump {
         academy.glossary_filter.clear();
         academy.glossary_focus = Some(i);
@@ -401,14 +421,22 @@ fn instructions(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bo
     if step.instructions.is_empty() {
         return;
     }
-    let accent = if done { success_color(ui) } else { ui.visuals().hyperlink_color };
+    let accent = if done {
+        success_color(ui)
+    } else {
+        ui.visuals().hyperlink_color
+    };
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, accent))
         .corner_radius(6.0)
         .inner_margin(8.0)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(if done { "Done:" } else { "Do this:" }).strong().color(accent));
+            ui.label(
+                RichText::new(if done { "Done:" } else { "Do this:" })
+                    .strong()
+                    .color(accent),
+            );
             for (i, line) in step.instructions.iter().enumerate() {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(format!("{}.", i + 1)).strong());
@@ -462,7 +490,10 @@ fn task(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
     };
     match &step.check {
         Check::Continue => {}
-        Check::Action { .. } => status(ui, "follow the steps above. The lesson notices when you did it."),
+        Check::Action { .. } => status(
+            ui,
+            "follow the steps above. The lesson notices when you did it.",
+        ),
         Check::View { view } => status(ui, &format!("open the {view} view (see the steps above).")),
         Check::OpenCrackme { name } => {
             status(ui, &format!("open the practice program {name}."));
@@ -491,7 +522,9 @@ fn task(ui: &mut Ui, academy: &mut Academy, step: &crate::Step, done: bool) {
                 });
             }
         }
-        Check::Choice { options, correct, .. } => {
+        Check::Choice {
+            options, correct, ..
+        } => {
             for (i, option) in options.iter().enumerate() {
                 let text = if done && i == *correct {
                     RichText::new(format!("{option}  (correct)")).color(success_color(ui))

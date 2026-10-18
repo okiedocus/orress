@@ -393,7 +393,13 @@ impl OrressApp {
         let focused = self.workspace.focused_doc().map(|(_, view)| view);
         let handles = match focused {
             Some(DocView::Hex) => true,
-            Some(DocView::Disassembly) => command == ViewCommand::GoTo,
+            Some(DocView::Disassembly) => matches!(
+                command,
+                ViewCommand::GoTo
+                    | ViewCommand::Find
+                    | ViewCommand::FindNext
+                    | ViewCommand::FindPrevious
+            ),
             _ => false,
         };
         if handles {

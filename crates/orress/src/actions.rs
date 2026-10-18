@@ -169,18 +169,20 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
     )
     .register(
         "hex::Find",
-        "Hex: Find",
-        "Search the file for text, wide (UTF-16) text or a byte pattern with ?? wildcards.",
+        "Find",
+        "In the Disassembly view: search the listing (mnemonics, operands, names, comments). \
+         Elsewhere: search the file's bytes in the Hex view for text, wide (UTF-16) text or a \
+         byte pattern with ?? wildcards.",
     )
     .register(
         "hex::FindNext",
-        "Hex: Find Next",
-        "Jump to the next match of the last search.",
+        "Find Next",
+        "Jump to the next match of the last search (Disassembly or Hex view).",
     )
     .register(
         "hex::FindPrevious",
-        "Hex: Find Previous",
-        "Jump to the previous match of the last search.",
+        "Find Previous",
+        "Jump to the previous match of the last search (Disassembly or Hex view).",
     )
     .register(
         "hex::CopyHex",

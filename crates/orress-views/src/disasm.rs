@@ -3,6 +3,7 @@
 //! Like the hex view it scrolls virtually by line number. Keys (when focused):
 //! arrows/PageUp/PageDown move, Enter follows the address on the line, Esc goes back,
 //! N renames, ; comments, X shows cross-references, Space switches to the graph.
+//! Ctrl+F searches the listing text, F3 / Shift+F3 find the next / previous match.
 
 use std::sync::Arc;
 
@@ -24,7 +25,33 @@ pub struct DisasmState {
     show_bytes: bool,
     popup: Option<EditPopup>,
     goto: Option<GotoBar>,
+    find: FindBar,
 }
+
+/// Search in the listing: matches the text of each line as shown (address, mnemonic,
+/// operands, names, comments, string notes), ignoring case.
+#[derive(Default)]
+struct FindBar {
+    open: bool,
+    query: String,
+    focus: bool,
+    status: Option<Result<String, String>>,
+    /// Line of the last match and the cursor it left, so "next" continues after it even when
+    /// several lines share an address (a function header and its first instruction).
+    last: Option<(usize, u64)>,
+    /// Match count per (query, document generation, number of names and comments): counting
+    /// renders every line, so it runs once per query.
+    count: Option<((String, u64, usize), usize)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FindStep {
+    Next,
+    Previous,
+}
+
+/// Stop counting matches after this many (the count is shown as "10000+").
+const MAX_COUNT: usize = 10_000;
 
 struct GotoBar {
     text: String,
@@ -41,13 +68,28 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
         return;
     }
 
+    let mut find_step = None;
     for command in std::mem::take(&mut cx.commands) {
-        if command == ViewCommand::GoTo {
-            state.goto = Some(GotoBar {
-                text: String::new(),
-                error: None,
-                focus: true,
-            });
+        match command {
+            ViewCommand::GoTo => {
+                state.goto = Some(GotoBar {
+                    text: String::new(),
+                    error: None,
+                    focus: true,
+                });
+            }
+            ViewCommand::FindNext if !state.find.query.trim().is_empty() => {
+                find_step = Some(FindStep::Next);
+            }
+            ViewCommand::FindPrevious if !state.find.query.trim().is_empty() => {
+                find_step = Some(FindStep::Previous);
+            }
+            // Find, or F3 before anything was searched: open the bar.
+            ViewCommand::Find | ViewCommand::FindNext | ViewCommand::FindPrevious => {
+                state.find.open = true;
+                state.find.focus = true;
+            }
+            _ => {}
         }
     }
 
@@ -55,6 +97,9 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
     patch_bar(ui, doc, &program);
     if state.goto.is_some() {
         goto_bar(ui, doc, &program, state);
+    }
+    if state.find.open {
+        find_step = find_bar(ui, &mut state.find).or(find_step);
     }
 
     let font = FontId::monospace(13.0);
@@ -71,7 +116,7 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
         "The program's machine code, one instruction per line: address, mnemonic (what it \
          does) and operands (what it works on). Function names end with a colon. Click a \
          name or address to jump there; Esc goes back. Keys: N rename, ; comment, X \
-         cross-references, Space graph view, Ctrl+G go to.",
+         cross-references, Space graph view, Ctrl+G go to, Ctrl+F find.",
     );
     if response.clicked() {
         response.request_focus();
@@ -125,6 +170,22 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
         show_address: true,
         show_bytes: state.show_bytes,
     };
+
+    if let Some(step) = find_step {
+        let current = cursor_line.unwrap_or(state.top_line);
+        if let Some(line) = find(doc, &program, &style, &mut state.find, current, step) {
+            if let Some(offset) = program.memory.offset_of(program.lines[line].addr) {
+                doc.go_to(offset);
+            }
+            state.last_cursor = Some(doc.cursor);
+            state.find.last = Some((line, doc.cursor));
+            if line < state.top_line || line >= state.top_line + visible {
+                state.top_line = line.saturating_sub(visible / 3).min(max_top);
+            }
+        }
+    }
+    let needle = (state.find.open && !state.find.query.trim().is_empty())
+        .then(|| state.find.query.trim().to_lowercase());
 
     // Debugger overlay: the current instruction and breakpoints (file virtual addresses).
     let dbg_rip = cx.debugger.current_file_rip(&doc.path);
@@ -183,6 +244,17 @@ pub fn disasm_view(ui: &mut Ui, doc: &mut Document, state: &mut DisasmState, cx:
             );
         }
         let rendered = code::render_line(doc, &program, line, &style);
+        if let Some(needle) = &needle {
+            let width = needle.chars().count() as f32 * char_w;
+            for column in match_columns(&rendered.job.text, needle) {
+                let x = rect.left() + 6.0 + column as f32 * char_w;
+                painter.rect_filled(
+                    Rect::from_min_size(Pos2::new(x, y + 1.0), Vec2::new(width, row_h - 2.0)),
+                    2.0,
+                    Color32::from_rgb(230, 180, 40).gamma_multiply(0.45),
+                );
+            }
+        }
         let galley = ui.fonts_mut(|f| f.layout_job(rendered.job.clone()));
         painter.galley(Pos2::new(rect.left() + 6.0, y + 1.5), galley, style.text);
         // A breakpoint dot and, on the current instruction, a play triangle, in the gutter.
@@ -290,7 +362,7 @@ fn toolbar(ui: &mut Ui, doc: &Document, program: &Program, state: &mut DisasmSta
              exactly which bytes to change.",
         );
         ui.label(
-            RichText::new("N rename · ; comment · X xrefs · Space graph · Esc back")
+            RichText::new("N rename · ; comment · X xrefs · Space graph · Ctrl+F find · Esc back")
                 .weak()
                 .small(),
         );
@@ -453,6 +525,154 @@ fn goto_bar(ui: &mut Ui, doc: &mut Document, program: &Arc<Program>, state: &mut
     }
 }
 
+/// Character columns where `needle` (already lowercase) starts in `text`, ignoring case.
+fn match_columns(text: &str, needle: &str) -> Vec<usize> {
+    let hay = text.to_lowercase();
+    if needle.is_empty() || hay.len() != text.len() {
+        // Lowercasing changed the length (rare non-ASCII text): skip highlighting.
+        return Vec::new();
+    }
+    hay.match_indices(needle)
+        .map(|(at, _)| hay[..at].chars().count())
+        .collect()
+}
+
+fn line_matches(
+    doc: &Document,
+    program: &Program,
+    style: &Style,
+    index: usize,
+    needle: &str,
+) -> bool {
+    program.lines.get(index).is_some_and(|line| {
+        code::render_line(doc, program, line, style)
+            .job
+            .text
+            .to_lowercase()
+            .contains(needle)
+    })
+}
+
+/// Finds the next or previous line matching the query, wrapping around, and updates the
+/// status. Returns the line index.
+fn find(
+    doc: &Document,
+    program: &Program,
+    style: &Style,
+    bar: &mut FindBar,
+    current: usize,
+    step: FindStep,
+) -> Option<usize> {
+    let needle = bar.query.trim().to_lowercase();
+    if needle.is_empty() {
+        bar.status = Some(Err("type something to search for".into()));
+        return None;
+    }
+    let total = program.lines.len();
+    // Continue from the last match if the cursor has not moved since.
+    let from = match bar.last {
+        Some((line, cursor)) if cursor == doc.cursor && line < total => line,
+        _ => current.min(total - 1),
+    };
+    let found = (1..=total)
+        .map(|i| match step {
+            FindStep::Next => (from + i) % total,
+            FindStep::Previous => (from + total - i) % total,
+        })
+        .find(|&i| line_matches(doc, program, style, i, &needle));
+    bar.status = Some(match found {
+        Some(line) => {
+            let key = (
+                needle.clone(),
+                doc.generation,
+                doc.annotations.names.len() + doc.annotations.comments.len(),
+            );
+            let count = match &bar.count {
+                Some((k, n)) if *k == key => *n,
+                _ => {
+                    let n = (0..total)
+                        .filter(|&i| line_matches(doc, program, style, i, &needle))
+                        .take(MAX_COUNT)
+                        .count();
+                    bar.count = Some((key, n));
+                    n
+                }
+            };
+            let more = if count >= MAX_COUNT { "+" } else { "" };
+            let wrapped = match step {
+                FindStep::Next => line <= from,
+                FindStep::Previous => line >= from,
+            };
+            Ok(format!(
+                "0x{:x} · {count}{more} matching line{}{}",
+                program.lines[line].addr,
+                if count == 1 { "" } else { "s" },
+                if wrapped && count > 1 {
+                    " · wrapped around"
+                } else {
+                    ""
+                }
+            ))
+        }
+        None => Err("not found".into()),
+    });
+    found
+}
+
+/// The find bar. Returns the search to run this frame, if any.
+fn find_bar(ui: &mut Ui, bar: &mut FindBar) -> Option<FindStep> {
+    let mut step = None;
+    ui.horizontal(|ui| {
+        ui.label("Find").explain(
+            "Find in the disassembly",
+            "Search the listing for text, ignoring upper/lower case: a mnemonic (xor), a \
+             register (rcx), a number (0x5a), a function or label name, an address, or words \
+             in comments and string notes (Correct). F3 finds the next match, Shift+F3 the \
+             previous one. To search the file's raw bytes, use Find in the Hex view.",
+        );
+        let edit = ui.add(
+            egui::TextEdit::singleline(&mut bar.query)
+                .id_salt("orress::disasm_find")
+                .hint_text("e.g. xor, call, 0x5a, Correct")
+                .desired_width(260.0)
+                .font(egui::TextStyle::Monospace),
+        );
+        if bar.focus {
+            edit.request_focus();
+            bar.focus = false;
+        }
+        if edit.changed() {
+            bar.status = None;
+            bar.last = None;
+        }
+        let submit = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+        if ui.button("Next").on_hover_text("F3").clicked() || submit {
+            step = Some(FindStep::Next);
+            if submit {
+                bar.focus = true;
+            }
+        }
+        if ui.button("Previous").on_hover_text("Shift+F3").clicked() {
+            step = Some(FindStep::Previous);
+        }
+        if ui.button("×").on_hover_text("Close (Esc)").clicked()
+            || (edit.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)))
+        {
+            bar.open = false;
+        }
+        match &bar.status {
+            Some(Ok(s)) => {
+                ui.label(RichText::new(s).weak());
+            }
+            Some(Err(e)) => {
+                ui.colored_label(ui.visuals().warn_fg_color, e);
+            }
+            None => {}
+        }
+    });
+    step
+}
+
 fn hover_span(
     ui: &Ui,
     doc: &Document,
@@ -601,5 +821,17 @@ fn keyboard(
         && line.kind == LineKind::Insn
     {
         cx.debugger.toggle_breakpoint(line.addr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::match_columns;
+
+    #[test]
+    fn match_columns_ignore_case() {
+        assert_eq!(match_columns("  401000  XOR eax, eax", "xor"), vec![10]);
+        assert_eq!(match_columns("mov rax, rax", "rax"), vec![4, 9]);
+        assert!(match_columns("call main", "jmp").is_empty());
     }
 }

@@ -180,12 +180,14 @@ fn validate(lesson: &Lesson) -> Result<(), String> {
             return Err(format!("{at}: at most 3 hints"));
         }
         match &step.check {
-            Check::Choice { options, correct, .. } if *correct >= options.len() => {
+            Check::Choice {
+                options, correct, ..
+            } if *correct >= options.len() => {
                 return Err(format!("{at}: `correct` is out of range"));
             }
-            Check::Choice { options, explain, .. }
-                if !explain.is_empty() && explain.len() != options.len() =>
-            {
+            Check::Choice {
+                options, explain, ..
+            } if !explain.is_empty() && explain.len() != options.len() => {
                 return Err(format!("{at}: `explain` needs one entry per option"));
             }
             Check::Answer {
@@ -273,11 +275,15 @@ mod tests {
         let errors: Vec<String> = BUILT_IN
             .iter()
             .filter_map(|(file, source)| parse(source).err().map(|e| format!("{file}: {e}")))
-            .chain(crate::lesson::GLOSSARY_FILES.iter().filter_map(|(file, source)| {
-                crate::glossary::parse(source)
-                    .err()
-                    .map(|e| format!("glossary/{file}: {e}"))
-            }))
+            .chain(
+                crate::lesson::GLOSSARY_FILES
+                    .iter()
+                    .filter_map(|(file, source)| {
+                        crate::glossary::parse(source)
+                            .err()
+                            .map(|e| format!("glossary/{file}: {e}"))
+                    }),
+            )
             .collect();
         assert!(errors.is_empty(), "invalid files:\n{}", errors.join("\n"));
     }

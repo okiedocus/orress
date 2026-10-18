@@ -113,7 +113,11 @@ mod tests {
         names.dedup();
         assert_eq!(names.len(), count, "glossary terms and aliases are unique");
         for t in &terms {
-            assert!(!t.short.trim().is_empty(), "`{}` has a short explanation", t.term);
+            assert!(
+                !t.short.trim().is_empty(),
+                "`{}` has a short explanation",
+                t.term
+            );
             for see in &t.see {
                 assert!(
                     find(&terms, see).is_some(),

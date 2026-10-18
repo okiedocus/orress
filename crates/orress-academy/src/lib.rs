@@ -437,7 +437,10 @@ impl Academy {
             return;
         };
         let ok = option == *correct;
-        let why = explain.get(option).map(|w| format!(" {w}")).unwrap_or_default();
+        let why = explain
+            .get(option)
+            .map(|w| format!(" {w}"))
+            .unwrap_or_default();
         self.feedback = Some(Feedback {
             correct: ok,
             text: if ok {
