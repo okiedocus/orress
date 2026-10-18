@@ -73,6 +73,22 @@ enum Command {
         #[arg(short = 'e', long)]
         eval: bool,
     },
+    /// Run a pwntools-style exploit script against a binary (tubes, packing, cyclic, ROP).
+    Exploit {
+        file: PathBuf,
+        /// Path to a `.rhai` script, or `-e CODE` to run inline code.
+        script: PathBuf,
+        /// Treat `script` as inline code rather than a file path.
+        #[arg(short = 'e', long)]
+        eval: bool,
+    },
+    /// List the ROP gadgets in a binary (sequences ending in ret/syscall).
+    Gadgets {
+        file: PathBuf,
+        /// Only show gadgets whose text contains this (case-insensitive).
+        #[arg(long)]
+        filter: Option<String>,
+    },
     /// Run a Workbench recipe, e.g. "from_base64 | xor key=0x41".
     Recipe {
         recipe: String,
@@ -215,6 +231,8 @@ fn main() -> Result<()> {
         Command::Funcs { file } => funcs(&file),
         Command::Vm { file } => vm(&file),
         Command::Script { file, script, eval } => run_script(&file, &script, eval),
+        Command::Exploit { file, script, eval } => run_exploit(&file, &script, eval),
+        Command::Gadgets { file, filter } => list_gadgets(&file, filter.as_deref()),
         Command::Disasm { file, target } => disasm(&file, target.as_deref().unwrap_or("main")),
         Command::Decompile { file, target } => {
             let (info, p) = analyze(&file)?;
@@ -509,6 +527,104 @@ fn run_script(file: &PathBuf, script: &PathBuf, eval: bool) -> Result<()> {
         }
         Err(e) => anyhow::bail!("script error: {e}"),
     }
+}
+
+fn run_exploit(file: &PathBuf, script: &PathBuf, eval: bool) -> Result<()> {
+    let src = if eval {
+        script.to_string_lossy().into_owned()
+    } else {
+        std::fs::read_to_string(script)
+            .with_context(|| format!("cannot read script {}", script.display()))?
+    };
+    let data = Arc::new(read_input(Some(file))?);
+    let info = orress_loaders::triage(&data);
+    let strings = orress_bytes::strings::extract(&data, 4, 500_000);
+    let program = orress_analysis::Program::analyze(&info, Arc::clone(&data), &strings)
+        .with_context(|| format!("cannot analyze {}", file.display()))?;
+    let ctx = exploit_ctx(&info, &program, &data);
+
+    // Stream the script's output to stdout as it runs.
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let printer = std::thread::spawn(move || {
+        for line in rx {
+            print!("{line}");
+        }
+    });
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let result = orress_script::run_exploit(&src, ctx, tx, cancel);
+    let _ = printer.join();
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => anyhow::bail!("exploit error: {e}"),
+    }
+}
+
+/// Builds the scripting context (symbols/GOT/PLT/exec sections) from a binary's analysis.
+fn exploit_ctx(
+    info: &orress_loaders::BinaryInfo,
+    program: &orress_analysis::Program,
+    data: &[u8],
+) -> orress_script::ExploitCtx {
+    use std::collections::HashMap;
+    let mut symbols: HashMap<String, u64> = HashMap::new();
+    for s in &info.function_symbols {
+        symbols.entry(s.name.clone()).or_insert(s.address);
+    }
+    for e in &info.exports {
+        if e.address != 0 {
+            symbols.entry(e.name.clone()).or_insert(e.address);
+        }
+    }
+    let got = info
+        .import_slots
+        .iter()
+        .map(|s| (s.name.clone(), s.address))
+        .collect();
+    let mut plt: HashMap<String, u64> = HashMap::new();
+    for f in program.functions.values() {
+        if f.kind == orress_analysis::FunctionKind::Thunk
+            && let Some(name) = program.name(f.entry)
+            && let Some(base_name) = name.text.strip_suffix("@plt")
+        {
+            plt.entry(base_name.to_string()).or_insert(f.entry);
+        }
+    }
+    let exec = info
+        .sections
+        .iter()
+        .filter(|s| s.perms.execute)
+        .filter_map(|s| Some((s.address, data.get(s.file_range()?)?.to_vec())))
+        .collect();
+    orress_script::ExploitCtx {
+        base: info.image_base,
+        isa: program.isa,
+        symbols,
+        got,
+        plt,
+        exec,
+    }
+}
+
+fn list_gadgets(file: &PathBuf, filter: Option<&str>) -> Result<()> {
+    let data = read_input(Some(file))?;
+    let info = orress_loaders::triage(&data);
+    let isa = orress_arch::Isa::from_arch_name(&info.arch).unwrap_or(orress_arch::Isa::X64);
+    let sections: Vec<(u64, &[u8])> = info
+        .sections
+        .iter()
+        .filter(|s| s.perms.execute)
+        .filter_map(|s| Some((s.address, data.get(s.file_range()?)?)))
+        .collect();
+    let needle = filter.map(str::to_lowercase);
+    for g in orress_pwn::find_gadgets(&sections, isa, 6) {
+        if needle
+            .as_deref()
+            .is_none_or(|n| g.text.to_lowercase().contains(n))
+        {
+            println!("{:#x}  {}", g.addr, g.text);
+        }
+    }
+    Ok(())
 }
 
 fn vm(file: &PathBuf) -> Result<()> {

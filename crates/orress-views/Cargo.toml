@@ -32,6 +32,7 @@ orress-pyc.workspace = true
 orress-java.workspace = true
 orress-archive.workspace = true
 orress-resources.workspace = true
+orress-pwn.workspace = true
 orress-js.workspace = true
 orress-dex.workspace = true
 orress-dotnet.workspace = true

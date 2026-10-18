@@ -69,6 +69,8 @@ pub enum TabKind {
     Resources,
     /// Exploit console: pwntools-style scripting over the open binary.
     Exploit,
+    /// ROP gadget finder.
+    Gadgets,
     /// JavaScript deobfuscation / beautify / string extraction.
     Js,
     /// .NET assembly metadata: types, methods, user strings.
@@ -146,6 +148,7 @@ impl TabKind {
             Self::Archive => "Archive".into(),
             Self::Resources => "Resources".into(),
             Self::Exploit => "Exploit".into(),
+            Self::Gadgets => "Gadgets".into(),
             Self::Js => "JavaScript".into(),
             Self::DotNet => ".NET".into(),
             Self::Assistant => "Assistant".into(),
@@ -293,6 +296,7 @@ pub struct TabEnv<'a> {
     pub archive: &'a mut orress_views::ArchiveView,
     pub resources: &'a mut orress_views::ResourcesView,
     pub exploit: &'a mut orress_views::ExploitView,
+    pub gadgets: &'a mut orress_views::GadgetsView,
     pub js: &'a mut orress_views::JsView,
     pub dotnet: &'a mut orress_views::DotNetView,
     pub assistant: &'a mut orress_views::AssistantView,
@@ -327,6 +331,7 @@ impl<'a> TabEnv<'a> {
         archive: &'a mut orress_views::ArchiveView,
         resources: &'a mut orress_views::ResourcesView,
         exploit: &'a mut orress_views::ExploitView,
+        gadgets: &'a mut orress_views::GadgetsView,
         js: &'a mut orress_views::JsView,
         dotnet: &'a mut orress_views::DotNetView,
         assistant: &'a mut orress_views::AssistantView,
@@ -364,6 +369,7 @@ impl<'a> TabEnv<'a> {
             archive,
             resources,
             exploit,
+            gadgets,
             js,
             dotnet,
             assistant,
