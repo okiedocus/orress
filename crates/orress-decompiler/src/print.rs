@@ -408,7 +408,7 @@ impl<'a> Printer<'a> {
                 };
                 self.tok(param_name(i), TokKind::Param);
                 self.p(".");
-                self.tok(f.name(), TokKind::Variable);
+                self.tok(layout.field_name(f), TokKind::Variable);
                 true
             }
             _ => false,
@@ -1490,7 +1490,7 @@ impl<'a> Printer<'a> {
             self.indent += 1;
             for f in &layout.fields {
                 self.start(None);
-                self.tok(f.name(), TokKind::Variable);
+                self.tok(layout.field_name(f), TokKind::Variable);
                 self.p(": ");
                 self.tok(f.width.rust(f.signed), TokKind::Type);
                 self.p(",");

@@ -12,7 +12,10 @@ All notable changes to ORRESS are documented here. The format follows
   form builder (field name, type, array count, pointer), with a live C-layout preview
   (offsets, sizes, padding). Apply a type to a data address from the hex view's right-click
   menu and the Inspector lays the bytes out as named, typed fields. Types persist per
-  binary alongside names and comments.
+  binary alongside names and comments. The decompiler uses the catalog too: when a
+  recovered struct parameter matches a user struct, its fields print with the user's names
+  (`p.magic` instead of `p.field_0`), and applied function prototypes override the
+  recovered signature.
 - **Symbol demangling** (`orress-demangle`): mangled linker names in the imports, exports
   and function-symbol lists are now shown readable — Rust (legacy `_ZN…E` and v0 `_R…`),
   C++ Itanium (`_Z…`) and MSVC (`?…`). Pure Rust, no C `__cxa_demangle`. GOT/PLT slot

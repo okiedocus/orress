@@ -31,6 +31,9 @@ const CACHE_ENTRIES: usize = 16;
 struct Entry<T> {
     program: Weak<Program>,
     func: u64,
+    /// The document's annotation generation the result was built at, so applying or editing
+    /// a type (which bumps the generation) re-decompiles instead of reusing a stale result.
+    generation: u64,
     value: Arc<T>,
 }
 
@@ -54,18 +57,29 @@ fn cache_id() -> egui::Id {
 }
 
 /// The cached value for (`program`, `func`), moved to the most-recent end.
-fn lookup<T>(entries: &mut Vec<Entry<T>>, program: &Arc<Program>, func: u64) -> Option<Arc<T>> {
+fn lookup<T>(
+    entries: &mut Vec<Entry<T>>,
+    program: &Arc<Program>,
+    func: u64,
+    generation: u64,
+) -> Option<Arc<T>> {
     let weak = Arc::downgrade(program);
-    let i = entries
-        .iter()
-        .position(|e| e.func == func && Weak::ptr_eq(&e.program, &weak))?;
+    let i = entries.iter().position(|e| {
+        e.func == func && e.generation == generation && Weak::ptr_eq(&e.program, &weak)
+    })?;
     let e = entries.remove(i);
     let value = Arc::clone(&e.value);
     entries.push(e);
     Some(value)
 }
 
-fn remember<T>(entries: &mut Vec<Entry<T>>, program: &Arc<Program>, func: u64, value: &Arc<T>) {
+fn remember<T>(
+    entries: &mut Vec<Entry<T>>,
+    program: &Arc<Program>,
+    func: u64,
+    generation: u64,
+    value: &Arc<T>,
+) {
     // Results for programs that no longer exist (an older patch level, a closed file) go first.
     entries.retain(|e| e.program.strong_count() > 0);
     if entries.len() >= CACHE_ENTRIES {
@@ -74,6 +88,7 @@ fn remember<T>(entries: &mut Vec<Entry<T>>, program: &Arc<Program>, func: u64, v
     entries.push(Entry {
         program: Arc::downgrade(program),
         func,
+        generation,
         value: Arc::clone(value),
     });
 }
@@ -229,21 +244,27 @@ fn panel(
     };
 
     // Decompiling is quick, but not free: keep the result until the code changes (a patch
-    // makes a new program). Names are not part of the output; renames apply when drawing.
+    // makes a new program) or a type is applied/edited (which bumps the generation). Names are
+    // not part of the output; renames apply when drawing.
+    let generation = doc.generation;
+    let hints = build_hints(doc);
     let cached: Option<Cached> = ui.ctx().data_mut(|d| {
         lookup(
             &mut d.get_temp_mut_or_default::<DecompCache>(cache_id()).pseudo,
             &program,
             func,
+            generation,
         )
     });
     let result = cached.unwrap_or_else(|| {
         let conv = orress_decompiler::convention(format);
-        let r =
-            Arc::new(orress_decompiler::decompile(&program, func, conv).map_err(|e| e.to_string()));
+        let r = Arc::new(
+            orress_decompiler::decompile_with(&program, func, conv, &hints)
+                .map_err(|e| e.to_string()),
+        );
         ui.ctx().data_mut(|d| {
             let cache = d.get_temp_mut_or_default::<DecompCache>(cache_id());
-            remember(&mut cache.pseudo, &program, func, &r);
+            remember(&mut cache.pseudo, &program, func, generation, &r);
         });
         r
     });
@@ -307,6 +328,7 @@ fn panel(
                 &mut d.get_temp_mut_or_default::<DecompCache>(cache_id()).port,
                 &program,
                 func,
+                generation,
             )
         });
         let pres = pcached.unwrap_or_else(|| {
@@ -315,7 +337,7 @@ fn panel(
                 Arc::new(orress_decompiler::port(&program, func, conv).map_err(|e| e.to_string()));
             ui.ctx().data_mut(|d| {
                 let cache = d.get_temp_mut_or_default::<DecompCache>(cache_id());
-                remember(&mut cache.port, &program, func, &r);
+                remember(&mut cache.port, &program, func, generation, &r);
             });
             r
         });
@@ -772,5 +794,124 @@ fn port_compile_check(ui: &mut egui::Ui, pkey: egui::Id, src: &str) {
                     .on_hover_text(diags.as_str());
             }
         }
+    }
+}
+
+/// Builds decompiler type hints from the document's type catalog and function prototypes:
+/// user struct layouts (to name recovered struct parameters and their fields) and lowered
+/// prototypes (to override a function's signature).
+fn build_hints(doc: &Document) -> orress_decompiler::types::TypeHints {
+    use orress_decompiler::types as dt;
+    use orress_project::types::UserType;
+
+    let catalog = doc.type_catalog();
+    let mut structs = Vec::new();
+    for ty in catalog.types.values() {
+        if let UserType::Struct { name, .. } = ty
+            && let Some(laid) = catalog.layout(ty)
+        {
+            let fields = laid
+                .iter()
+                .filter(|f| f.count == 1)
+                .filter_map(|f| {
+                    let (w, signed) = scalar_width(&catalog, &f.ty)?;
+                    Some((f.offset, orress_decompiler::ir::Width(w), signed, f.path.clone()))
+                })
+                .collect();
+            structs.push(dt::StructDef {
+                name: name.clone(),
+                fields,
+            });
+        }
+    }
+
+    let mut prototypes = std::collections::BTreeMap::new();
+    for (&addr, proto) in &doc.annotations.func_prototypes {
+        let params = proto
+            .params
+            .iter()
+            .map(|(_, t)| lower_ty(&catalog, t).unwrap_or(dt::Ty::Int(orress_decompiler::ir::Width(8), false)))
+            .collect();
+        let ret = proto.ret.as_ref().and_then(|t| lower_ty(&catalog, t));
+        prototypes.insert(addr, dt::Proto { ret, params });
+    }
+
+    dt::TypeHints {
+        structs,
+        prototypes,
+    }
+}
+
+/// The integer byte-width and signedness of a scalar field type, or `None` for a type that
+/// is not a fixed-width scalar (a nested struct, say) and so cannot name a recovered field.
+fn scalar_width(
+    catalog: &orress_project::TypeCatalog,
+    ty: &orress_project::TypeRef,
+) -> Option<(u8, bool)> {
+    use orress_project::types::{Prim, TypeRef};
+    match ty {
+        TypeRef::Prim(Prim::U8 | Prim::Char | Prim::Bool) => Some((1, false)),
+        TypeRef::Prim(Prim::I8) => Some((1, true)),
+        TypeRef::Prim(Prim::U16) => Some((2, false)),
+        TypeRef::Prim(Prim::I16) => Some((2, true)),
+        TypeRef::Prim(Prim::U32) => Some((4, false)),
+        TypeRef::Prim(Prim::I32) => Some((4, true)),
+        TypeRef::Prim(Prim::U64) => Some((8, false)),
+        TypeRef::Prim(Prim::I64) => Some((8, true)),
+        TypeRef::Pointer(_) => Some((catalog.pointer_size as u8, false)),
+        _ => None,
+    }
+}
+
+/// Lowers a user type reference into a decompiler [`Ty`] for a function prototype.
+fn lower_ty(
+    catalog: &orress_project::TypeCatalog,
+    ty: &orress_project::TypeRef,
+) -> Option<orress_decompiler::types::Ty> {
+    use orress_decompiler::types as dt;
+    use orress_project::types::{Prim, TypeRef, UserType};
+
+    match ty {
+        TypeRef::Prim(Prim::F32) => Some(dt::Ty::Float(orress_decompiler::ir::Width(4))),
+        TypeRef::Prim(Prim::F64) => Some(dt::Ty::Float(orress_decompiler::ir::Width(8))),
+        TypeRef::Prim(Prim::Bool) => Some(dt::Ty::Bool),
+        TypeRef::Prim(Prim::Void) => None,
+        TypeRef::Prim(_) => {
+            let (w, signed) = scalar_width(catalog, ty)?;
+            Some(dt::Ty::Int(orress_decompiler::ir::Width(w), signed))
+        }
+        TypeRef::Pointer(inner) => match inner.as_ref() {
+            // A pointer to a user struct becomes a named struct parameter.
+            TypeRef::Named(name) => {
+                let user = catalog.types.get(name)?;
+                let fields = catalog
+                    .layout(user)?
+                    .iter()
+                    .filter(|f| f.count == 1)
+                    .filter_map(|f| {
+                        let (w, signed) = scalar_width(catalog, &f.ty)?;
+                        Some((f.offset, f.path.clone(), dt::Field {
+                            offset: f.offset,
+                            width: orress_decompiler::ir::Width(w),
+                            signed,
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                let field_names = fields.iter().map(|(o, n, _)| (*o, n.clone())).collect();
+                let layout = dt::StructLayout {
+                    name: name.clone(),
+                    fields: fields.into_iter().map(|(_, _, f)| f).collect(),
+                    field_names,
+                };
+                let mutable = matches!(user, UserType::Struct { .. });
+                Some(dt::Ty::Struct(layout, mutable))
+            }
+            // A pointer to a scalar becomes a reference of that width.
+            other => {
+                let (w, _) = scalar_width(catalog, other)?;
+                Some(dt::Ty::Ref(orress_decompiler::ir::Width(w), false))
+            }
+        },
+        TypeRef::Named(_) => None,
     }
 }

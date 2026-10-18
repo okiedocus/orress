@@ -275,7 +275,19 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
 
 /// Decompiles the function containing `addr` into readable Rust-syntax pseudocode.
 pub fn decompile(program: &Program, addr: u64, conv: Convention) -> Result<Output, Error> {
-    let d = run(program, addr, conv)?;
+    decompile_with(program, addr, conv, &types::TypeHints::default())
+}
+
+/// Like [`decompile`], but applies user type hints: names recovered struct parameters and
+/// their fields from the user's catalog, and overlays any function prototype.
+pub fn decompile_with(
+    program: &Program,
+    addr: u64,
+    conv: Convention,
+    hints: &types::TypeHints,
+) -> Result<Output, Error> {
+    let mut d = run(program, addr, conv)?;
+    types::apply_hints(&mut d.sig, d.entry, hints);
     let mut lines = print::Printer::new(
         program,
         &d.sig,

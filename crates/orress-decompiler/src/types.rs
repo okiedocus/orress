@@ -29,6 +29,93 @@ impl Field {
 pub struct StructLayout {
     pub name: String,
     pub fields: Vec<Field>,
+    /// User-supplied names by field offset, overriding `field_N` when a user type is applied.
+    pub field_names: BTreeMap<u64, String>,
+}
+
+impl StructLayout {
+    /// The printed name of a field: the user's name if one was applied, else `field_N`.
+    pub fn field_name(&self, f: &Field) -> String {
+        self.field_names
+            .get(&f.offset)
+            .cloned()
+            .unwrap_or_else(|| f.name())
+    }
+}
+
+/// Type information the user has supplied, lowered into decompiler terms by the caller. It
+/// names recovered struct parameters and their fields, and overrides a function's signature.
+#[derive(Clone, Debug, Default)]
+pub struct TypeHints {
+    /// User struct layouts, used to name a recovered struct parameter and its fields.
+    pub structs: Vec<StructDef>,
+    /// Function prototypes by entry address: override return and parameter types.
+    pub prototypes: BTreeMap<u64, Proto>,
+}
+
+impl TypeHints {
+    pub fn is_empty(&self) -> bool {
+        self.structs.is_empty() && self.prototypes.is_empty()
+    }
+}
+
+/// A user struct, as `(offset, width, signed, name)` fields.
+#[derive(Clone, Debug)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<(u64, Width, bool, String)>,
+}
+
+/// A user function prototype, already lowered to decompiler types.
+#[derive(Clone, Debug, Default)]
+pub struct Proto {
+    pub ret: Option<Ty>,
+    pub params: Vec<Ty>,
+}
+
+/// Applies user type hints to a recovered signature in place: names recovered struct
+/// parameters whose layout a user struct covers, then overlays any function prototype.
+pub fn apply_hints(sig: &mut Signature, entry: u64, hints: &TypeHints) {
+    if hints.is_empty() {
+        return;
+    }
+    for ty in &mut sig.params {
+        if let Ty::Struct(layout, _) = ty
+            && let Some(def) = best_struct_match(&hints.structs, layout)
+        {
+            layout.name = def.name.clone();
+            layout.field_names = def
+                .fields
+                .iter()
+                .map(|(off, _, _, name)| (*off, name.clone()))
+                .collect();
+        }
+    }
+    if let Some(proto) = hints.prototypes.get(&entry) {
+        if let Some(ret) = &proto.ret {
+            sig.ret = Some(ret.clone());
+        }
+        for (i, pty) in proto.params.iter().enumerate() {
+            if let Some(slot) = sig.params.get_mut(i) {
+                *slot = pty.clone();
+            }
+        }
+    }
+}
+
+/// The one user struct whose fields cover every recovered `(offset, width)` field, if that
+/// match is unique (no guessing between two equally plausible structs).
+fn best_struct_match<'a>(defs: &'a [StructDef], layout: &StructLayout) -> Option<&'a StructDef> {
+    let covers = |d: &StructDef| {
+        layout.fields.iter().all(|f| {
+            d.fields
+                .iter()
+                .any(|(off, w, _, _)| *off == f.offset && *w == f.width)
+        })
+    };
+    let mut matches = defs.iter().filter(|d| covers(d));
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -308,7 +395,14 @@ pub fn infer(
                 })
                 .collect();
             let name = format!("Struct{next_struct}");
-            tys[i] = Ty::Struct(StructLayout { name, fields }, uses[i].written);
+            tys[i] = Ty::Struct(
+                StructLayout {
+                    name,
+                    fields,
+                    field_names: BTreeMap::new(),
+                },
+                uses[i].written,
+            );
         }
     }
     // (pointer, length) pairs become one slice parameter.
@@ -628,4 +722,103 @@ pub fn locals(blocks: &[Block]) -> BTreeMap<Var, (Width, bool)> {
     out.into_iter()
         .map(|(v, w)| (v, (w, signed.contains(&v))))
         .collect()
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    fn struct_param(offsets: &[(u64, u8)]) -> Signature {
+        let fields = offsets
+            .iter()
+            .map(|&(offset, w)| Field {
+                offset,
+                width: Width(w),
+                signed: false,
+            })
+            .collect();
+        Signature {
+            params: vec![Ty::Struct(
+                StructLayout {
+                    name: "Struct1".into(),
+                    fields,
+                    field_names: BTreeMap::new(),
+                },
+                false,
+            )],
+            ret: None,
+        }
+    }
+
+    #[test]
+    fn user_struct_names_recovered_fields() {
+        let mut sig = struct_param(&[(0, 4), (4, 2)]);
+        let hints = TypeHints {
+            structs: vec![StructDef {
+                name: "Packet".into(),
+                fields: vec![
+                    (0, Width(4), false, "magic".into()),
+                    (4, Width(2), false, "len".into()),
+                ],
+            }],
+            prototypes: BTreeMap::new(),
+        };
+        apply_hints(&mut sig, 0x1000, &hints);
+        let Ty::Struct(layout, _) = &sig.params[0] else {
+            panic!("expected struct");
+        };
+        assert_eq!(layout.name, "Packet");
+        assert_eq!(layout.field_name(&layout.fields[0]), "magic");
+        assert_eq!(layout.field_name(&layout.fields[1]), "len");
+    }
+
+    #[test]
+    fn ambiguous_match_is_left_alone() {
+        let mut sig = struct_param(&[(0, 4)]);
+        // Two structs both cover the single recovered field: no unique match, so no rename.
+        let def = |n: &str| StructDef {
+            name: n.into(),
+            fields: vec![(0, Width(4), false, "x".into())],
+        };
+        let hints = TypeHints {
+            structs: vec![def("A"), def("B")],
+            prototypes: BTreeMap::new(),
+        };
+        apply_hints(&mut sig, 0x1000, &hints);
+        let Ty::Struct(layout, _) = &sig.params[0] else {
+            panic!();
+        };
+        assert_eq!(layout.name, "Struct1");
+    }
+
+    #[test]
+    fn prototype_overrides_return_and_params() {
+        let mut sig = Signature {
+            params: vec![Ty::Int(Width(4), false)],
+            ret: None,
+        };
+        let mut prototypes = BTreeMap::new();
+        prototypes.insert(
+            0x2000,
+            Proto {
+                ret: Some(Ty::Bool),
+                params: vec![Ty::Int(Width(8), true)],
+            },
+        );
+        let hints = TypeHints {
+            structs: vec![],
+            prototypes,
+        };
+        apply_hints(&mut sig, 0x2000, &hints);
+        assert_eq!(sig.ret, Some(Ty::Bool));
+        assert_eq!(sig.params[0], Ty::Int(Width(8), true));
+    }
+
+    #[test]
+    fn empty_hints_change_nothing() {
+        let mut sig = struct_param(&[(0, 4)]);
+        let before = format!("{sig:?}");
+        apply_hints(&mut sig, 0x1000, &TypeHints::default());
+        assert_eq!(before, format!("{sig:?}"));
+    }
 }
