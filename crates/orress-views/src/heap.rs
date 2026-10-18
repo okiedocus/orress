@@ -14,12 +14,14 @@ use crate::DebugSession;
 
 /// Persistent UI state for the Heap tab.
 pub struct HeapView {
-    /// (pid, generation, mangled) the cached parse belongs to.
-    cache_key: Option<(u32, u64, bool)>,
+    /// (pid, generation, mangled, main_arena) the cached parse belongs to.
+    cache_key: Option<(u32, u64, bool, Option<u64>)>,
     heap: Option<Heap>,
     error: Option<String>,
     /// Whether to de-mangle free-list pointers (glibc >= 2.32 safe-linking).
     mangled: bool,
+    /// Optional `main_arena` address (hex), to show the fastbins/unsorted/small/large bins.
+    arena_input: String,
 }
 
 impl Default for HeapView {
@@ -29,8 +31,20 @@ impl Default for HeapView {
             heap: None,
             error: None,
             mangled: true,
+            arena_input: String::new(),
         }
     }
+}
+
+/// Parses a `0x…` / decimal hex address, if non-empty and valid.
+fn parse_addr(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .map_or_else(|| s.parse().ok(), |h| u64::from_str_radix(h, 16).ok())
 }
 
 pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
@@ -63,10 +77,23 @@ pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
             view.cache_key = None;
         }
     });
+    ui.horizontal(|ui| {
+        ui.label("main_arena");
+        ui.add(
+            egui::TextEdit::singleline(&mut view.arena_input)
+                .hint_text("0x… (optional, for fastbins/unsorted/small/large)")
+                .desired_width(260.0),
+        )
+        .on_hover_text(
+            "Paste the main_arena address (e.g. from GEF, or libc base + offset) to also show the \
+             arena bins. Chunks and tcache show without it.",
+        );
+    });
 
-    let key = (pid, generation, view.mangled);
+    let arena_addr = parse_addr(&view.arena_input);
+    let key = (pid, generation, view.mangled, arena_addr);
     if view.cache_key != Some(key) {
-        recompute(view, pid);
+        recompute(view, pid, arena_addr);
         view.cache_key = Some(key);
     }
 
@@ -152,7 +179,7 @@ pub fn heap_view(ui: &mut Ui, view: &mut HeapView, session: &mut DebugSession) {
 
 }
 
-fn recompute(view: &mut HeapView, pid: u32) {
+fn recompute(view: &mut HeapView, pid: u32, arena_addr: Option<u64>) {
     view.heap = None;
     view.error = None;
     let map = match orress_debug::memory_map(pid) {
@@ -176,6 +203,12 @@ fn recompute(view: &mut HeapView, pid: u32) {
             return;
         }
     };
-    // Arena bins need main_arena (libc-version dependent); located in a later tier.
-    view.heap = Some(orress_heap::parse(&bytes, region.base, None, view.mangled));
+    // When the user supplies main_arena, read it too so the arena bins show.
+    let arena = arena_addr.and_then(|addr| {
+        orress_debug::read_mem(pid, addr, 0x900)
+            .ok()
+            .map(|b| (b, addr))
+    });
+    let arena_ref = arena.as_ref().map(|(b, a)| (b.as_slice(), *a));
+    view.heap = Some(orress_heap::parse(&bytes, region.base, arena_ref, view.mangled));
 }
