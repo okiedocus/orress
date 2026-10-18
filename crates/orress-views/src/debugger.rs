@@ -220,7 +220,21 @@ pub fn debugger_panel(ui: &mut Ui, session: &mut DebugSession, doc: Option<&mut 
     let path = doc.path.clone();
     session.set_current_file(&path);
 
-    if !session.is_active_for(&path) {
+    // A run that ended (exited, stopped or failed) shows the start screen again, with how
+    // the last run ended, so the program can be debugged as many times as needed.
+    let ended = session
+        .active
+        .as_ref()
+        .filter(|a| a.path == path && !a.state.is_alive())
+        .map(|a| a.state.clone());
+    if !session.is_active_for(&path) || ended.is_some() {
+        if let Some(last) = &ended {
+            ui.horizontal(|ui| {
+                ui.label(muted("Last run:"));
+                status_line(ui, last);
+            });
+            ui.separator();
+        }
         start_screen(ui, session, doc);
         return;
     }
