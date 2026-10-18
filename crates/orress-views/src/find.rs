@@ -43,7 +43,7 @@ pub(crate) struct BarResult {
 /// Draws the bar. `explain` is shown in Explain Mode on its label.
 pub(crate) fn bar(ui: &mut Ui, input: &mut FindInput, hint: &str, explain: &str) -> BarResult {
     let mut result = BarResult::default();
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Find").explain("Find", explain);
         let edit = ui.add(
             egui::TextEdit::singleline(&mut input.query)

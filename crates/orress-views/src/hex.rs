@@ -910,6 +910,7 @@ fn context_menu(
     cx: &mut ViewCtx<'_>,
 ) {
     ui.set_min_width(220.0);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
     let what = if doc.selection.is_some() {
         "selection"
     } else {

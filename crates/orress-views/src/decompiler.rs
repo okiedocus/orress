@@ -397,6 +397,8 @@ fn panel(
                         }
                         response.context_menu(|ui| {
                             ui.set_min_width(220.0);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                             menu::copy_item(ui, "Copy the code", s.clone());
                             if ui.button("Open in editor").clicked() {
                                 requests.push(ViewRequest::OpenInEditor {
@@ -595,6 +597,7 @@ fn line_menu(
     text: &str,
 ) -> Option<MenuAction> {
     ui.set_min_width(220.0);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
     let mut action = None;
     let mut pick = |ui: &mut Ui, label: String, a: MenuAction| {
         if ui.button(label).clicked() {
@@ -616,21 +619,17 @@ fn line_menu(
     if let Some(addr) = line.addr {
         pick(
             ui,
-            format!("Show this line in the disassembly (0x{addr:x})"),
+            format!("Show in disassembly (0x{addr:x})"),
             MenuAction::GoTo(addr),
         );
-        pick(ui, "Comment this line…".into(), MenuAction::Comment(addr));
+        pick(ui, "Comment…".into(), MenuAction::Comment(addr));
     }
     if target != Some(func) {
         let name = code::describe_address(doc, program, func);
+        pick(ui, format!("Rename {name}…"), MenuAction::Rename(func));
         pick(
             ui,
-            format!("Rename this function ({name})…"),
-            MenuAction::Rename(func),
-        );
-        pick(
-            ui,
-            "Cross-references to this function".into(),
+            format!("Cross-references to {name}"),
             MenuAction::Xrefs(func),
         );
     }
@@ -654,7 +653,10 @@ fn line_menu(
         action = Some(MenuAction::Find);
         ui.close();
     }
-    menu::command(ui, requests, "view::Graph");
+    if ui.button("Show in graph").clicked() {
+        requests.push(ViewRequest::RunAction("view::Graph".into()));
+        ui.close();
+    }
     menu::views_and_commands(ui, requests);
     action
 }

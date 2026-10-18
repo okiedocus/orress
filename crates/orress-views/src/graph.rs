@@ -464,6 +464,7 @@ fn context_menu(
     cx: &mut ViewCtx<'_>,
 ) {
     ui.set_min_width(220.0);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
     let shortcut = |label: &str, keys: &str| egui::Button::new(label).shortcut_text(keys);
     if let Some(a) = target {
         let name = code::describe_address(doc, program, a);
