@@ -602,6 +602,11 @@ fn exploit_ctx(
         .ok()
         .and_then(|p| p.find_from(data, 0))
         .and_then(|off| info.offset_to_address(off as u64));
+    let sections = info
+        .sections
+        .iter()
+        .map(|s| (s.name.clone(), s.address))
+        .collect();
     orress_script::ExploitCtx {
         base: info.image_base,
         isa: program.isa,
@@ -610,6 +615,7 @@ fn exploit_ctx(
         plt,
         exec,
         binsh,
+        sections,
     }
 }
 

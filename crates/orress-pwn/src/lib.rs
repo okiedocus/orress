@@ -8,6 +8,7 @@ pub mod fmtstr;
 pub mod one_gadget;
 pub mod pack;
 pub mod ret2csu;
+pub mod ret2dlresolve;
 pub mod rop;
 pub mod srop;
 pub mod tube;
