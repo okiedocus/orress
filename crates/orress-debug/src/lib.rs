@@ -34,7 +34,7 @@ use std::thread::JoinHandle;
 
 pub use backend::{Backend, DebugError, Event, Module, StopReason, Unsupported};
 pub use mock::MockTarget;
-pub use procmem::{MemRegion, read_all_memory};
+pub use procmem::{MapRegion, MemRegion, memory_map, read_all_memory, read_mem};
 pub use regs::{FLAGS, FlagInfo, GP_NAMES, Registers, flag_set};
 
 /// Where the target is in its life cycle.
@@ -62,6 +62,8 @@ pub struct DebugState {
     pub prev_registers: Registers,
     pub modules: Vec<Module>,
     pub image_base: Option<u64>,
+    /// The target process id, once launched (for pid-based memory reads).
+    pub pid: Option<u32>,
     /// Breakpoint address -> enabled.
     pub breakpoints: std::collections::BTreeMap<u64, bool>,
     pub last_error: Option<String>,
@@ -82,6 +84,7 @@ impl DebugState {
             prev_registers: Registers::default(),
             modules: Vec::new(),
             image_base: None,
+            pid: None,
             breakpoints: std::collections::BTreeMap::new(),
             last_error: None,
             memory: None,
@@ -246,12 +249,14 @@ fn snapshot(
     let regs = backend.registers().unwrap_or_default();
     let modules = backend.modules();
     let image_base = backend.image_base();
+    let pid = backend.pid();
     let exited = reason.is_exit();
     publish(shared, notify, |s| {
         s.prev_registers = s.registers;
         s.registers = regs;
         s.modules = modules;
         s.image_base = image_base;
+        s.pid = pid;
         s.status = if exited {
             Status::Exited
         } else {

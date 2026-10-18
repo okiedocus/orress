@@ -74,6 +74,40 @@ impl DebugSession {
         self.active.as_ref().is_some_and(|a| a.state.is_alive())
     }
 
+    /// The current target state (refreshed each frame by [`DebugSession::refresh`]), for views that
+    /// read registers / memory map / pid, e.g. the heap visualizer.
+    pub fn state(&self) -> Option<&DebugState> {
+        self.active.as_ref().map(|a| &a.state)
+    }
+
+    /// The target pid while stopped (for pid-based memory reads via `orress_debug::read_mem`).
+    pub fn stopped_pid(&self) -> Option<u32> {
+        let a = self.active.as_ref()?;
+        if a.state.is_stopped() {
+            a.state.pid
+        } else {
+            None
+        }
+    }
+
+    /// The base address of the loaded libc (`libc.so.6`), from the module list.
+    pub fn libc_base(&self) -> Option<u64> {
+        let a = self.active.as_ref()?;
+        a.state
+            .modules
+            .iter()
+            .find(|m| {
+                let n = m.name.rsplit(['/', '\\']).next().unwrap_or(&m.name);
+                n.starts_with("libc.so") || n.starts_with("libc-") || n == "libc.so.6"
+            })
+            .map(|m| m.base)
+    }
+
+    /// The generation of the current snapshot, so a view caches until the next stop.
+    pub fn generation(&self) -> u64 {
+        self.active.as_ref().map_or(0, |a| a.state.generation)
+    }
+
     /// Makes `path` the file the path-less breakpoint accessors refer to.
     pub fn set_current_file(&mut self, path: &Path) {
         if self.current.as_deref() != Some(path) {
@@ -190,6 +224,7 @@ fn empty_state() -> DebugState {
         prev_registers: Registers::default(),
         modules: Vec::new(),
         image_base: None,
+        pid: None,
         breakpoints: std::collections::BTreeMap::new(),
         last_error: None,
         memory: None,

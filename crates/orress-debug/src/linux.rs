@@ -811,6 +811,10 @@ impl Backend for LinuxBackend {
         self.image_base
     }
 
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid.as_raw() as u32)
+    }
+
     fn kill(&mut self) -> Result<()> {
         if self.exited {
             return Ok(());

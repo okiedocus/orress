@@ -108,6 +108,10 @@ pub trait Backend {
     fn modules(&self) -> Vec<Module>;
     /// The base address the main executable was loaded at, once known.
     fn image_base(&self) -> Option<u64>;
+    /// The target process id, for pid-based memory reads (`None` for back ends without one).
+    fn pid(&self) -> Option<u32> {
+        None
+    }
     /// Terminates the target.
     fn kill(&mut self) -> Result<()>;
 }

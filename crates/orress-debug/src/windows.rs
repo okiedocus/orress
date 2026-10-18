@@ -688,6 +688,10 @@ impl Backend for WindowsBackend {
         self.image_base
     }
 
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
     fn kill(&mut self) -> Result<()> {
         if self.process.is_invalid() {
             return Ok(());
