@@ -36,6 +36,7 @@ orress-java = { path = "crates/orress-java" }
 orress-archive = { path = "crates/orress-archive" }
 orress-js = { path = "crates/orress-js" }
 orress-dex = { path = "crates/orress-dex" }
+orress-demangle = { path = "crates/orress-demangle" }
 orress-dotnet = { path = "crates/orress-dotnet" }
 orress-heap = { path = "crates/orress-heap" }
 orress-ai = { path = "crates/orress-ai" }

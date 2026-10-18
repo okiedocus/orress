@@ -6,6 +6,13 @@ All notable changes to ORRESS are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Symbol demangling** (`orress-demangle`): mangled linker names in the imports, exports
+  and function-symbol lists are now shown readable — Rust (legacy `_ZN…E` and v0 `_R…`),
+  C++ Itanium (`_Z…`) and MSVC (`?…`). Pure Rust, no C `__cxa_demangle`. GOT/PLT slot
+  names are kept raw so exploit `got()`/`plt()` lookups still match.
+
 ## [1.2.0] - 2026-10-18
 
 The binary-exploitation release: enough that a student of a Linux pwn/RE course (such as

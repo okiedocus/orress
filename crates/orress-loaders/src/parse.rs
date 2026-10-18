@@ -113,7 +113,10 @@ pub fn parse(data: &[u8]) -> BinaryInfo {
             .map(|i| Import {
                 library: String::from_utf8_lossy(i.library()).into_owned(),
                 name: match i.name() {
-                    NameOrOrdinal::Name(n) => String::from_utf8_lossy(n).into_owned(),
+                    NameOrOrdinal::Name(n) => {
+                        let raw = String::from_utf8_lossy(n);
+                        orress_demangle::demangle(&raw).unwrap_or_else(|| raw.into_owned())
+                    }
                     NameOrOrdinal::Ordinal(o) => format!("#{o}"),
                 },
             })
@@ -124,7 +127,10 @@ pub fn parse(data: &[u8]) -> BinaryInfo {
             .filter_map(Result::ok)
             .map(|e| Export {
                 name: match e.name() {
-                    NameOrOrdinal::Name(n) => String::from_utf8_lossy(n).into_owned(),
+                    NameOrOrdinal::Name(n) => {
+                        let raw = String::from_utf8_lossy(n);
+                        orress_demangle::demangle(&raw).unwrap_or_else(|| raw.into_owned())
+                    }
                     NameOrOrdinal::Ordinal(o) => format!("#{o}"),
                 },
                 // Forwarded exports (to another DLL) have no address in this file.

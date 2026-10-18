@@ -164,7 +164,7 @@ pub fn function_symbols(file: &object::File<'_>) -> Vec<NamedAddress> {
             let name = s.name().ok()?;
             (!name.is_empty()).then(|| NamedAddress {
                 address: s.address(),
-                name: name.to_owned(),
+                name: orress_demangle::demangle(name).unwrap_or_else(|| name.to_owned()),
             })
         })
         .collect();

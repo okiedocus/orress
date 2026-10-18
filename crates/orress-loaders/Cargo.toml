@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 orress-bytes.workspace = true
+orress-demangle.workspace = true
 memchr.workspace = true
 md-5.workspace = true
 object.workspace = true
