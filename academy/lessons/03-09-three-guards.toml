@@ -1,0 +1,154 @@
+id = "l3-three-guards"
+level = 3
+order = 9
+title = "Practice: three guards"
+summary = "Crackme #12 stacks three different debugger checks and hides the real password behind a decoy. Beat all of it at once by emulating the one function that matters."
+badge = "Three Down"
+reveal_source = "crackme12"
+goals = [
+    "recognise several anti-debug checks stacked in one program",
+    "tell apart an API check, a PEB check and a timing check",
+    "see how a decoy password punishes a careless debugger session",
+    "choose the approach that sidesteps every guard at once",
+    "recover the real password with the Emulator",
+]
+
+[[steps]]
+title = "Three guards at once"
+goal = "Know what makes this the capstone of the level."
+text = '''
+This is the practice lesson for the whole level. Crackme #12 does not play fair. It stacks **three different debugger checks**, and it adds a nasty twist: if any of them fires, it does not just say "detected". It silently decodes a **decoy** password instead of the real one, then always answers "Wrong". So a careless debugger session shows you a password that looks real and is not.
+
+Everything you have learned applies. But the clever move is not to fight all three guards one by one. It is to notice which single function actually computes the password, and run just that function in a place where no guard can see you: the **Emulator**.
+
+By the end you will have the real password and a feel for the general lesson: when a program defends itself, find the smallest piece that holds the secret and run that piece in isolation.
+'''
+
+[[steps]]
+title = "Open crackme #12 and triage it"
+goal = "Open the program and let Triage classify it."
+text = '''
+Open crackme #12 and open the **Triage** view.
+
+Like crackme #4, it imports a debugger-detection API, so Triage again classifies it as **"a challenge that resists debugging"** and lists **"Check for a debugger"** (T1622). That tells you to expect anti-debugging; it does not tell you there are three of them. For that, you read the code.
+'''
+instructions = [
+    "Click the button **Open crackme12** below.",
+    "Open the **Triage** view (**Ctrl+Shift+T**, or the View menu).",
+    "Read the classification and the **Check for a debugger** capability.",
+]
+spotlight = "view.Triage"
+check = { kind = "action", id = "view::Triage" }
+hints = [
+    "Open crackme #12 first, then Triage (Ctrl+Shift+T).",
+]
+success = '''
+Triage warns you there is anti-debugging. Now find out how much.
+'''
+
+[[steps]]
+title = "The three guards"
+goal = "Tell the three detection methods apart."
+text = '''
+In the Disassembly view, `main` calls three small functions one after another, just before it decodes the password. Each is one of the detection tricks from the last lesson:
+
+- **An API check.** It calls `IsDebuggerPresent` and asks Windows directly. Easy to spot: the call goes to an imported function by name.
+- **A PEB check.** It reads `gs:[0x60]` to get the Process Environment Block, then reads the debugger flag byte itself. There is **no API call** to cross-reference; just a `mov` from `gs:[0x60]` and a byte read.
+- **A timing check.** It reads a high-resolution counter before and after a short loop and compares the gap against a threshold. Under a debugger that is stepping, the gap is far too large.
+
+The program combines all three results with `or` into a single "was I watched?" flag, and checks that flag once near the end.
+
+Of the three, which one needs **no operating-system API call at all**, so it would not show up if you only looked at the imports?
+'''
+check = { kind = "choice", options = [
+    "The PEB check: it reads gs:[0x60] and the flag byte directly, calling nothing",
+    "The API check: IsDebuggerPresent is not really an API",
+    "The timing check: reading a counter never involves the operating system",
+], correct = 0, explain = [
+    "Right. Reading gs:[0x60] and the byte in the PEB is done with ordinary instructions, so there is no import to find. You have to spot it in the code.",
+    "The API check is exactly the one that does call an API (IsDebuggerPresent); that is how Triage flagged the program.",
+    "The timing check reads a counter through a system call (a high-resolution timer), so it does involve the operating system.",
+] }
+hints = [
+    "Which method reads a process structure with plain instructions instead of asking Windows?",
+    "gs:[0x60] is read directly; no import is involved.",
+]
+success = '''
+The PEB check hides from the imports, because it reads the flag itself. That is why reading the code matters: a program can check for a debugger without any tell-tale API call.
+'''
+
+[[steps]]
+title = "The decoy twist"
+goal = "Understand why a naive debugger session misleads you."
+text = '''
+Now the twist that makes guessing dangerous. Here is the shape of the end of `main`:
+
+```text
+  ... compute "watched" = guard1 OR guard2 OR guard3 ...
+  mov   dl, watched
+  call  decode_secret        ; decode_secret(out, decoy = watched)
+  call  check_password
+  test  bl, bl               ; bl = watched
+  jne   wrong                ; if watched, go to "Wrong"
+  test  al, al               ; al = password correct?
+  je    wrong
+  ...                        ; "Correct!"
+```
+
+Look at how the "watched" flag is used. It is passed to `decode_secret` as the **decoy** argument. So if any guard fired, the program decodes the **wrong** password and *also* takes the "Wrong" branch. If you run this under the debugger and read the decoded buffer in memory (as you did in lesson 4), you will read the **decoy**, not the real password, and never know the difference.
+
+That is why patching just the final `jne` is not enough here: by the time you reach it, `decode_secret` has already built the decoy. You would have to defeat all three guards *before* the decode, so that `watched` is 0 and the real password is produced.
+
+There is a much simpler way.
+'''
+
+[[steps]]
+title = "Beat them all with the Emulator"
+goal = "Recover the real password without triggering any guard."
+text = '''
+The guards only run in `main`. The function that actually builds the password, `decode_secret`, does not check anything: it just decodes. Its second argument decides which password to build, the real one (`decoy = 0`) or the decoy (`decoy = 1`).
+
+So run `decode_secret` on its own in the **Emulator**. No `main`, no guards, and you control the decoy argument. `decode_secret` is at `0x140001190`. The Emulator passes your **Input** as the first argument (the output buffer) and, only if you tick **pass input length**, the length as the second argument. Leave that box **unticked**, and the second argument is `0`: `decoy = 0`, the **real** password.
+
+Open the Emulator (**F7**), set the **Function address** to `0x140001190`, type sixteen characters as the **Input** (for example `AAAAAAAAAAAAAAAA`, so the scratch buffer is sixteen bytes long), leave **pass input length as arg1** unticked, and press **Run**. The **Scratch buffer after run** line shows the real password.
+
+Type the password it reveals.
+'''
+instructions = [
+    "Open the **Emulator** view (**F7**).",
+    "Set **Function address** to `0x140001190` (`decode_secret`).",
+    "Type `AAAAAAAAAAAAAAAA` (sixteen characters) as the **Input**.",
+    "Leave **pass input length as arg1** UNticked (this keeps the decoy flag 0), then press **Run**.",
+    "Read the password from **Scratch buffer after run** and type it.",
+]
+spotlight = "view.Emulator"
+check = { kind = "secret", sha256 = "8d6ad57d7a765a94ca635836b4450579e7cf96dbdad8f558de54fff5848d5962" }
+hints = [
+    "decode_secret is at 0x140001190; leave 'pass input length' off so the decoy flag is 0.",
+    "The real password is in the scratch buffer after the run, sixteen characters long.",
+    "It starts with `pa7ch`.",
+]
+success = '''
+There it is: the real password, with all three guards and the decoy bypassed. You did not disable a single check. You ran the one function that holds the secret, in a place no guard could reach. On Windows, start crackme #12 normally (not under the debugger) and type it to confirm.
+'''
+
+[[steps]]
+title = "Level 3 complete"
+goal = "Look back at what you can do now."
+text = '''
+That is the end of Dynamic Analysis. You can now:
+
+- **watch a program run** and know when it is safe to;
+- **drive the debugger**: start, breakpoints, stepping, registers, flags, stack and memory;
+- **read secrets at runtime** that are nowhere in the file;
+- **change a running program** by setting a register to steer a branch;
+- **patch** a program's bytes and save a copy that behaves the new way;
+- **emulate** a single function on a simulated CPU, on any operating system;
+- **beat anti-debugging**, including stacked guards and a decoy, by recognising the checks and either neutralising the branch or sidestepping it entirely.
+
+The deepest habit of this level is the one you just used: **know what you are looking for, find the smallest piece that holds it, and run that piece where nothing can interfere.** A debugger, a patch and an emulator are three ways to do that.
+
+Level 4 moves from cracking single programs to the CTF workflow: encodings, the Workbench, recognising crypto, and automatic solvers that build on the very emulator you used here.
+
+The source of crackme #12 appears below. Read the three guard functions and the decoy logic in `main`, and see how closely the code matches what you worked out.
+'''

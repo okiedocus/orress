@@ -1,0 +1,152 @@
+id = "l3-emulation"
+level = 3
+order = 7
+title = "Emulation"
+summary = "Run one function on a simulated CPU inside ORRESS. Feed crackme #2's check the password and read its yes/no answer, with no real execution and no operating system."
+badge = "CPU Whisperer"
+goals = [
+    "say what an emulator is and how it differs from a debugger",
+    "name the kind of code emulation is best for",
+    "run a single function in the Emulator with an input you choose",
+    "read the function's return value from RAX",
+    "know the emulator's limits",
+]
+
+[[steps]]
+title = "Running on a simulated CPU"
+goal = "Understand what an emulator does."
+text = '''
+A debugger runs the program on your **real** processor. An **emulator** runs it on a **simulated** one: a CPU built in software that reads the machine code and carries out each instruction itself. ORRESS has one built in. You met a simple version in Level 1, the CPU simulator; the emulator is the same idea for real x86-64 code from a file.
+
+Why fake the CPU when you could just run the program? Because an emulator can run **just a piece** of it. You point it at a single function, hand it some inputs, and read exactly what it produces, without launching the whole program, without its files or network, and without even needing the same operating system the program was built for.
+
+For understanding one routine, a decoder, a hash, a password check, that isolation is a superpower. You saw it already in the last-but-one lesson, where you ran crackme #11's builder on its own and read the decoded password out of the scratch buffer. This lesson looks at the tool itself.
+'''
+
+[[steps]]
+title = "Emulation next to debugging"
+goal = "Compare the two ways of running code."
+text = '''
+You now know both ways to run code. They complement each other:
+
+- **A debugger** runs the **whole program** on the **real** CPU and OS. It is the real thing: real input, real behaviour, real side effects. It needs the right operating system (Windows, for these crackmes), and anything the program does really happens.
+- **An emulator** runs **one piece** on a **simulated** CPU, inside ORRESS. Nothing it does reaches your computer: system calls are intercepted, not performed, so no file, network or registry is touched. It runs the same on any operating system, because it never asks the real one to do anything.
+
+Three things fall out of that:
+
+- **No environment needed.** Run a Windows function on Linux, or code for another setup, without that setup.
+- **No real side effects.** Running a snippet cannot harm your machine.
+- **Deterministic and fully visible.** Same inputs, same result, every time, and you can read every register and byte afterwards.
+
+The trade-off: the emulator models a **subset** of instructions and almost none of the operating system. A whole GUI app that makes thousands of OS calls will not "just run". Emulation shines on **self-contained computation**.
+'''
+
+[[steps]]
+title = "What is it good for?"
+goal = "Pick the emulator's sweet spot."
+text = '''
+Given those strengths and limits, what is the emulator best at?
+'''
+check = { kind = "choice", options = [
+    "Running one self-contained routine on inputs you choose, to see exactly what it computes",
+    "Making the whole program run faster than it normally would",
+    "Building the program from its source code",
+    "Replacing the debugger for a full-screen GUI application",
+], correct = 0, explain = [
+    "Right. Feed a decoder, hash or check function an input and read precisely what it returns or writes, with no environment to set up.",
+    "A simulated CPU is slower than the real one, not faster. Speed is not the point; isolation and control are.",
+    "The emulator runs existing machine code; it does not compile source. Compiling is the opposite direction.",
+    "A GUI app makes thousands of OS calls the emulator does not model. It is for self-contained routines, not whole interactive programs.",
+] }
+hints = [
+    "Think about the one-function-in-isolation strength, not whole-program execution.",
+    "Feed a routine an input and read its output, with no environment to set up.",
+]
+success = '''
+The emulator is for running a self-contained routine on chosen inputs and reading exactly what it produces. Now use it on crackme #2's password check.
+'''
+
+[[steps]]
+title = "Run the check"
+goal = "Emulate crackme #2's password check with the right password."
+text = '''
+Open crackme #2 and the **Emulator** view (**F7**). You will run just its password check, the function at `0x140001100`, and nothing else.
+
+The check is a Rust function that takes the password as a byte slice: a pointer and a length. The Emulator's **Run function** puts your input string into a scratch buffer and passes a pointer to it as the first argument (`rcx`). If you tick **pass input length as arg1**, it also passes the length (`rdx`). This check compares the length to 7 first (`cmp rdx, 7`), so you must pass the length, or it rejects everything as the wrong size.
+
+Set the **Function address** to `0x140001100`, type `R3v3rs3` as the **Input**, tick **pass input length as arg1**, and press **Run**. ORRESS shows the **return value in RAX** (as hex, unsigned and signed) and how many instructions it ran.
+
+The check returns a `bool`, which lives in the low byte of `RAX` (called `al`): `1` for a match, `0` for no match. With the correct password, what are the last two hex digits of RAX (its `al`)?
+'''
+instructions = [
+    "Open crackme #2 (button below) and the **Emulator** view (**F7**).",
+    "Set **Function address** to `0x140001100`.",
+    "Type `R3v3rs3` as the **Input**.",
+    "Tick **pass input length as arg1**, then press **Run**.",
+    "Read the RAX value and type its last two hex digits.",
+]
+spotlight = "view.Emulator"
+check = { kind = "answer", answers = ["1", "01", "0x01"], number = true }
+hints = [
+    "The return value is in RAX; the bool is its low byte, al.",
+    "A correct password makes the check return true.",
+    "true is 1, so RAX ends in 01.",
+]
+success = '''
+RAX ends in `01`: `al = 1`, the check returned `true`, all on a simulated CPU without running the program. (The upper bytes of RAX are leftovers; only `al` carries the `bool`.)
+'''
+
+[[steps]]
+title = "Try a wrong one"
+goal = "See the return value change with the input."
+text = '''
+Now change the **Input** to something wrong but still seven characters long, say `R3v3rsX`, keep **pass input length** ticked, and press **Run** again.
+
+This time RAX ends in `00`: `al = 0`, the check returned `false`. Change it back to `R3v3rs3` and `al` is `1` again. The emulator is deterministic, so the same input always gives the same answer, and you can sweep inputs as fast as you can type them.
+
+Try one more: untick **pass input length** and run `R3v3rs3` again. Now RAX is `0`, and the instruction count is tiny. Without the length in `rdx`, the very first check (`cmp rdx, 7`) fails and the function returns at once. That is a useful reminder: you have to set up a function's arguments the way its caller does, or you are testing something else.
+'''
+instructions = [
+    "Set **Input** to `R3v3rsX` (seven characters), keep **pass input length** ticked, press **Run**. RAX ends in `00`.",
+    "Set **Input** back to `R3v3rs3`, press **Run**. RAX ends in `01` again.",
+    "Untick **pass input length**, run `R3v3rs3`: RAX is `0` and far fewer instructions run.",
+]
+spotlight = "view.Emulator"
+check = { kind = "continue" }
+hints = [
+    "al is the last two hex digits of RAX: 01 for the right password, 00 for a wrong one.",
+    "Without the length argument, the length check fails first and the function returns immediately.",
+]
+success = '''
+You watched the return value track the input, and saw how a missing argument changes everything. Setting up arguments correctly is most of using the emulator well.
+'''
+
+[[steps]]
+title = "Workflow and limits"
+goal = "Know when to reach for the emulator and when not to."
+text = '''
+Put the emulator to work:
+
+1. **Confirm what a routine does.** Feed it an input, Run, and read **RAX** and the **Scratch buffer after run**. Returning a `bool`? Decoding bytes in place? The output tells you, without your reading every instruction.
+2. **Run code you otherwise could not.** Wrong operating system, missing libraries: none of it stops the emulator from running a self-contained function. This is the Linux and macOS path through much of this level.
+3. **It powers the solvers.** The same engine underlies the side-channel and symbolic solvers and the time-travel recorder you meet in later levels. Emulation is the foundation they build on.
+
+Know the edges too. The emulator models a **subset** of instructions and almost none of the OS, so heavy system calls, threads or GUI code will not run. When it cannot proceed, it stops and tells you, for example an unsupported instruction or a memory fault. (You will meet exactly that limit in the next lesson, where crackme #4's check uses an instruction the emulator does not yet handle, so you reach for patching instead.) Aim it at **self-contained computation** and it rarely lets you down.
+
+So: **debugger** for the whole program on a real CPU; **emulator** for one function on a simulated CPU. Reach for whichever fits the question.
+'''
+
+[[steps]]
+title = "What you can do now"
+goal = "Sum up emulation."
+text = '''
+You can now run a function in isolation:
+
+- open the **Emulator** (**F7**) and point it at a **function address**;
+- pass an **input** (as a pointer) and, when the function needs it, its **length**;
+- press **Run** and read the **return value in RAX** (its low byte `al` for a `bool`) and the **scratch buffer**;
+- sweep inputs quickly, because the simulated CPU is deterministic and has no side effects;
+- and run self-contained code on any operating system, while knowing the emulator's limits.
+
+That is three ways to run code under your control: the debugger, patching, and the emulator. In the last two lessons of this level you use them against programs that try to stop you: crackme #4, which notices the debugger, and crackme #12, which stacks three such tricks.
+'''

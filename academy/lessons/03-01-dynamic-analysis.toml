@@ -172,7 +172,7 @@ The Academy crackmes are Windows programs. That decides which tools you can use:
 - **Patching** works everywhere: ORRESS changes bytes in its copy of the file. To *run* the patched program you need Windows again.
 - **The emulator** works on **every** operating system. It does not ask Windows to run anything: ORRESS reads the machine code and carries out each instruction itself, on a simulated CPU, like the CPU simulator from Level 1 but for real x86-64 code.
 
-If you are on Windows, do every lesson as written. If you are on Linux or macOS, read the debugger lessons (they explain ideas you need), and use the **Emulator** whenever a lesson offers it. Lessons 4, 7, 8 and 9 show you an Emulator path to the same answer.
+If you are on Windows, do every lesson as written. If you are on Linux or macOS, read the debugger lessons (they explain ideas you need), and use the **Emulator** whenever a lesson offers it. Lessons 4, 7 and 9 show you an Emulator path to the same answer.
 
 You are on Linux and want to know what a crackme's check function returns for an input. Which tool do you use?
 '''

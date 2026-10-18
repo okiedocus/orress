@@ -1,0 +1,195 @@
+id = "l3-read-memory"
+level = 3
+order = 4
+title = "Reading memory at runtime"
+summary = "Crackme #11 builds its password in memory and never stores it in the file. Stop the program just after it does, and read it straight out of memory."
+badge = "Caught in the Act"
+reveal_source = "crackme11"
+goals = [
+    "recognise a password that exists only while the program runs",
+    "find the function that builds the secret and the function that checks it",
+    "break on the check and read a pointer argument out of a register",
+    "read bytes at that address in the Debugger's Memory pane",
+    "do the same without a debugger, using the Emulator",
+]
+
+[[steps]]
+title = "A password that is not in the file"
+goal = "Understand why static analysis cannot find this one."
+text = '''
+In Level 2 you found passwords by reading the file: a string, or seven `cmp` instructions each comparing one byte. That works when the password, or its bytes, are *in the file*.
+
+Crackme #11 is different. Its password is never stored, not as text and not as byte values. A function builds it in memory while the program runs, from scrambled bytes and a key that changes after every byte. The Strings view will not find it, and there is no list of `cmp` constants to read off, because the comparison is against a buffer the program just computed.
+
+This is exactly the case from lesson 1: the answer exists only at runtime. So you do what dynamic analysis is for. You let the program build the password, stop it the instant after it does, and **read the result out of memory**. You do not have to understand the scrambling at all; you let the program unscramble it for you and then look.
+
+The plan:
+
+1. Find the function that builds the secret, and the function that checks your input against it.
+2. Set a breakpoint on the check, so you stop right after the secret has been built.
+3. Read the secret from the memory the check is about to compare.
+'''
+
+[[steps]]
+title = "Open crackme #11"
+goal = "Open the program and confirm the password is not just lying in the file."
+text = '''
+Open crackme #11. ORRESS analyses it as usual.
+
+First, confirm the problem for yourself. Open the **Strings** view and look for anything that could be the password. You will find the title, the prompts and the messages (`Password: `, `Wrong password. Try again!`, `Correct! You read the secret while the program was running.`), but **no password**. It is not there to find.
+
+That is the point of this crackme. Reading the file is not enough; you have to watch it run.
+'''
+instructions = [
+    "Click the button **Open crackme11** below.",
+    "Open the **Strings** view (in the Project panel, or the View menu) and skim the strings.",
+    "Notice there is no password among them, only the messages the program prints.",
+]
+check = { kind = "open_crackme", name = "crackme11" }
+hints = ["The button is below the Do this box."]
+success = '''
+No password in the strings. It is built in memory at runtime, so the only way to see it is to catch the program in the act.
+'''
+
+[[steps]]
+title = "Find the two functions"
+goal = "Locate the builder and the checker."
+text = '''
+Open the **Disassembly** view and go to `main`. Two function calls matter here, one after the other:
+
+```text
+  lea   rbx, [rsp+0x20]        ; rbx points to a 12-byte buffer on the stack
+  mov   rcx, rbx
+  call  sub_140001100          ; builds the secret into that buffer
+  mov   rcx, rsi               ; your input (pointer)
+  mov   rdx, rdi               ; your input length
+  mov   r8,  rbx               ; the secret buffer (pointer)
+  call  sub_140001190          ; checks your input against the secret
+```
+
+The first call, `sub_140001100`, is the **builder**: it fills the buffer that `rbx` points to with the decoded password. The second, `sub_140001190`, is the **checker**: it compares your input against that buffer.
+
+Notice the three `mov`s just before the second call. They set up its arguments following the calling convention: `rcx` = your input, `rdx` = its length, and `r8` = the pointer to the secret buffer. That `r8` is the key: the moment the checker is entered, `r8` points at the decoded password.
+
+Rename the two functions so your work is saved: put the cursor on `sub_140001100`, press **N**, and call it `build_secret`; do the same for `sub_140001190`, calling it `check_password`.
+'''
+instructions = [
+    "Open the **Disassembly** view (**Ctrl+D**) and press **Go > Go to main**.",
+    "Find the two `call` lines near the middle of `main`, to `sub_140001100` and `sub_140001190`.",
+    "Click `sub_140001100`, press **N**, type `build_secret`, press Enter.",
+    "Click `sub_140001190`, press **N**, type `check_password`, press Enter.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "renamed" }
+hints = [
+    "N renames the function called on a `call` line.",
+    "The builder is sub_140001100; the checker is sub_140001190.",
+]
+success = '''
+Two named functions: `build_secret` fills the buffer, `check_password` reads it. The pointer to that buffer reaches `check_password` in `r8`.
+'''
+
+[[steps]]
+title = "Break on the checker"
+goal = "Stop the program right after the secret is built."
+text = '''
+You want to stop **after** `build_secret` has run (so the password exists in memory) but **before** the program throws it away. The first instruction of `check_password` is the perfect spot: by then the secret is built, and `r8` points straight at it.
+
+Set a breakpoint on the first instruction of `check_password` (file address `0x140001190`). Click the name in the `call check_password` line to jump into it, then press **F9** on its first instruction.
+
+Then start the program: open the Debugger panel (**F6**), press **Start debugging**, type any 12-character guess in the console (for example `aaaaaaaaaaaa`), and press **Enter**. The program builds the secret, then calls the checker and stops at your breakpoint.
+
+It does not matter that your guess is wrong. `build_secret` has already run, so the real password is sitting in memory whatever you typed.
+'''
+instructions = [
+    "In the Disassembly view, click `check_password` in the `call check_password` line to jump into it.",
+    "On its first instruction (`0x140001190`), press **F9** to set a breakpoint.",
+    "Press **F6**, then **Start debugging**.",
+    "In the console window, type `aaaaaaaaaaaa` (twelve letters) and press **Enter**.",
+    "The program stops at your breakpoint in `check_password`.",
+]
+spotlight = "view.Debugger"
+check = { kind = "continue" }
+hints = [
+    "Jump into the checker, then F9 on its first instruction.",
+    "Any input works: the secret is built before the checker is called.",
+]
+success = '''
+Stopped inside `check_password`, with the decoded password already in memory. Now `r8` points right at it.
+'''
+
+[[steps]]
+title = "Read the secret from memory"
+goal = "Read the decoded password out of the running program."
+text = '''
+The program is stopped and `r8` holds the address of the decoded password. Now read what is there.
+
+In the Debugger panel, open the **Memory** section (click its header to fold it open). Type `r8` into the address box and press **Show**. ORRESS reads 128 bytes starting at the address in `r8` and shows them as hex on the left and as characters on the right.
+
+Because you typed a register name, ORRESS reads the **runtime** address `r8` points to, in the real process. The first twelve characters on the right-hand side spell out the password. (The bytes after it are whatever else is on the stack; ignore them.)
+
+Read the first twelve characters. What is the password?
+'''
+instructions = [
+    "In the Debugger panel, fold open the **Memory** section.",
+    "Type `r8` in the address box and press **Show**.",
+    "Read the first twelve characters in the right-hand (character) column.",
+    "Type them and press **Check**.",
+]
+spotlight = "view.Debugger"
+check = { kind = "secret", sha256 = "94701504f8a2f2d3e895d739066e7442979d1cfe32df09ec7ffa449e6502dde0" }
+hints = [
+    "Type the register name r8 (not a number) so ORRESS reads the running process.",
+    "The password is twelve characters, in the character column on the right.",
+    "It starts with `w4tch`.",
+]
+success = '''
+You read the password straight out of the running program's memory, something no amount of reading the file could give you. The program unscrambled it for you; you just looked at the right place at the right time.
+
+Run it for real to prove it: start the program normally and type the password you found.
+'''
+
+[[steps]]
+title = "The same thing without a debugger"
+goal = "Get the password with the Emulator, on any operating system."
+text = '''
+There is a second way to the same answer, one that does not run the program on your real computer and works on Linux and macOS too: run `build_secret` on its own in the **Emulator**.
+
+`build_secret` takes one argument, a pointer to the buffer it fills. The Emulator's **Run function** puts your input string into a scratch buffer and passes a pointer to it as the first argument, then shows you that buffer after the run. So if you point the Emulator at `build_secret`, it fills the scratch buffer with the decoded password, and you read it from the result.
+
+Open the **Emulator** (**F7**), set the **Function address** to `0x140001100` (`build_secret`), type twelve characters as the **Input** (for example `aaaaaaaaaaaa`, so the scratch buffer is twelve bytes long), leave "pass input length" unticked, and press **Run**. The **Scratch buffer after run** line shows the decoded password, the same one you read in memory.
+'''
+instructions = [
+    "Open the **Emulator** view (**F7**).",
+    "Set **Function address** to `0x140001100` (or put the cursor on `build_secret` and click **use cursor's function**).",
+    "Type `aaaaaaaaaaaa` (twelve characters) as the **Input**.",
+    "Leave **pass input length as arg1** unticked and press **Run**.",
+    "Read the password from the **Scratch buffer after run** line.",
+]
+spotlight = "view.Emulator"
+check = { kind = "secret", sha256 = "94701504f8a2f2d3e895d739066e7442979d1cfe32df09ec7ffa449e6502dde0" }
+hints = [
+    "The function that builds the secret is at 0x140001100.",
+    "The scratch buffer after the run holds the twelve decoded bytes.",
+    "It is the same password you read in memory, starting with `w4tch`.",
+]
+success = '''
+Same password, no debugger, no real execution. The Emulator ran just the one function on a simulated CPU and handed you its output. This is the Linux and macOS path for this lesson, and a fast one on Windows too.
+'''
+
+[[steps]]
+title = "What you can do now"
+goal = "Sum up reading runtime memory."
+text = '''
+You recovered a password that is nowhere in the file:
+
+- you recognised that the secret is **built at runtime**, so static analysis cannot show it;
+- you found the **builder** and the **checker**, and saw the secret's pointer arrive in `r8`;
+- you set a breakpoint on the checker so you stopped with the secret in memory;
+- you read it from the **Memory** pane by the register name `r8`;
+- and you got the same answer from the **Emulator**, with no debugger at all.
+
+This pattern, let the program compute the secret and then read it, is one of the most useful in all of reverse engineering. Decoded strings, derived keys, decrypted buffers: you rarely need to understand the maths if you can stop the program just after it finishes and look.
+
+The source of crackme #11 appears below when you finish. Compare `decode_secret` with what you did: it XORs scrambled bytes with a changing key, exactly the kind of thing that is tedious to undo by hand and trivial to read at runtime.
+'''

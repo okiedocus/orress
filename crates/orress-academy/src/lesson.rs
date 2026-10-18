@@ -140,7 +140,7 @@ pub const LEVELS: [(&str, &str); 8] = [
     ),
     (
         "Dynamic analysis",
-        "Watching a program run, and the debugger. Lessons on breakpoints, patching, emulation and anti-debugging come in a later version.",
+        "Watching a program run: the debugger, breakpoints and stepping, reading and changing a running program, patching, emulation, and beating anti-debugging.",
     ),
     (
         "Intermediate CTF",

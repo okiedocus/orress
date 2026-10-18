@@ -1,0 +1,207 @@
+id = "l3-anti-debugging"
+level = 3
+order = 8
+title = "Beating anti-debugging"
+summary = "Crackme #4 notices the debugger and refuses to confirm the password. Recognise the check, find the branch it controls, and patch past it."
+badge = "Unshackled"
+reveal_source = "crackme04"
+goals = [
+    "name the common ways a program detects a debugger",
+    "state the weakness every anti-debug check shares",
+    "use the Triage report to recognise anti-debugging",
+    "find the anti-debug branch and the password",
+    "patch past the check so you can analyse freely",
+]
+
+[[steps]]
+title = "Programs that fight back"
+goal = "Know what anti-debugging is and why programs do it."
+text = '''
+Some programs notice when they are being debugged and **change what they do** to throw you off: they exit, take a fake path, quietly corrupt the answer, or just do nothing interesting. Crackmes do it to frustrate you; malware does it to **hide its real behaviour** from an analyst.
+
+This is **anti-debugging**, the last core dynamic-analysis skill in this level. The tricks look intimidating, but they share one fatal weakness, and once you see it, most of them fall in a single patch.
+
+The job is always the same two steps: **recognise** the check, then **neutralise** it.
+
+In this lesson you take crackme #4. Run it under the debugger and it always says "Debugger detected", even when your password is right. You will find the check, find the password, and patch past the trap so you can analyse it like any other program.
+'''
+
+[[steps]]
+title = "How a program spots a debugger"
+goal = "Learn the common detection tricks."
+text = '''
+The usual ways a program detects a debugger:
+
+- **API calls.** On Windows, `IsDebuggerPresent`, `CheckRemoteDebuggerPresent`, or `NtQueryInformationProcess` (asking for the debug port). The program just asks the operating system.
+- **Reading the PEB directly.** The debugger flag lives in a structure the process owns (the Process Environment Block). A program can read the `BeingDebugged` byte there itself, with **no API call** to spot.
+- **ptrace.** On Linux, a process tries to `ptrace` itself; if that fails, something else is already tracing it.
+- **Timing.** Read the clock before and after a short block of code. Under a debugger that is single-stepping, the gap is huge, which gives the debugger away.
+- **Breakpoint scanning.** The program checks its own code for the `0xCC` byte that a software breakpoint leaves behind.
+
+Different mechanisms, same end: each produces a yes/no "is a debugger here?" that the program then acts on.
+'''
+
+[[steps]]
+title = "The weakness they share"
+goal = "See what makes every anti-debug check beatable."
+text = '''
+However a check detects the debugger, the result is useless to the program unless it *does something* with it. What is the weakness every anti-debug trick shares?
+'''
+check = { kind = "choice", options = [
+    "It ends in a branch: find the jump the check controls and you can force the program onto the 'no debugger' path",
+    "Anti-debug checks are mathematically unbreakable once compiled",
+    "They force you to give up debugging and read the code only statically",
+    "They only work on Linux, so switching to Windows avoids them",
+], correct = 0, explain = [
+    "Right. A yes/no answer is worthless unless the program branches on it, and a branch is something you can see, understand and patch, exactly as you did in the patching lesson.",
+    "They are just code. A detection feeds a branch, and a branch can be changed.",
+    "Static reading helps you find the check, but you do not have to give up running the program: you neutralise the branch.",
+    "The same idea (API, PEB, ptrace, timing) exists on every system. The platform is not the escape; the branch is.",
+] }
+hints = [
+    "The detection result is useless unless the program acts on it. How does code act on a yes/no?",
+    "Every check is followed by a conditional jump you can see and change.",
+]
+success = '''
+Detection is pointless without a branch to act on it, and a branch is something you can see, understand and change. Recognise the check, find its branch, patch it.
+'''
+
+[[steps]]
+title = "Triage flags it"
+goal = "Use the Triage report to recognise the anti-debugging."
+text = '''
+ORRESS helps you recognise anti-debugging before you even run the program. Open crackme #4 and open the **Triage** view.
+
+Because the program imports a debugger-detection API, Triage classifies it as **"a challenge that resists debugging"**, lists the capability **"Check for a debugger"** tagged with MITRE ATT&CK **T1622 (Debugger Evasion)**, and its graded hints tell you to **locate the anti-debug check (IsDebuggerPresent, a PEB flag, ptrace, or a timing check) and see what branch it controls**.
+
+That is your recognise step done for you. From there you cross-reference the flagged API to find the exact check in the code.
+'''
+instructions = [
+    "Click the button **Open crackme04** below.",
+    "Open the **Triage** view (press **Ctrl+Shift+T**, or the View menu, or the command palette and type `Triage`).",
+    "Read the classification and the capability **Check for a debugger** (T1622). Reveal the Challenge hints.",
+]
+spotlight = "view.Triage"
+check = { kind = "action", id = "view::Triage" }
+hints = [
+    "Open crackme #4 first, then the Triage view.",
+    "Ctrl+Shift+T opens Triage; the capability list shows 'Check for a debugger'.",
+]
+success = '''
+Triage recognised the anti-debugging for you and pointed at the next move: find the check and the branch it controls.
+'''
+
+[[steps]]
+title = "Find the password"
+goal = "Read the password out of the file."
+text = '''
+Before dealing with the trap, notice something: crackme #4's password is an ordinary fixed string, stored in the file. The whole challenge here is the anti-debug guard, not the password.
+
+Open the **Strings** view and look through it. Among the messages you will find one string that is clearly a password rather than a prompt or a message. (Its text is a small joke about the very thing this crackme does.)
+
+Type the password you find.
+'''
+instructions = [
+    "Open the **Strings** view (in the Project panel, or the View menu).",
+    "Find the string that looks like a password, not a prompt or a message.",
+    "Type it and press **Check**.",
+]
+spotlight = "tree.Strings"
+check = { kind = "secret", sha256 = "08bc13d00e75ae06edbecfa55cf222074e61d8200a7b1e8d103eae69030c8e32" }
+hints = [
+    "It is in the Strings view, stored in the file like any other string.",
+    "It reads like a boast about there being no debugger.",
+    "It starts with `n0_`.",
+]
+success = '''
+You have the password already, straight from the file. So why is this a dynamic-analysis lesson? Because typing it under the debugger still fails. The next step shows the trap.
+'''
+
+[[steps]]
+title = "Watch it detect you"
+goal = "See the guard refuse a correct password under the debugger."
+text = '''
+Here is the trap. Look at how `main` uses two results, one after the other:
+
+```text
+  call  check_password       ; result (right password?) saved in bl
+  call  debugger_present      ; is a debugger attached? -> al
+  test  al, al
+  jne   loc_140001304         ; if a debugger is attached, jump to "Debugger detected"
+  test  bl, bl
+  je    loc_140001312         ; else, if the password was wrong, jump to "Wrong"
+  ...                         ; else "Correct!"
+```
+
+The password is checked first, but its result does not get a chance to matter: if a debugger is attached, the `jne` jumps straight to "Debugger detected" and the program exits. So under the debugger, even the right password gives nothing.
+
+You run crackme #4 under the debugger and type the correct password `n0_debugger_here`. What happens?
+'''
+check = { kind = "choice", options = [
+    "It prints 'Debugger detected. Nice try.' and exits, because the debugger check runs before the password result is used",
+    "It prints 'Correct!', because the password is right",
+    "It crashes, because the password is right but a debugger is attached",
+], correct = 0, explain = [
+    "Right. debugger_present() returns true under the debugger, the jne fires, and the program bails out before the correct password can lead anywhere.",
+    "The password is right, but the anti-debug branch jumps away to 'Debugger detected' before that matters.",
+    "Nothing crashes; the program deliberately takes the 'detected' path and exits normally with code 1.",
+] }
+hints = [
+    "Which branch runs first, the password one or the debugger one?",
+    "The debugger check jumps away before the password result is ever used.",
+]
+success = '''
+Under the debugger the guard wins every time. To analyse this program *with* the debugger, you have to take the guard out. That is patch-and-go.
+'''
+
+[[steps]]
+title = "Patch past the guard"
+goal = "Remove the anti-debug branch."
+text = '''
+You know the move from the patching lesson. The guard is one conditional jump:
+
+```text
+  140001290  test  al, al
+  140001292  jne   loc_140001304     ; jump to "Debugger detected"
+```
+
+If the `jne` never fires, the program falls through to the password check no matter what `debugger_present()` returned. So **NOP** the `jne` at `0x140001292`. Then, whether or not a debugger is attached, the correct password reaches "Correct!".
+
+Open the **Disassembly** view, go to `main`, put the cursor on the `jne loc_140001304` line at `0x140001292`, and click **NOP** in the patch bar. The `jne` is a short, two-byte jump. How many bytes does the patch bar say you patched?
+'''
+instructions = [
+    "Open the **Disassembly** view (**Ctrl+D**) and press **Go > Go to main**.",
+    "Find the anti-debug branch: `test al, al` then `jne loc_140001304` at `0x140001292`.",
+    "Click the `jne loc_140001304` line, then click **NOP** in the patch bar.",
+    "Read the orange byte count and type the number.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["2"], number = true }
+hints = [
+    "The anti-debug jump is at 0x140001292.",
+    "A short conditional jump is two bytes.",
+    "The answer is 2.",
+]
+success = '''
+`2 bytes patched` and the guard is gone. Save a patched copy (**Save patched file...**) and, on Windows, run it under the debugger and type `n0_debugger_here`: this time it prints `Correct! You slipped past the anti-debugging.` You can now debug it freely.
+'''
+
+[[steps]]
+title = "An anti-debugging playbook"
+goal = "Have a repeatable plan for anti-debugging."
+text = '''
+A plan that works on most anti-debugging:
+
+1. **Recognise it.** Triage flags it, or the program behaves differently under a debugger than when run normally.
+2. **Locate the check.** Cross-reference the anti-debug APIs, or look for a PEB read, a timing pair, or a `ptrace` call near a suspicious branch.
+3. **Read the branch.** Work out which way is "detected" and which is "clean".
+4. **Neutralise it.** Usually one of:
+   - **Patch and go.** NOP or invert the branch so it always takes the clean path (what you just did).
+   - **Change a register.** Stop after the check and set its result to "no debugger", as in the changing-registers lesson.
+   - **Emulate** the routine you care about, where there is no real debugger and timing is deterministic. (Not every function emulates: crackme #4's password check uses an instruction the emulator does not yet handle, which is why you patched here instead.)
+5. **Verify.** Confirm the program behaves the same debugged as not.
+
+Watch for **stacked** checks: a program can carry several, so find them all. That is exactly the next lesson, where crackme #12 stacks three different debugger checks and hides the real password behind them. Anti-debugging is a speed bump, not a wall.
+
+The source of crackme #4 appears below. Compare `debugger_present` and the branch in `main` with what you found and patched.
+'''

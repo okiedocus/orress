@@ -1,0 +1,242 @@
+# Level 3: dynamic analysis. The debugger, breakpoints and stepping, reading and changing
+# a running program, patching, emulation, and anti-debugging.
+
+[[term]]
+term = "debugger"
+aliases = ["debuggers"]
+short = "A tool that runs another program under its control, so you can stop it, look at it, and change it while it runs."
+text = '''
+A **debugger** runs a program and keeps control of it. It can stop the program at an
+instruction you choose, show you the real registers and memory at that moment, run one
+instruction at a time, and even change a value before letting the program go on.
+
+Think of debugging your own Rust code: you set a breakpoint on a line, run, and execution
+pauses so you can inspect your variables. A debugger for a compiled program is the same
+idea, one *instruction* instead of one source line, and it works on a program you have no
+source code for.
+
+A debugger runs the program for real, on your computer, so you only debug code you trust.
+'''
+see = ["debuggee", "breakpoint", "stepping", "emulator", "dynamic analysis"]
+
+[[term]]
+term = "debuggee"
+aliases = ["debuggees"]
+short = "The program that is being run under a debugger."
+text = '''
+The **debuggee** is the program the debugger is controlling. On Windows, the debugger asks
+the operating system to start the program in a special way, and from then on Windows reports
+what happens in the debuggee to the debugger and freezes it whenever the debugger asks.
+'''
+see = ["debugger", "process"]
+
+[[term]]
+term = "breakpoint"
+aliases = ["breakpoints"]
+short = "A stop point you place on an instruction: the program pauses there every time it is about to run it."
+text = '''
+A **breakpoint** tells the debugger to stop the program at a particular instruction. Each
+time the program is about to run that instruction, it pauses and hands control back to you,
+so you can read registers and memory, step forward, or change something.
+
+In ORRESS you set a breakpoint in the Disassembly view with **F9**, or by clicking the
+gutter at the left of the line. A red dot marks it, and it also appears in the Breakpoints
+list. Breakpoints are saved with the program, so they are still there next time you open it.
+'''
+see = ["debugger", "software breakpoint", "stepping"]
+
+[[term]]
+term = "software breakpoint"
+aliases = ["software breakpoints", "int3", "0xCC"]
+short = "The usual kind of breakpoint: the debugger writes a special byte (0xCC) over the instruction to make the CPU stop there."
+text = '''
+A **software breakpoint** is how a debugger usually stops a program. It temporarily replaces
+the first byte of the target instruction with `0xCC` (the `int3` instruction). When the CPU
+reaches it, it traps into the debugger, which puts the original byte back, shows you the
+stopped program, and restores the breakpoint when you continue.
+
+This leaves a trace: a program can scan its own code for `0xCC` bytes to notice it is being
+debugged. That is one of the anti-debugging tricks.
+'''
+see = ["breakpoint", "anti-debugging"]
+
+[[term]]
+term = "runtime address"
+aliases = ["runtime addresses", "runtime base"]
+short = "The address an instruction or byte actually has while the program runs, after the operating system has loaded it somewhere."
+text = '''
+A **runtime address** is where something really is in memory while the program runs. Because
+of ASLR, the operating system loads the program at a random base each time, so runtime
+addresses change from run to run.
+
+ORRESS shows file addresses (as if the program were at its image base), but the debugger's
+registers and status line show runtime addresses. To convert:
+
+```text
+runtime address = file address - image base + runtime base
+```
+
+The runtime base always ends in several zeros, so the **last four hex digits** of a runtime
+address match the file address. That is the quickest way to tell which instruction you are on.
+'''
+see = ["file address", "ASLR", "image base"]
+
+[[term]]
+term = "file address"
+aliases = ["file addresses", "file virtual address"]
+short = "The address ORRESS shows for an instruction or byte, as if the program were loaded at its image base."
+text = '''
+A **file address** is the address ORRESS uses throughout the Disassembly, Hex and other
+views: the address the program *would* have if it were loaded at its image base, the preferred
+load address in its header. File addresses are stable, so you can note one down and it still
+means the same instruction next time.
+
+The debugger lets you work in file addresses (breakpoints and the Breakpoints list use them)
+even though the running program is somewhere else, because it translates to runtime addresses
+for you.
+'''
+see = ["runtime address", "image base", "ASLR"]
+
+[[term]]
+term = "exit code"
+aliases = ["exit codes", "return code", "status code"]
+short = "A number a program hands to the operating system when it ends: 0 for success, non-zero for a problem."
+text = '''
+Every program ends with an **exit code**, a number for whoever started it. By convention `0`
+means success and anything else means something went wrong; the program decides what each
+non-zero number means. The Academy crackmes use `0` for the correct password and `1` for a
+wrong one.
+
+In Rust, returning normally from `main` gives exit code `0`, and `std::process::exit(1)` ends
+with `1`. ORRESS shows the exit code in the Debugger's "Last run:" line, so you can tell
+success from failure even if the program's console window closed too fast to read.
+
+(A program that crashes ends with a large, strange code instead, such as `0xC0000005`, which
+is Windows' code for an access violation.)
+'''
+see = ["process", "debugger"]
+
+[[term]]
+term = "emulator"
+aliases = ["emulators"]
+short = "A CPU built in software that runs machine code itself, instead of running it on your real processor."
+text = '''
+An **emulator** is a simulated CPU: a program that reads machine code and carries out each
+instruction itself. ORRESS has one built in. Because the code runs on the simulated CPU and
+not your real one, you can run just a single function, feed it inputs, and read exactly what
+it computes, without launching the whole program and without even needing the same operating
+system it was built for.
+
+Emulation has no real side effects (system calls are intercepted, not performed), so it
+cannot harm your computer. Its limit is that it models only a subset of instructions and
+almost none of the operating system, so it is best for self-contained computation: a decoder,
+a hash, a password check.
+'''
+see = ["emulation", "debugger"]
+
+[[term]]
+term = "emulation"
+aliases = ["emulate", "emulated", "emulating"]
+short = "Running code on a simulated CPU instead of a real one."
+text = '''
+**Emulation** is running machine code on a CPU that is simulated in software rather than on
+a real processor. It lets you run one piece of a program in isolation, on any operating
+system, with full visibility and no real side effects. In ORRESS the Emulator view runs a
+chosen function with arguments you provide.
+'''
+see = ["emulator"]
+
+[[term]]
+term = "patch"
+aliases = ["patching", "patched", "patches"]
+short = "Changing a program's instructions (its bytes) so it behaves differently; a permanent change, unlike setting a register for one run."
+text = '''
+To **patch** a program is to change its actual instructions. Most patches are tiny: remove
+one instruction, or flip one jump. The three common moves are to **NOP** an instruction (skip
+it), **invert** a conditional jump (take the other branch), or make a jump **always** happen.
+
+In ORRESS the patch bar in the Disassembly view does these. Patches are kept as an overlay
+with your work; the file on disk is never changed. To run the modified program you "Save
+patched file", which writes a copy with the changes baked in. Patching makes permanent what
+changing a register does for a single run.
+'''
+see = ["NOP", "conditional jump", "debugger"]
+
+[[term]]
+term = "anti-debugging"
+aliases = ["anti-debug", "anti-debug check", "anti-debug checks", "debugger detection"]
+short = "Tricks a program uses to notice it is being debugged and change what it does to throw off an analyst."
+text = '''
+**Anti-debugging** is any trick a program uses to detect a debugger and then misbehave:
+exit, take a fake path, decode a decoy, or hide its real work. Crackmes use it to frustrate
+you; malware uses it to evade analysis.
+
+The common detections are an API call (`IsDebuggerPresent`), reading the PEB's debugger flag
+directly, a `ptrace` self-check on Linux, a timing check, or scanning for `0xCC` breakpoint
+bytes. They all share one weakness: the result feeds a branch. Find that branch and you can
+patch past it, or sidestep the whole thing by emulating the part you care about.
+'''
+see = ["IsDebuggerPresent", "PEB", "timing check", "patch", "emulation"]
+
+[[term]]
+term = "IsDebuggerPresent"
+short = "A Windows API a program can call to ask whether it is being debugged."
+text = '''
+`IsDebuggerPresent` is a Windows function that returns non-zero when the calling program is
+being debugged. It is the simplest anti-debugging check, and the easiest to spot: it appears
+in the import table, so ORRESS's Triage flags it and you can cross-reference it to the exact
+branch it controls. Under the hood it just reads the same PEB flag you could read yourself.
+'''
+see = ["anti-debugging", "PEB"]
+
+[[term]]
+term = "PEB"
+aliases = ["Process Environment Block", "BeingDebugged"]
+short = "A Windows structure describing the running process; it holds a flag that says whether a debugger is attached."
+text = '''
+The **PEB** (Process Environment Block) is a structure Windows keeps for every running
+process, with details about how it was started and the modules it loaded. It contains a
+`BeingDebugged` byte that is set when a debugger is attached.
+
+A program can read this byte itself, with ordinary instructions (`mov rax, gs:[0x60]` to get
+the PEB, then the flag byte), so there is no API call to spot. That makes a PEB check harder
+to notice than `IsDebuggerPresent`: you have to see it in the code.
+'''
+see = ["anti-debugging", "IsDebuggerPresent", "process"]
+
+[[term]]
+term = "timing check"
+aliases = ["timing checks"]
+short = "An anti-debug trick that times a short piece of code; a debugger that is stepping makes it take far too long."
+text = '''
+A **timing check** reads a high-resolution clock before and after a short block of code and
+compares the gap against a threshold. Run normally, the block takes microseconds. Under a
+debugger where someone is single-stepping, it takes seconds, so a large gap betrays the
+debugger. Like every anti-debug trick, the result just feeds a branch you can defeat.
+'''
+see = ["anti-debugging"]
+
+[[term]]
+term = "decoy"
+aliases = ["decoy password", "decoys"]
+short = "A fake answer a program shows on purpose to mislead an analyst who triggered a protection."
+text = '''
+A **decoy** is a wrong answer a program produces deliberately, to punish careless analysis.
+Crackme #12, for example, decodes a decoy password instead of the real one if any of its
+anti-debug guards fire, and still answers "Wrong". If you read the decoded buffer under the
+debugger without beating the guards first, you read the decoy and never know it. The lesson:
+check *where* a value comes from, and prefer a method (like emulating the real decode
+function) that no guard can taint.
+'''
+see = ["anti-debugging", "emulation"]
+
+[[term]]
+term = "gutter"
+aliases = ["margin"]
+short = "The narrow strip at the far left of the Disassembly view, where breakpoint dots and the current-instruction marker appear."
+text = '''
+The **gutter** is the thin column on the left edge of the Disassembly view, left of the
+address. Clicking it toggles a breakpoint on that line (a red dot). While debugging, a green
+triangle in the gutter marks the instruction that will run next.
+'''
+see = ["breakpoint", "debugger"]

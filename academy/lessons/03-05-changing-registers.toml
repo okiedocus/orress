@@ -1,0 +1,176 @@
+id = "l3-change-register"
+level = 3
+order = 5
+title = "Changing a running program"
+summary = "A debugger does not only watch. Change one register while the program is stopped and send it down the other branch, so a wrong password is accepted."
+badge = "Puppeteer"
+goals = [
+    "find the branch that decides correct from wrong",
+    "stop on the test that controls that branch",
+    "read the check's result out of a register",
+    "change that register and send the program the other way",
+    "explain why this does not reveal the password",
+]
+
+[[steps]]
+title = "Not just watching"
+goal = "See the fourth thing a debugger can do."
+text = '''
+So far you have used the debugger to *look*: stop, read registers, read memory, step. But in lesson 2 you saw a debugger can do a fourth thing: **change** the program's state while it is stopped, then let it run on with the new value.
+
+Here is why that is powerful. Every password check ends the same way: it computes a yes/no answer, puts it in a register, and the program **branches** on it, one way to "Correct!", the other to "Wrong". If you change that register while the program is stopped, you change which way it goes, whatever the real answer was.
+
+In this lesson you take crackme #2, type a **wrong** password, stop the program just as the check hands back its "no", flip that "no" to a "yes" in a register, and watch the program print "Correct!".
+
+This is a temporary change: it only affects this one run, in memory. It does not change the file, and it does not tell you the password. But it proves you understand exactly where the decision is made, and it is the first step toward patching, which makes the change permanent.
+'''
+
+[[steps]]
+title = "Open crackme #2"
+goal = "Open the program."
+text = '''
+Open crackme #2 again. You know it well by now: `main` reads your input, calls the password check, and branches on the result.
+'''
+instructions = [
+    "Click the button **Open crackme02** below (or bring its tab to the front).",
+]
+check = { kind = "open_crackme", name = "crackme02" }
+hints = ["The button is below the Do this box."]
+
+[[steps]]
+title = "Find the decision"
+goal = "Locate the test and branch that follow the check."
+text = '''
+Open the **Disassembly** view and go to `main`. Find the call to the password check and look at the two instructions right after it:
+
+```text
+  140001413  call  check_password
+  140001418  test  al, al            ; is the result zero (false)?
+  14000141a  je    loc_140001487     ; if zero, jump to "Wrong"
+```
+
+This is the decision. The check returns its yes/no answer in `al` (the low byte of `rax`, the return-value register from Level 1). `test al, al` sets the zero flag `ZF` if `al` is zero. Then `je` ("jump if equal", which means jump if `ZF` is set) sends the program to the "Wrong password" block when the answer was zero (false). If `al` is not zero, the `je` is not taken and the program falls through into the "Correct!" block.
+
+So: `al = 0` means wrong, `al` non-zero means correct. To make the program accept a wrong password, you need `al` to be non-zero at the moment `test al, al` runs.
+
+Set a breakpoint on the `test al, al` line at `0x140001418`, so you stop *after* the check has returned but *before* the test reads `al`.
+'''
+instructions = [
+    "Open the **Disassembly** view (**Ctrl+D**) and press **Go > Go to main**.",
+    "Find the line `call check_password` (or `call sub_140001100`) at `0x140001413`.",
+    "On the next line, `test al, al` at `0x140001418`, press **F9** to set a breakpoint.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "continue" }
+hints = [
+    "The call is at 0x140001413; the test right after it is at 0x140001418.",
+    "Set the breakpoint on `test al, al`, not on the call.",
+]
+success = '''
+Your breakpoint is on `test al, al`. You will stop there with the check's answer already sitting in `al`, just before the program reads it.
+'''
+
+[[steps]]
+title = "Stop with the wrong answer"
+goal = "Run to the test with a wrong password and read al."
+text = '''
+Now run it with a **wrong** password. Open the Debugger panel (**F6**), press **Start debugging**, type `hello` in the console and press **Enter**.
+
+The check runs, decides `hello` is wrong, and returns `0` in `al`. The program reaches your breakpoint on `test al, al` and stops.
+
+Look at `rax` in the register list. Its low byte (the last two hex digits) is the `al` the test is about to read. Because the password was wrong, it is `00`: the whole `rax` value ends in `00`.
+
+If you let the program continue now, `test al, al` would set `ZF`, the `je` would be taken, and you would get "Wrong password". But you are going to change that first.
+'''
+instructions = [
+    "Press **F6**, then **Start debugging**.",
+    "In the console, type `hello` and press **Enter**.",
+    "When the program stops at `test al, al`, look at `rax`. Its last two hex digits are `00`.",
+]
+spotlight = "view.Debugger"
+check = { kind = "continue" }
+hints = [
+    "If the program does not stop, make sure you typed into the console window.",
+    "al is the low byte of rax; it is 00 because `hello` is wrong.",
+]
+success = '''
+Stopped on the test, with `al = 0`: the check's honest "no". Now flip it.
+'''
+
+[[steps]]
+title = "Flip the answer"
+goal = "Change rax so the program takes the other branch."
+text = '''
+Change `al` to non-zero before the test reads it. The debugger's **set** row does this: pick a register, type a value, apply.
+
+In the Debugger panel, find the **set** row (below the registers). Choose `rax` from the dropdown, type `1` in the value box (values there are hex), and press **Set**. `rax` now ends in `...01`, so `al` is `1`.
+
+Then press **Continue**. This time `test al, al` sees `al = 1`, so `ZF` is **not** set, the `je` is **not** taken, and the program falls into the "Correct!" block. It prints `Correct! You read the password byte by byte.` and ends normally.
+
+Check the **Last run:** line in the Debugger panel. A normal end means exit code 0. What is the exit code after you forced the branch?
+'''
+instructions = [
+    "In the **set** row, choose `rax`, type `1`, and press **Set**. `rax` now ends in `01`.",
+    "Press **Continue**.",
+    "Read the **Last run:** line at the top of the Debugger panel and type the exit code.",
+]
+spotlight = "view.Debugger"
+check = { kind = "answer", answers = ["0"], number = true }
+hints = [
+    "Set rax to 1, then Continue.",
+    "A wrong password normally gives exit code 1; forcing the correct branch gives 0.",
+    "The answer is 0.",
+]
+success = '''
+Exit code `0`, the "success" code, from a password that was wrong. You changed one register and the program took the other branch. If you were watching the console, you saw `Correct!` for the word `hello`.
+'''
+
+[[steps]]
+title = "What you did, and did not, do"
+goal = "Understand the limits of forcing a branch."
+text = '''
+Be clear about what just happened, because it matters.
+
+You did **not** find or reveal the password. You never learned what crackme #2 actually wanted. What you did was override the *decision*: you forced the program past the check regardless of the answer.
+
+That tells you two things are different problems:
+
+- **"What is the password?"** is answered by reading the check (Level 1 and 2) or by reading the secret in memory (last lesson).
+- **"Make the program accept me"** is answered by forcing the branch, as you just did.
+
+For a crackme the second is often enough. For understanding a program, the first is what you want. Real work usually needs both: you force a branch to get *past* a check you do not care about (a licence test, an anti-debug trap) so you can reach the part you *do* care about.
+
+Your change was also **temporary**. It lived in the registers of one run and vanished when the program ended. Start it again and the check is back to normal. To make the change stick, so the program behaves this way every time, without a debugger, you change its bytes instead of its registers. That is **patching**, the next lesson.
+
+A wrong password `hello` is accepted by crackme #2 after you force the branch. Does that mean `hello` is the real password?
+'''
+check = { kind = "choice", options = [
+    "No: you overrode the decision, you did not discover the password",
+    "Yes: the program said Correct, so hello must be the password",
+    "Yes, but only while the debugger is attached",
+], correct = 0, explain = [
+    "Right. You changed the register the branch reads, so the program skipped past its own answer. The real password is unchanged.",
+    "The program printed Correct only because you set al to 1 by hand; the check itself still said no.",
+    "The real password does not depend on the debugger. You forced the branch; you did not change what the password is.",
+] }
+hints = ["Did you read the password anywhere, or did you change the result of the check?"]
+success = '''
+Exactly. Forcing a branch gets you past a check; it does not reveal what the check wanted. Keep the two apart and you will always know what you have actually learned.
+'''
+
+[[steps]]
+title = "What you can do now"
+goal = "Sum up changing a running program."
+text = '''
+You can now steer a running program:
+
+- find the **test and branch** that make a decision (`test al, al` then `je`);
+- stop on the test, with the check's answer already in a register;
+- read that answer in `al` (the low byte of `rax`);
+- change the register with the **set** row and **Continue**;
+- and send the program down the branch you want.
+
+You also know the honest limit: this overrides the decision for one run; it does not reveal the secret and it does not survive restarting the program.
+
+Next you make such a change permanent. Instead of editing a register each run, you edit the program's instructions once and save a copy that always behaves the new way. That is patching.
+'''

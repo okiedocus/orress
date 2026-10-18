@@ -1,0 +1,203 @@
+id = "l3-breakpoints"
+level = 3
+order = 3
+title = "Breakpoints and stepping"
+summary = "Stop the program exactly where you want with a breakpoint, then run it one instruction at a time and watch the registers change."
+badge = "One Step at a Time"
+goals = [
+    "set and remove a breakpoint in the Disassembly view",
+    "run a program until it reaches your breakpoint",
+    "read a function's argument out of a register when it stops",
+    "step one instruction at a time and see which registers changed",
+    "say what Step does when it reaches a call",
+]
+
+[[steps]]
+title = "Stopping where it matters"
+goal = "See why you set your own breakpoints."
+text = '''
+In the last lesson the program stopped at `main` and then ran to the end. Stopping at the very first instruction of `main` is rarely where the interesting code is. The password check, the decision, the decoded data: all of that is deeper in.
+
+A **breakpoint** is a stop point *you* choose. You put one on an instruction, and every time the program is about to run that instruction, it stops and hands control back to you. Then you can read the registers and memory, step forward, or change something.
+
+You already know the idea from a debugger for your own Rust code: you click in the margin next to a line, run, and execution pauses there so you can inspect your variables. A breakpoint in machine code is the same thing, one instruction instead of one source line.
+
+In this lesson you set a breakpoint on crackme #2's password check, run the program until it stops there, read the length of the password you typed straight out of a register, and then step through the first few instructions one at a time. By the end you can stop the program anywhere and walk it forward by hand.
+'''
+
+[[steps]]
+title = "Open crackme #2"
+goal = "Open the program you will step through."
+text = '''
+Open crackme #2 again, the byte-by-byte password check from Level 1. If it is still open, the button brings its tab to the front.
+
+Remember its shape from Level 1: `main` reads a line of input and calls a function that checks the password. In Level 1 you found that function at the file address `0x140001100` and (in lesson 01-12) renamed it `check_password`. If you renamed it, ORRESS still shows that name now, because names are saved per program. If you did not, the function is called `sub_140001100`.
+'''
+instructions = [
+    "Click the button **Open crackme02** below.",
+    "Wait until the **Project** panel on the left shows `crackme02.exe` with its views.",
+]
+check = { kind = "open_crackme", name = "crackme02" }
+hints = ["The button is below the Do this box."]
+
+[[steps]]
+title = "Set a breakpoint"
+goal = "Put a breakpoint on the password check."
+text = '''
+You set breakpoints in the **Disassembly** view, on the instruction you want to stop at. You will stop on the **first instruction of the password check**, so you can read its arguments the moment it is entered.
+
+There are two ways to set a breakpoint on the instruction under the cursor:
+
+- press **F9**, or
+- click in the narrow **gutter** on the very left of the line (the empty strip left of the address).
+
+Either one adds a red dot in the gutter and a line in the **Breakpoints** list in the Debugger panel. Do the same again to remove it. Breakpoints are saved with the program, so they are still there the next time you open it.
+
+Set a breakpoint on the first instruction of the password check now. The fastest way there: in `main`, click the name in the `call check_password` line (or `call sub_140001100`) to jump into the function, which lands you on its first instruction, `sub rsp, 0x38`.
+'''
+instructions = [
+    "Open the **Disassembly** view (press **Ctrl+D**, or **Go > Go to main**).",
+    "In `main`, find the line `call check_password` (or `call sub_140001100`) and click the name to jump into the function.",
+    "The cursor is now on the first instruction, `sub rsp, 0x38`, at `0x140001100`.",
+    "Press **F9**. A red dot appears in the gutter, and `check_password` (or `sub_140001100`) appears in the Breakpoints list.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "continue" }
+hints = [
+    "Ctrl+D opens the Disassembly view; Go > Go to main jumps to main.",
+    "Click the function name inside the `call` line to go into it, then press F9 on the first instruction.",
+    "The red dot in the left gutter means the breakpoint is set.",
+]
+success = '''
+The red dot marks your breakpoint. The program will now stop the moment it is about to run the first instruction of the password check.
+'''
+
+[[steps]]
+title = "Run to the breakpoint"
+goal = "Start the program and stop at your breakpoint."
+text = '''
+Now run the program. Open the **Debugger** panel (**F6**) and press **Start debugging**.
+
+Because you set a breakpoint yourself, ORRESS does **not** add one at `main` this time: it stops at the first breakpoint your program reaches. But the password check only runs *after* the program has read your input. So:
+
+1. The program starts and prints `Password: ` in its console window. The status line says *running...*: it is waiting for you to type.
+2. You type a password in the console and press **Enter**.
+3. The program calls the password check, hits your breakpoint, and stops at its first instruction.
+
+Type the correct password `R3v3rs3` (the one you recovered in Level 1). When the program stops, the status line shows a runtime address, and `rip` holds the same address. Its last four hex digits tell you which instruction you are on.
+
+What are the last four hex digits of the address where it stopped?
+'''
+instructions = [
+    "Press **F6** to open the Debugger panel, then click **Start debugging**.",
+    "Click the console window of `crackme02.exe` (check the taskbar if you cannot see it).",
+    "Type `R3v3rs3` and press **Enter**.",
+    "Back in ORRESS, read the status line (or `rip`) and type the last four hex digits.",
+]
+spotlight = "view.Debugger"
+check = { kind = "answer", answers = ["1100", "0x1100", "1100h"] }
+hints = [
+    "The password check's first instruction is at file address 0x140001100.",
+    "ASLR changes the high digits of the runtime address but never the last four.",
+    "The answer is 1100. (If you are not on Windows, type it to continue.)",
+]
+success = '''
+`1100`: you stopped at the first instruction of the password check, exactly where you put the breakpoint. You decided where the program would stop, and it did.
+'''
+
+[[steps]]
+title = "Read an argument from a register"
+goal = "Read the password length out of a register."
+text = '''
+You are stopped at the very first instruction of the password check, before it has run. That is the perfect moment to read its **arguments**, because the calling convention from Level 1 says exactly where they are: the first argument is in `rcx`, the second in `rdx`.
+
+The check is a Rust function that takes the password as a byte slice. A slice is a pointer *and* a length, so the password's address arrives in `rcx` and its length in `rdx`. Look at the register list in the Debugger panel and find `rdx`.
+
+You typed `R3v3rs3`, which is seven characters. So `rdx` should hold `7`. Hover over the value to read it in decimal if you like.
+
+What number is in `rdx`?
+'''
+instructions = [
+    "In the Debugger panel, find `rdx` in the register list.",
+    "Read its value (hover over it to see it in decimal).",
+    "Type the number and press **Check**.",
+]
+spotlight = "view.Debugger"
+check = { kind = "answer", answers = ["7"], number = true }
+hints = [
+    "You typed a seven-character password.",
+    "The second argument (the slice length) is in rdx. The value is 7.",
+]
+success = '''
+`rdx` holds `7`, the length of the password you typed. You read a live argument straight out of a register, before the function did anything with it. The very next instruction, `cmp rdx, 7`, compares this against the expected length.
+'''
+
+[[steps]]
+title = "Step one instruction"
+goal = "Run the program forward one instruction at a time."
+text = '''
+Now move forward by hand. Press **Step** (the button next to Continue, or **F10** / **F11** with the panel focused). The program runs **exactly one instruction** and stops again.
+
+Watch two things each time you step:
+
+- **`rip`** changes to the address of the next instruction. Its last four digits follow the Disassembly view: `1100`, then `1104`, and so on. In the Disassembly view, the green line and the green triangle in the gutter move with it: that line is always what runs **next**.
+- A register or flag that the last instruction changed is shown in a **different colour** for one step, so you can see at a glance what it did. After `sub rsp, 0x38`, `rsp` is highlighted; after `cmp rdx, 7`, the flags change (`ZF` turns on, because `7 - 7 = 0`).
+
+Step a few times and watch the green line walk down the function and the registers light up as they change. There is no rush: while the program is stopped, nothing moves until you step or continue.
+'''
+instructions = [
+    "In the Debugger panel, click **Step** once. Watch `rip` and the green line in the Disassembly view move to the next instruction.",
+    "Click **Step** a few more times, each time looking for the register or flag shown in a different colour.",
+    "When you are done looking, press **Continue** to let the program run to the end.",
+]
+spotlight = "view.Debugger"
+check = { kind = "continue" }
+hints = [
+    "Step is next to Continue. Each click runs one instruction.",
+    "The highlighted register or flag is the one the last instruction changed.",
+]
+success = '''
+You walked the program forward one instruction at a time and watched each one take effect. Continue let the rest run: with the correct password, it printed `Correct!` and ended with exit code 0.
+'''
+
+[[steps]]
+title = "What Step does at a call"
+goal = "Know what one step does when the next instruction is a call."
+text = '''
+One thing to be clear about. In this machine-code debugger, **Step always runs exactly one instruction**. (The buttons **F10** and **F11** both do this; in debuggers for source code they mean "step over" and "step into", but there are no source lines here, only instructions.)
+
+So what happens when the instruction you are about to step is a `call`? A `call` *is* one instruction, and running it jumps into the called function. So after you step over a `call`, you are stopped at the **first instruction of that function**.
+
+You are stopped on a `call check_password` instruction and you press **Step** once. Where does the program stop?
+'''
+check = { kind = "choice", options = [
+    "Inside check_password, at its first instruction",
+    "After the call, having run the whole of check_password in one step",
+    "It does not move: Step cannot cross a call",
+], correct = 0, explain = [
+    "Right. A call is a single instruction that jumps into the function, so one step lands you on the function's first instruction.",
+    "That would be 'step over' in a source debugger. This machine-code debugger runs one instruction, and a call enters the function.",
+    "Step always runs the next instruction, whatever it is, including a call.",
+] }
+hints = [
+    "A call is one instruction, and it jumps somewhere.",
+    "Running a call takes you into the function it calls.",
+]
+success = '''
+One step runs the `call`, which jumps into the function, so you land on its first instruction. If you want to stay in the caller instead, set a breakpoint on the instruction *after* the call and press Continue: the called function runs at full speed and you stop when it returns.
+'''
+
+[[steps]]
+title = "What you can do now"
+goal = "Sum up breakpoints and stepping."
+text = '''
+You can now stop a program wherever you want and walk it forward:
+
+- **set** a breakpoint with **F9** or a click in the gutter, and see it in the Breakpoints list;
+- **run** to it with **Start debugging** and **Continue**, giving input in the console when the program asks;
+- **read** a function's arguments from the registers the moment it is entered (`rcx`, `rdx`, ... from the calling convention);
+- **step** one instruction at a time, following `rip` and the green line, and watch the changed register or flag light up;
+- know that **Step runs a `call`** by entering the function.
+
+This is the core loop of dynamic analysis: stop at the right place, look, step, look again. In the next lesson you use it for something you cannot do with static analysis at all: read a password that the program builds in memory and never stores in the file.
+'''

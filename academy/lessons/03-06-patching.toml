@@ -1,0 +1,158 @@
+id = "l3-patching"
+level = 3
+order = 6
+title = "Patching"
+summary = "Change the program's bytes, not just a register. Remove the branch that rejects a wrong password, and save a patched copy that behaves that way every time."
+badge = "Byte Surgeon"
+goals = [
+    "name the three common one-instruction patches",
+    "choose the right patch for a given branch",
+    "apply a patch from the Disassembly view",
+    "know that the original file is never changed",
+    "save a patched copy to run it",
+]
+
+[[steps]]
+title = "Making the change permanent"
+goal = "See how patching differs from changing a register."
+text = '''
+Last lesson you forced crackme #2 to accept a wrong password by setting a register. But that change lived for one run only. Start the program again and the check is back.
+
+**Patching** makes the change permanent. Instead of editing a register each run, you edit the program's **instructions** once. A patched program behaves the new way every time, on its own, with no debugger attached.
+
+The edits are tiny. You are not rewriting the program; you change one jump, or delete one instruction. The skill is choosing *which* instruction and *which* change.
+
+Patching has two common uses:
+
+- **Beat a check for good.** Make the password check always pass, or delete an anti-debug trap, and save a copy that just works.
+- **Test an idea fast.** "If I remove this call, does the crash go away?" Change one instruction, run it, and see. It is often quicker than reasoning it out.
+
+In this lesson you remove the branch that sends a wrong password to "Wrong", so crackme #2 prints "Correct!" for anything, and you save that as a patched `.exe`.
+'''
+
+[[steps]]
+title = "Open crackme #2"
+goal = "Open the program to patch."
+text = '''
+Open crackme #2 once more. If you set a breakpoint on it earlier, that is fine; it does not affect patching.
+'''
+instructions = [
+    "Click the button **Open crackme02** below (or bring its tab to the front).",
+]
+check = { kind = "open_crackme", name = "crackme02" }
+hints = ["The button is below the Do this box."]
+
+[[steps]]
+title = "Three ways to change one instruction"
+goal = "Learn the three standard patches."
+text = '''
+Almost all patching comes down to three moves, each on a single instruction. ORRESS offers exactly these three in its patch bar:
+
+- **NOP it.** Replace the instruction with `NOP`s (no-operation: an instruction that does nothing). The instruction is **skipped entirely**, as if it were not there. Good for deleting a check or a call you do not want.
+- **Invert jump.** Flip a conditional jump's condition: `je` becomes `jne`, `jl` becomes `jge`, and so on. The program now takes the **other** branch at that fork.
+- **Always jump.** Turn a conditional jump into an unconditional one, so it is **always taken**, whatever was compared before.
+
+A one- or two-byte change, a completely different outcome. The whole art is reading the branch first, then picking the move that does what you want.
+'''
+
+[[steps]]
+title = "Pick the patch"
+goal = "Choose the right move for crackme #2's branch."
+text = '''
+Recall crackme #2's decision from the last lesson:
+
+```text
+  140001418  test  al, al
+  14000141a  je    loc_140001487     ; if the check said "no" (al == 0), jump to "Wrong"
+  14000141c  ...                     ; otherwise fall through to "Correct!"
+```
+
+The conditional jump `je` goes to the **"Wrong"** block when the answer is zero. If the jump is *not* taken, the program falls through into **"Correct!"**.
+
+You do not know the password, and you want **every** input to reach "Correct!". Which of the three patches, applied to the `je` at `0x14000141a`, does that?
+'''
+check = { kind = "choice", options = [
+    "NOP the je, so the jump to \"Wrong\" never happens and every input falls through to \"Correct!\"",
+    "Always jump, so the je is always taken and every input lands on \"Wrong\"",
+    "Invert it to jne, so only wrong inputs reach \"Correct!\" and the real password now fails",
+], correct = 0, explain = [
+    "Right. The je is the only thing sending inputs to \"Wrong\". Remove it with NOPs and every input falls straight through to \"Correct!\".",
+    "This je jumps to \"Wrong\", so making it always jump would send every input to \"Wrong\" instead.",
+    "Inverting swaps which inputs pass: jne would jump to \"Wrong\" only for a non-zero (correct) result, so the real password would fail and wrong ones would pass.",
+] }
+hints = [
+    "Where does this je go: to \"Correct!\" or to \"Wrong\"?",
+    "It goes to \"Wrong\". If it never happens, what does every input do instead?",
+    "NOP removes the jump, so everything falls through to \"Correct!\".",
+]
+success = '''
+NOP the `je`. It is the one thing diverting inputs to "Wrong"; take it out and they all fall through to "Correct!". (Careful with direction: because this `je` goes to the *wrong* block, "Always jump" would do the opposite of what you want.)
+'''
+
+[[steps]]
+title = "Apply the patch"
+goal = "NOP the branch in the Disassembly view."
+text = '''
+ORRESS patches right where you read, in the **Disassembly** view. Put the cursor on an instruction and a **patch bar** appears at the top of the view, showing the moves available for that instruction (`NOP`, `Invert jump`, `Always jump`, and `Undo patch` once you have changed it), with a running count of how many bytes you have patched.
+
+Open the Disassembly view, go to `main`, put the cursor on the `je loc_140001487` line at `0x14000141a`, and click **NOP** in the patch bar. The instruction's bytes change to `NOP`s immediately, and the line now reads `nop`. (Turn on **Bytes** in the toolbar if you want to watch the bytes themselves change.)
+
+The `je` is a short, two-byte instruction, so NOP-ing it changes two bytes. What does the patch bar's byte count say after you apply it?
+'''
+instructions = [
+    "Open the **Disassembly** view (**Ctrl+D**) and press **Go > Go to main**.",
+    "Click the line `je loc_140001487` at `0x14000141a` to put the cursor on it.",
+    "In the patch bar at the top, click **NOP**. The line changes to `nop`.",
+    "Read the orange byte count in the patch bar and type the number.",
+]
+spotlight = "view.Disassembly"
+check = { kind = "answer", answers = ["2"], number = true }
+hints = [
+    "The patch bar appears for the instruction under the cursor.",
+    "A short conditional jump is two bytes long.",
+    "The answer is 2 (`2 bytes patched`).",
+]
+success = '''
+`2 bytes patched`. The branch to "Wrong" is gone. In this copy, every input now falls through to "Correct!".
+'''
+
+[[steps]]
+title = "The original file is safe"
+goal = "Know that patches are an overlay, and how to run them."
+text = '''
+Here is the reassuring part. ORRESS keeps your patches as an **overlay** stored with your work; it does **not** change the file on disk. You can patch boldly, try an idea, and undo it. The patch bar has **Undo patch** for one instruction, and **File > Patch > Revert All Patches** removes every patch at once.
+
+Because the patch is only an overlay, it does not run until you deliberately write it out. To actually run the modified program, you save a copy with the patches baked in: click **Save patched file...** in the patch bar (or **File > Patch > Save Patched File**). ORRESS writes a new `.exe`, leaving the original untouched.
+
+Save a patched copy now. A file dialog opens suggesting `crackme02.patched.exe`; choose a location you can find and save it. If you are on Windows, run that patched copy and type any password at all. It prints `Correct!`, because you removed the branch that could ever say otherwise.
+'''
+instructions = [
+    "In the patch bar, click **Save patched file...**.",
+    "In the dialog, keep the suggested name (or pick your own) and save it somewhere you can find.",
+    "On Windows: run the saved copy and type any password. It accepts it.",
+]
+check = { kind = "continue" }
+hints = [
+    "The button is in the patch bar, next to the byte count; or use File > Patch > Save Patched File.",
+    "The original crackme02.exe is never changed; only the copy carries the patch.",
+]
+success = '''
+You saved a patched `.exe` that accepts any password, while the original stayed exactly as it was. That overlay-and-export model is what lets you experiment without fear.
+'''
+
+[[steps]]
+title = "Patch responsibly"
+goal = "Keep patching clean and honest."
+text = '''
+A few habits keep patching useful instead of mysterious:
+
+1. **Smallest scope.** Patch the one jump or call that matters, not a whole block. The more you change, the more you can break.
+2. **Know why it works.** A patch that passes a check without your understanding *why* is a guess. Read the branch first, as you did, then patch to confirm it.
+3. **Verify.** Save the patched copy and run or step it. Did it actually behave as intended, with no surprises?
+4. **Lean on reversibility.** Because patches are an overlay, try bold experiments and revert the ones that do not pan out.
+5. **Stay safe with untrusted code.** A patched malware sample is still malware. Only run such things in the isolated lab from Level 6.
+
+You have gone from reading a program, to steering one run of it, to rewriting its behaviour for good, one instruction at a time. NOP, invert, always-jump, save: that is binary patching.
+
+Next: running a single function on a simulated CPU, so you can feed it inputs and read what it computes, without running the program at all.
+'''
