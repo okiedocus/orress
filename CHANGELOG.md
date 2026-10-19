@@ -8,6 +8,9 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **RISC-V decompilation**: the decompiler now lifts RV64I + M (and the common compressed
+  forms), so RISC-V functions become readable Rust-style pseudocode — not just disassembly.
+  Floating-point, CSR and uncommon compressed instructions are kept as inline `asm!`.
 - **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
   MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
   Hand-rolled pure-Rust decoder (R/I/J formats). Byte order is picked from the ELF; the

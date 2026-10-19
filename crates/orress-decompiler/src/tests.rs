@@ -55,6 +55,73 @@ fn decompiled(funcs: &[(&str, &[u8])], index: usize) -> String {
     out.text()
 }
 
+/// A tiny RISC-V (RV64) program with one function `f` at BASE.
+fn riscv_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "RISC-V (64-bit)".into(),
+        bits: Some(64),
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("riscv")
+}
+
+#[test]
+fn riscv_lifts_add_and_branch() {
+    // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b
+    let add: &[u8] = &[0x33, 0x05, 0xb5, 0x00, 0x67, 0x80, 0x00, 0x00];
+    let p = riscv_program(add);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+
+    // f(a, b): branch on a < b, return one of two constants.
+    //   bge a0,a1, +0xc ; li a0,1 ; ret ; li a0,2 ; ret
+    let branch: &[u8] = &[
+        0x63, 0xd6, 0xb5, 0x00, // bge a0,a1,+0xc
+        0x13, 0x05, 0x10, 0x00, // addi a0,zero,1  (li a0,1)
+        0x67, 0x80, 0x00, 0x00, // ret
+        0x13, 0x05, 0x20, 0x00, // addi a0,zero,2  (li a0,2)
+        0x67, 0x80, 0x00, 0x00, // ret
+    ];
+    let p = riscv_program(branch);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(text.contains("if "), "recovered an if:\n{text}");
+    assert!(
+        text.contains('1') && text.contains('2'),
+        "both arms:\n{text}"
+    );
+}
+
 fn ported(funcs: &[(&str, &[u8])], index: usize) -> String {
     let p = program(funcs);
     port(&p, BASE + index as u64 * 0x40, Convention::SysV).expect("ports")

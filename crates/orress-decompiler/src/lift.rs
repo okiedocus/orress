@@ -19,6 +19,9 @@ pub enum Convention {
     SysV,
     /// ARM64 (AAPCS64): x0–x7, result in x0 (which the IR models as register 0, like rax).
     Aarch64,
+    /// RISC-V: a0–a7, result in a0 (the IR models a0 as register 0). See riscv.rs for the
+    /// x-register -> IR register numbering.
+    Riscv,
 }
 
 impl Convention {
@@ -27,6 +30,8 @@ impl Convention {
             Self::Win64 => &[RCX, RDX, R8, R9],
             Self::SysV => &[RDI, RSI, RDX, RCX, R8, R9],
             Self::Aarch64 => &[0, 1, 2, 3, 4, 5, 6, 7],
+            // a0..a7 map to IR registers 0..7 (see riscv.rs).
+            Self::Riscv => &[0, 1, 2, 3, 4, 5, 6, 7],
         }
     }
 
@@ -39,6 +44,8 @@ impl Convention {
             Self::Aarch64 => &[
                 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             ],
+            // RISC-V caller-saved: ra (8) and t0..t6 (9..15) in riscv.rs numbering.
+            Self::Riscv => &[8, 9, 10, 11, 12, 13, 14, 15],
         }
     }
 }
