@@ -308,11 +308,53 @@ fn decode_base(w: u32, address: u64) -> Option<Insn> {
                 Flow::Next,
             )
         }
+        // Atomics (A extension): `lr`/`sc` and the `amo*` read-modify-writes.
+        0x2f => return decode_amo(address, rd, rs1, rs2, f3, f7),
         // OP-FP and fused multiply-add.
         0x53 => return decode_fp(address, rd, rs1, rs2, f3, f7),
         0x43 | 0x47 | 0x4b | 0x4f => return Some(decode_fma(w, address, opcode, rd, rs1, rs2)),
         _ => return None,
     })
+}
+
+/// The A (atomic) extension (opcode 0x2f): `lr.w`/`sc.w` and the `amo*.w`/`amo*.d` read-modify-writes.
+/// `funct5` (the top 5 bits of funct7) selects the operation; `aq`/`rl` ordering bits are not shown.
+fn decode_amo(address: u64, rd: u32, rs1: u32, rs2: u32, f3: u32, f7: u32) -> Option<Insn> {
+    let suffix = match f3 {
+        2 => "w",
+        3 => "d",
+        _ => return None,
+    };
+    let base = match f7 >> 2 {
+        0x00 => "amoadd",
+        0x01 => "amoswap",
+        0x02 => "lr",
+        0x03 => "sc",
+        0x04 => "amoxor",
+        0x08 => "amoor",
+        0x0c => "amoand",
+        0x10 => "amomin",
+        0x14 => "amomax",
+        0x18 => "amominu",
+        0x1c => "amomaxu",
+        _ => return None,
+    };
+    let m = format!("{base}.{suffix}");
+    // `lr` has no source register; everything else is `rd, rs2, (rs1)`.
+    let operands = if base == "lr" {
+        vec![reg(rd), punct(","), punct("("), reg(rs1), punct(")")]
+    } else {
+        vec![
+            reg(rd),
+            punct(","),
+            reg(rs2),
+            punct(","),
+            punct("("),
+            reg(rs1),
+            punct(")"),
+        ]
+    };
+    Some(insn(address, 4, &m, operands, Flow::Next))
 }
 
 /// A `.s`/`.d` suffix from the OP-FP format field (`fmt`, bits 26:25).
@@ -1135,6 +1177,25 @@ mod tests {
     #[test]
     fn rejects_truncated() {
         assert!(decode(&[0x13], 0, true).is_none());
+    }
+
+    #[test]
+    fn atomics() {
+        fn ops(i: &Insn) -> Vec<String> {
+            i.operands.iter().map(|t| t.text.clone()).collect()
+        }
+        // amoadd.w a0, a1, (a2)  -> funct5=0, f3=2 : 0x00B6252F
+        let add = d(0x00B6_252F, 0);
+        assert_eq!(add.mnemonic, "amoadd.w");
+        assert_eq!(ops(&add), ["a0", ",", "a1", ",", "(", "a2", ")"]);
+        // lr.w a0, (a1)  -> funct5=2, no source register : 0x1005A52F
+        let lr = d(0x1005_A52F, 0);
+        assert_eq!(lr.mnemonic, "lr.w");
+        assert_eq!(ops(&lr), ["a0", ",", "(", "a1", ")"]);
+        // sc.w a0, a1, (a2)  -> funct5=3 : 0x18B6252F
+        assert_eq!(d(0x18B6_252F, 0).mnemonic, "sc.w");
+        // amoswap.d a0, a1, (a2) -> funct5=1, f3=3 : 0x08B6352F
+        assert_eq!(d(0x08B6_352F, 0).mnemonic, "amoswap.d");
     }
 
     #[test]

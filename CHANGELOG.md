@@ -91,7 +91,9 @@ All notable changes to ORRESS are documented here. The format follows
   fused multiply-adds — with the float-register ABI names (`fa0`, `ft0`, …), where these
   previously showed as raw data. CSR instructions now show the full `csrrw rd, csr, rs1` /
   `csrrwi rd, csr, zimm` form (the CSR number and the immediate variants' operand were
-  previously dropped).
+  previously dropped). The **A (atomic) extension** is decoded too — `lr`/`sc` and the
+  `amo*.w`/`amo*.d` read-modify-writes (`amoadd`, `amoswap`, `amoor`, `amomaxu`, …) — so
+  RV64GC concurrency primitives no longer show as raw data.
 - **RISC-V 32-bit (RV32)** disassembly: ORRESS now also loads 32-bit RISC-V ELFs (common in
   embedded/firmware), with 4-byte pointers and the RV32 compressed set. The five compressed
   encodings that differ by XLEN are decoded per the ISA — `c.jal` (a **call**, so RV32
