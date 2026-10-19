@@ -41,15 +41,19 @@ All notable changes to ORRESS are documented here. The format follows
   statements and basic blocks, before it is structured into `if`/`while` and printed as
   Rust. A window on how decompilation works; each line keeps its source address and block
   labels are clickable.
-- **RISC-V (RV64I + M) disassembly**: ORRESS now loads and disassembles 64-bit RISC-V ELFs —
-  functions, cross-references, the linear and graph views, hex and strings all work.
+- **RISC-V (RV64I + M + F/D) disassembly**: ORRESS now loads and disassembles 64-bit RISC-V
+  ELFs — functions, cross-references, the linear and graph views, hex and strings all work.
   Hand-rolled pure-Rust decoder (no new dependency); the **full RV64 integer compressed
   (`C`) set** is decoded with operands — the stack loads/stores (`c.lwsp`/`c.ldsp`/`c.swsp`/
   `c.sdsp`/`c.addi4spn`), reg+offset loads/stores (`c.lw`/`c.ld`/`c.sw`/`c.sd`) and the
   `c.addi`/`c.lui`/`c.addi16sp`/`c.slli`/`c.sub`/… arithmetic that make up most of a RISC-V
-  function; floating-point compressed halves stay length-aware. CSR instructions now show the
-  full `csrrw rd, csr, rs1` / `csrrwi rd, csr, zimm` form (the CSR number and the immediate
-  variants' operand were previously dropped).
+  function. **Single- and double-precision floating-point (F/D)** is decoded too —
+  `flw`/`fld`/`fsw`/`fsd` and the compressed `c.fld`/`c.fsd`/`c.fldsp`/`c.fsdsp`, the OP-FP
+  arithmetic, compares, conversions and moves (`fadd.s`, `fcvt.w.d`, `fmv.x.w`, …) and the
+  fused multiply-adds — with the float-register ABI names (`fa0`, `ft0`, …), where these
+  previously showed as raw data. CSR instructions now show the full `csrrw rd, csr, rs1` /
+  `csrrwi rd, csr, zimm` form (the CSR number and the immediate variants' operand were
+  previously dropped).
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,

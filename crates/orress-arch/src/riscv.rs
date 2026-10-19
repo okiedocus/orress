@@ -1,9 +1,11 @@
-//! A hand-rolled RISC-V (RV64I + M) disassembler. The base ISA is fixed 32-bit and very
+//! A hand-rolled RISC-V (RV64I + M + F/D) disassembler. The base ISA is fixed 32-bit and very
 //! regular, so decoding is a handful of field extractions per format. Compressed (`C`)
 //! instructions are 16-bit; the full RV64 *integer* compressed set is decoded with operands, and
 //! the floating-point / reserved halves stay length-aware (shown as a generic `c.insn`) so the
-//! linear sweep stays aligned. Floating-point, vector and CSR details beyond the basics are shown
-//! generically. Pure Rust, no decoder dependency.
+//! linear sweep stays aligned. Single- and double-precision floating-point (loads/stores, OP-FP
+//! arithmetic/compares/conversions/moves and the fused multiply-adds) is decoded; the vector
+//! extension and CSR details beyond the basics are shown generically. Pure Rust, no decoder
+//! dependency.
 
 use crate::{Flow, Insn, Token, TokenKind};
 
@@ -12,6 +14,13 @@ const REG: [&str; 32] = [
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
     "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
     "t5", "t6",
+];
+
+/// Floating-point register ABI names, f0..f31.
+const FREG: [&str; 32] = [
+    "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7", "fs0", "fs1", "fa0", "fa1", "fa2",
+    "fa3", "fa4", "fa5", "fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7", "fs8", "fs9",
+    "fs10", "fs11", "ft8", "ft9", "ft10", "ft11",
 ];
 
 pub fn decode(bytes: &[u8], address: u64) -> Option<Insn> {
@@ -28,6 +37,14 @@ fn reg(n: u32) -> Token {
     Token {
         kind: TokenKind::Register,
         text: REG[(n & 31) as usize].to_owned(),
+    }
+}
+
+/// Builds a floating-point register token.
+fn freg(n: u32) -> Token {
+    Token {
+        kind: TokenKind::Register,
+        text: FREG[(n & 31) as usize].to_owned(),
     }
 }
 
@@ -248,8 +265,198 @@ fn decode_base(w: u32, address: u64) -> Option<Insn> {
             }
         }
         0x0f => insn(address, 4, "fence", vec![], Flow::Next),
+        // Floating-point loads/stores: `flw fd, imm(rs1)` / `fsw fs2, imm(rs1)`.
+        0x07 => {
+            let m = match f3 {
+                2 => "flw",
+                3 => "fld",
+                _ => return None,
+            };
+            insn(
+                address,
+                4,
+                m,
+                vec![
+                    freg(rd),
+                    punct(","),
+                    imm(i_imm),
+                    punct("("),
+                    reg(rs1),
+                    punct(")"),
+                ],
+                Flow::Next,
+            )
+        }
+        0x27 => {
+            let m = match f3 {
+                2 => "fsw",
+                3 => "fsd",
+                _ => return None,
+            };
+            insn(
+                address,
+                4,
+                m,
+                vec![
+                    freg(rs2),
+                    punct(","),
+                    imm(s_imm),
+                    punct("("),
+                    reg(rs1),
+                    punct(")"),
+                ],
+                Flow::Next,
+            )
+        }
+        // OP-FP and fused multiply-add.
+        0x53 => return decode_fp(address, rd, rs1, rs2, f3, f7),
+        0x43 | 0x47 | 0x4b | 0x4f => return Some(decode_fma(w, address, opcode, rd, rs1, rs2)),
         _ => return None,
     })
+}
+
+/// A `.s`/`.d` suffix from the OP-FP format field (`fmt`, bits 26:25).
+fn fp_suffix(fmt: u32) -> &'static str {
+    if fmt == 0 { ".s" } else { ".d" }
+}
+
+/// OP-FP (opcode 0x53): the single- and double-precision arithmetic, sign-inject, min/max,
+/// compares, conversions and moves, selected by `funct7`.
+fn decode_fp(address: u64, rd: u32, rs1: u32, rs2: u32, f3: u32, f7: u32) -> Option<Insn> {
+    let s = fp_suffix(f7 & 1);
+    // `fd, fs1, fs2` — the common three-register float form.
+    let fff = |m: &str| {
+        insn(
+            address,
+            4,
+            m,
+            vec![freg(rd), punct(","), freg(rs1), punct(","), freg(rs2)],
+            Flow::Next,
+        )
+    };
+    let name = |base: &str| format!("{base}{s}");
+    Some(match f7 >> 1 {
+        // Arithmetic.
+        0x00 => fff(&name("fadd")),
+        0x02 => fff(&name("fsub")),
+        0x04 => fff(&name("fmul")),
+        0x06 => fff(&name("fdiv")),
+        // fsqrt fd, fs1.
+        0x16 => insn(
+            address,
+            4,
+            &name("fsqrt"),
+            vec![freg(rd), punct(","), freg(rs1)],
+            Flow::Next,
+        ),
+        // Sign-injection: fsgnj / fsgnjn / fsgnjx (fmv/fneg/fabs pseudo-ops).
+        0x08 => fff(&name(
+            ["fsgnj", "fsgnjn", "fsgnjx"].get(f3 as usize).copied()?,
+        )),
+        // Min / max.
+        0x0a => fff(&name(if f3 == 0 { "fmin" } else { "fmax" })),
+        // Compares (integer destination): feq / flt / fle.
+        0x28 => {
+            let m = match f3 {
+                0 => "fle",
+                1 => "flt",
+                2 => "feq",
+                _ => return None,
+            };
+            insn(
+                address,
+                4,
+                &name(m),
+                vec![reg(rd), punct(","), freg(rs1), punct(","), freg(rs2)],
+                Flow::Next,
+            )
+        }
+        // fcvt between single and double: fcvt.s.d (f7=0x20, rs2=1) / fcvt.d.s (f7=0x21, rs2=0).
+        0x10 => {
+            let (dst, src) = if f7 & 1 == 0 { ("s", "d") } else { ("d", "s") };
+            insn(
+                address,
+                4,
+                &format!("fcvt.{dst}.{src}"),
+                vec![freg(rd), punct(","), freg(rs1)],
+                Flow::Next,
+            )
+        }
+        // Float → integer: fcvt.w/wu/l/lu.{s,d} (int dest, float src).
+        0x30 => insn(
+            address,
+            4,
+            &format!(
+                "fcvt.{}{s}",
+                ["w", "wu", "l", "lu"].get(rs2 as usize).copied()?
+            ),
+            vec![reg(rd), punct(","), freg(rs1)],
+            Flow::Next,
+        ),
+        // Integer → float: fcvt.{s,d}.w/wu/l/lu (float dest, int src).
+        0x34 => insn(
+            address,
+            4,
+            &format!(
+                "fcvt{s}.{}",
+                ["w", "wu", "l", "lu"].get(rs2 as usize).copied()?
+            ),
+            vec![freg(rd), punct(","), reg(rs1)],
+            Flow::Next,
+        ),
+        // fmv.x.w / fclass (int dest, float src).
+        0x38 => {
+            let m = if f3 == 0 {
+                format!("fmv.x.{}", if f7 & 1 == 0 { "w" } else { "d" })
+            } else {
+                name("fclass")
+            };
+            insn(
+                address,
+                4,
+                &m,
+                vec![reg(rd), punct(","), freg(rs1)],
+                Flow::Next,
+            )
+        }
+        // fmv.w.x / fmv.d.x (float dest, int src).
+        0x3c => insn(
+            address,
+            4,
+            &format!("fmv.{}.x", if f7 & 1 == 0 { "w" } else { "d" }),
+            vec![freg(rd), punct(","), reg(rs1)],
+            Flow::Next,
+        ),
+        _ => return None,
+    })
+}
+
+/// Fused multiply-add (opcodes 0x43/0x47/0x4b/0x4f): `op fd, fs1, fs2, fs3`, the extra source in
+/// `rs3` (bits 31:27). Format comes from bits 26:25.
+fn decode_fma(w: u32, address: u64, opcode: u32, rd: u32, rs1: u32, rs2: u32) -> Insn {
+    let base = match opcode {
+        0x43 => "fmadd",
+        0x47 => "fmsub",
+        0x4b => "fnmsub",
+        _ => "fnmadd",
+    };
+    let rs3 = (w >> 27) & 0x1f;
+    let s = fp_suffix((w >> 25) & 3);
+    insn(
+        address,
+        4,
+        &format!("{base}{s}"),
+        vec![
+            freg(rd),
+            punct(","),
+            freg(rs1),
+            punct(","),
+            freg(rs2),
+            punct(","),
+            freg(rs3),
+        ],
+        Flow::Next,
+    )
 }
 
 fn op_imm(w: u32, address: u64, word32: bool, rd: u32, rs1: u32, f3: u32, i_imm: i64) -> Insn {
@@ -561,7 +768,36 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
             Flow::Next,
         ),
 
-        // Floating-point (FLD/FSD/FLDSP/FSDSP) and reserved: length-aware only.
+        // Compressed double-precision loads/stores (RV64: C.FLD/C.FSD and their SP forms).
+        (0b00, 0b001) => insn(
+            address,
+            2,
+            "c.fld",
+            cmem(freg(8 + ((w >> 2) & 7)), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b101) => insn(
+            address,
+            2,
+            "c.fsd",
+            cmem(freg(8 + ((w >> 2) & 7)), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b10, 0b001) => insn(
+            address,
+            2,
+            "c.fldsp",
+            cmem(freg((w >> 7) & 0x1f), ldsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        (0b10, 0b101) => insn(
+            address,
+            2,
+            "c.fsdsp",
+            cmem(freg((w >> 2) & 0x1f), sdsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        // Reserved / vector encodings: length-aware only.
         _ => insn(address, 2, "c.insn", vec![], Flow::Next),
     })
 }
@@ -752,9 +988,9 @@ mod tests {
         let ret = decode(&0x8082u16.to_le_bytes(), 0).unwrap();
         assert_eq!(ret.len, 2);
         assert_eq!(ret.flow, Flow::Return);
-        // A float/reserved compressed half (C.FLDSP) still decodes as a 2-byte generic c.insn
-        // (keeps the sweep aligned without claiming to know the operands).
-        let other = decode(&0x2002u16.to_le_bytes(), 0).unwrap();
+        // A reserved compressed half (quadrant 0, funct3=100) still decodes as a 2-byte generic
+        // c.insn (keeps the sweep aligned without claiming to know the operands).
+        let other = decode(&0x8000u16.to_le_bytes(), 0).unwrap();
         assert_eq!(other.len, 2);
         assert_eq!(other.mnemonic, "c.insn");
     }
@@ -794,6 +1030,38 @@ mod tests {
         // c.slli a0, 0x1
         assert_eq!(d(0x0506, 0).mnemonic, "c.slli");
         assert_eq!(ops(0x0506), ["a0", ",", "0x1"]);
+    }
+
+    #[test]
+    fn floating_point() {
+        let ops = |w: u32| {
+            d(w, 0)
+                .operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>()
+        };
+        // fadd.s fa0, fa1, fa2
+        assert_eq!(d(0x00c5_8553, 0).mnemonic, "fadd.s");
+        assert_eq!(ops(0x00c5_8553), ["fa0", ",", "fa1", ",", "fa2"]);
+        // fld fa0, 0x8(sp)
+        assert_eq!(d(0x0081_3507, 0).mnemonic, "fld");
+        assert_eq!(ops(0x0081_3507), ["fa0", ",", "0x8", "(", "sp", ")"]);
+        // fsw fa0, 0x0(sp)
+        assert_eq!(d(0x00a1_2027, 0).mnemonic, "fsw");
+        assert_eq!(ops(0x00a1_2027), ["fa0", ",", "0x0", "(", "sp", ")"]);
+        // fcvt.w.s a0, fa0 — float to int, integer destination.
+        assert_eq!(d(0xc005_7553, 0).mnemonic, "fcvt.w.s");
+        assert_eq!(ops(0xc005_7553), ["a0", ",", "fa0"]);
+        // fmadd.s fa0, fa1, fa2, fa3 — fused multiply-add, four float registers.
+        assert_eq!(d(0x68c5_8543, 0).mnemonic, "fmadd.s");
+        assert_eq!(
+            ops(0x68c5_8543),
+            ["fa0", ",", "fa1", ",", "fa2", ",", "fa3"]
+        );
+        // c.fldsp fa0, 0x8(sp) — compressed double load from the stack.
+        assert_eq!(d(0x2522, 0).mnemonic, "c.fldsp");
+        assert_eq!(ops(0x2522), ["fa0", ",", "0x8", "(", "sp", ")"]);
     }
 
     #[test]
