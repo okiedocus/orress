@@ -19,8 +19,9 @@ All notable changes to ORRESS are documented here. The format follows
   Floating-point, CSR and uncommon compressed instructions are kept as inline `asm!`.
 - **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
   MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
-  Hand-rolled pure-Rust decoder (R/I/J formats). Byte order is picked from the ELF; the
-  delay slot after an unconditional `j`/`jr` may show as data (a documented limit). The
+  Hand-rolled pure-Rust decoder (R/I/J formats), now including the SPECIAL2 `mul`/`madd`/
+  `msub`/`clz`/`clo` family (the three-operand `mul` compilers emit instead of `mult`+`mflo`)
+  and the `movz`/`movn`/`mthi`/`mtlo`/`sync` moves. Byte order is picked from the ELF. The
   decompiler is x86/ARM64 only for now.
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
