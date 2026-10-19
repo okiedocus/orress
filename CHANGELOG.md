@@ -8,6 +8,11 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
+  MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
+  Hand-rolled pure-Rust decoder (R/I/J formats). Byte order is picked from the ELF; the
+  delay slot after an unconditional `j`/`jr` may show as data (a documented limit). The
+  decompiler is x86/ARM64 only for now.
 - **Function signatures (FLIRT-style)**: identify known library functions (libc, the
   Rust/MSVC runtime, …) in a stripped binary by matching the leading bytes of each
   function, with relocatable call/jump operands masked so a function matches wherever it is

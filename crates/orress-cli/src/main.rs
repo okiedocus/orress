@@ -693,7 +693,9 @@ fn one_gadget(file: &PathBuf) -> Result<()> {
 fn list_gadgets(file: &PathBuf, filter: Option<&str>) -> Result<()> {
     let data = read_input(Some(file))?;
     let info = orress_loaders::triage(&data);
-    let isa = orress_arch::Isa::from_arch_name(&info.arch).unwrap_or(orress_arch::Isa::X64);
+    let isa =
+        orress_arch::Isa::from_arch_name(&info.arch, info.endian == orress_loaders::Endian::Little)
+            .unwrap_or(orress_arch::Isa::X64);
     let sections: Vec<(u64, &[u8])> = info
         .sections
         .iter()
