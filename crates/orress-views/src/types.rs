@@ -151,6 +151,8 @@ pub struct TypesView {
     draft: Option<Draft>,
     error: Option<String>,
     status: Option<String>,
+    /// The "Paste C" window's buffer, when open.
+    paste: Option<String>,
 }
 
 pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
@@ -194,6 +196,14 @@ pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
                 }
                 if ui.button("+ Typedef").clicked() {
                     view.draft = Some(Draft::new(Kind::Typedef));
+                    view.error = None;
+                }
+                if ui
+                    .button("Paste C…")
+                    .on_hover_text("Create types from pasted C declarations")
+                    .clicked()
+                {
+                    view.paste = Some(String::new());
                     view.error = None;
                 }
             });
@@ -253,6 +263,84 @@ pub fn types_view(ui: &mut Ui, view: &mut TypesView, docs: &mut DocStore) {
             }
         });
     });
+
+    paste_window(ui, view, doc);
+}
+
+/// The "Paste C" window: parse pasted C declarations into catalog types.
+fn paste_window(ui: &mut Ui, view: &mut TypesView, doc: &mut orress_project::Document) {
+    let Some(text) = view.paste.as_mut() else {
+        return;
+    };
+    let mut open = true;
+    let mut close = false;
+    let mut parse = false;
+    egui::Window::new("Paste C declarations")
+        .id(egui::Id::new("orress::types_paste_c"))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(460.0)
+        .open(&mut open)
+        .show(ui.ctx(), |ui| {
+            ui.label(muted(
+                "struct / union / enum / typedef — including arrays, pointers and stdint types.",
+            ));
+            egui::ScrollArea::vertical()
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(text)
+                            .code_editor()
+                            .desired_rows(12)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(
+                                "struct Packet {\n    uint32_t magic;\n    char body[64];\n};",
+                            ),
+                    );
+                });
+            ui.horizontal(|ui| {
+                parse = ui.button("Create types").clicked();
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+            if let Some(e) = &view.error {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            } else if let Some(s) = &view.status {
+                ui.label(muted(s));
+            }
+        });
+
+    if parse {
+        match orress_project::parse_c_decls(text) {
+            Ok(types) => {
+                let mut made = 0;
+                for ty in types {
+                    match doc.define_type(ty) {
+                        Ok(()) => made += 1,
+                        Err(e) => {
+                            view.error = Some(e);
+                            break;
+                        }
+                    }
+                }
+                if view.error.is_none() || made > 0 {
+                    view.status = Some(format!(
+                        "Created {made} type{}",
+                        if made == 1 { "" } else { "s" }
+                    ));
+                }
+                if view.error.is_none() {
+                    close = true;
+                }
+            }
+            Err(e) => view.error = Some(e),
+        }
+    }
+    if !open || close {
+        view.paste = None;
+        view.error = None;
+    }
 }
 
 /// Draws the editor form for one draft, returning whether Save was clicked.
