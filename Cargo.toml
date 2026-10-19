@@ -26,6 +26,7 @@ orress-challenge = { path = "crates/orress-challenge" }
 orress-decompiler = { path = "crates/orress-decompiler" }
 orress-emu = { path = "crates/orress-emu" }
 orress-sym = { path = "crates/orress-sym" }
+orress-sig = { path = "crates/orress-sig" }
 orress-triage = { path = "crates/orress-triage" }
 orress-sandbox = { path = "crates/orress-sandbox" }
 orress-wasm = { path = "crates/orress-wasm" }

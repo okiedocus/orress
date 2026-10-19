@@ -380,6 +380,74 @@ impl OrressApp {
         self.save_settings();
     }
 
+    /// Loads a signature library and names the functions in the open binary that match it.
+    fn apply_signatures(&mut self, ctx: &Context) {
+        let Some(program) = self.docs.active().and_then(|d| d.program().cloned()) else {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Signature library", &["sig", "json"])
+            .set_title("Apply a signature library")
+            .pick_file()
+        else {
+            return;
+        };
+        let lib = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|json| orress_sig::Library::from_json(&json));
+        match lib {
+            Ok(lib) => {
+                let found = orress_sig::identify(&program, &lib);
+                let n = found.len();
+                if let Some(doc) = self.docs.active_mut() {
+                    for (addr, name) in found {
+                        let _ = doc.rename(addr, &name);
+                    }
+                }
+                self.notify(
+                    ctx,
+                    format!("Named {n} function{}", if n == 1 { "" } else { "s" }),
+                    false,
+                );
+            }
+            Err(e) => self.notify(ctx, format!("Could not load signatures: {e}"), true),
+        }
+    }
+
+    /// Generates a signature library from the open binary's symbols and saves it.
+    fn generate_signatures(&mut self, ctx: &Context) {
+        let Some(program) = self.docs.active().and_then(|d| d.program().cloned()) else {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        };
+        let lib = orress_sig::generate(&program);
+        if lib.signatures.is_empty() {
+            self.notify(ctx, "No symbols to sign — this binary is stripped.", false);
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Signature library", &["sig"])
+            .set_title("Save signature library")
+            .set_file_name("library.sig")
+            .save_file()
+        else {
+            return;
+        };
+        match std::fs::write(&path, lib.to_json()) {
+            Ok(()) => self.notify(
+                ctx,
+                format!("Wrote {} signatures", lib.signatures.len()),
+                false,
+            ),
+            Err(e) => self.notify(
+                ctx,
+                format!("Could not write {}: {e}", path.display()),
+                true,
+            ),
+        }
+    }
+
     /// Saves settings immediately (the eframe `save` hook also does this periodically, but a
     /// folder/project change is worth persisting at once).
     fn save_settings(&self) {
@@ -724,6 +792,8 @@ impl OrressApp {
                     ),
                 }
             }
+            "analysis::ApplySignatures" => self.apply_signatures(ctx),
+            "analysis::GenerateSignatures" => self.generate_signatures(ctx),
             "hex::GoTo" => self.hex_command(ctx, ViewCommand::GoTo),
             "hex::Find" => self.hex_command(ctx, ViewCommand::Find),
             "hex::FindNext" => self.hex_command(ctx, ViewCommand::FindNext),
@@ -1101,6 +1171,9 @@ impl OrressApp {
                 ui.menu_button("Tools", |ui| {
                     self.menu_entry(ui, "workbench::Open", &mut clicked);
                     self.menu_entry(ui, "hex::SendToWorkbench", &mut clicked);
+                    ui.separator();
+                    self.menu_entry(ui, "analysis::ApplySignatures", &mut clicked);
+                    self.menu_entry(ui, "analysis::GenerateSignatures", &mut clicked);
                     ui.separator();
                     self.menu_entry(ui, "challenge::OpenWorkbench", &mut clicked);
                 });

@@ -47,6 +47,18 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          folder can hold a target's binary, source, notes, patches and extracted resources.",
     )
     .register(
+        "analysis::ApplySignatures",
+        "Apply Signatures…",
+        "Load a FLIRT-style signature library and name the functions in the open binary that \
+         match it — recovering library names (libc, the Rust/MSVC runtime) in a stripped binary.",
+    )
+    .register(
+        "analysis::GenerateSignatures",
+        "Generate Signatures…",
+        "Build a signature library from the open binary's symbols and save it, to identify the \
+         same functions later in stripped binaries.",
+    )
+    .register(
         "workspace::CloseProject",
         "Close Project",
         "Close the open project folder: the folder tree disappears and no project is reopened \

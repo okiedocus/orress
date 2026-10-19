@@ -8,6 +8,12 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **Function signatures (FLIRT-style)**: identify known library functions (libc, the
+  Rust/MSVC runtime, …) in a stripped binary by matching the leading bytes of each
+  function, with relocatable call/jump operands masked so a function matches wherever it is
+  linked. **Tools ▸ Generate Signatures…** builds a library from a binary that still has
+  symbols; **Apply Signatures…** names the matching functions in a stripped one (also
+  `orress-cli sign` / `identify`). New pure-Rust `orress-sig` crate.
 - **IL view**: a read-only **IL** tab shows the decompiler's lifted intermediate
   representation for the function under the cursor — machine code lifted into simple
   statements and basic blocks, before it is structured into `if`/`while` and printed as
