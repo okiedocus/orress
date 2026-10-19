@@ -211,7 +211,8 @@ fn listing_shows_data_section_strings() {
 #[test]
 fn unsupported_arch_is_none() {
     let (mut info, data) = crackme();
-    info.arch = "PowerPC (32-bit)".into();
+    // SPARC has no decoder yet, so analysis of it is declined.
+    info.arch = "SPARC".into();
     assert!(Program::analyze(&info, data, &[]).is_none());
 }
 

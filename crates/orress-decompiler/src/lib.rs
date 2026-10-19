@@ -21,6 +21,7 @@ pub mod deobfuscate;
 pub mod ir;
 pub mod lift;
 pub mod mips;
+pub mod ppc;
 pub mod print;
 pub mod riscv;
 pub mod simplify;
@@ -145,14 +146,23 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
-    } else if program.isa == Isa::Riscv64 {
+    } else if matches!(program.isa, Isa::Riscv64 | Isa::Riscv32) {
         riscv::RiscvLifter {
             program,
             param_counts: counts,
         }
         .lift(f)
-    } else if matches!(program.isa, Isa::Mips32 | Isa::Mips32El) {
+    } else if matches!(
+        program.isa,
+        Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El
+    ) {
         mips::MipsLifter {
+            program,
+            param_counts: counts,
+        }
+        .lift(f)
+    } else if matches!(program.isa, Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El) {
+        ppc::PpcLifter {
             program,
             param_counts: counts,
         }
@@ -185,15 +195,28 @@ struct Decompiled {
 fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Error> {
     if !matches!(
         program.isa,
-        Isa::X86 | Isa::X64 | Isa::Arm64 | Isa::Riscv64 | Isa::Mips32 | Isa::Mips32El
+        Isa::X86
+            | Isa::X64
+            | Isa::Arm64
+            | Isa::Riscv64
+            | Isa::Riscv32
+            | Isa::Mips32
+            | Isa::Mips32El
+            | Isa::Mips64
+            | Isa::Mips64El
+            | Isa::Ppc32
+            | Isa::Ppc64
+            | Isa::Ppc64El
     ) {
         return Err(Error::Unsupported(program.isa));
     }
     // ARM64 and RISC-V use their own calling conventions regardless of the caller's x86 choice.
     let conv = match program.isa {
         Isa::Arm64 => Convention::Aarch64,
-        Isa::Riscv64 => Convention::Riscv,
+        Isa::Riscv64 | Isa::Riscv32 => Convention::Riscv,
         Isa::Mips32 | Isa::Mips32El => Convention::Mips,
+        Isa::Mips64 | Isa::Mips64El => Convention::Mips64,
+        Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El => Convention::Ppc,
         _ => conv,
     };
     let f = program

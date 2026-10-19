@@ -25,6 +25,12 @@ pub enum Convention {
     /// MIPS o32: a0–a3, result in v0 (the IR models v0 as register 0). See mips.rs for the
     /// register numbering.
     Mips,
+    /// MIPS n64 (the MIPS64 ABI): a0–a7 for integer arguments and $f12–$f19 for floats, result
+    /// in v0. Uses the same IR register numbering as [`Convention::Mips`].
+    Mips64,
+    /// PowerPC (SysV / PowerOpen): r3–r10 for integer arguments, f1–f13 for floats, result in r3
+    /// (the IR models r3 as register 0, like RISC-V's a0). See ppc.rs for the numbering.
+    Ppc,
 }
 
 impl Convention {
@@ -37,6 +43,10 @@ impl Convention {
             Self::Riscv => &[0, 1, 2, 3, 4, 5, 6, 7],
             // a0..a3 map to IR registers 1..4 (v0 is register 0, the result).
             Self::Mips => &[1, 2, 3, 4],
+            // n64 adds a4..a7 ($8..$11), which map to IR registers 6..9 (see mips.rs reg_num).
+            Self::Mips64 => &[1, 2, 3, 4, 6, 7, 8, 9],
+            // r3..r10 map to IR registers 0..7 (r3 is register 0, the result).
+            Self::Ppc => &[0, 1, 2, 3, 4, 5, 6, 7],
         }
     }
 
@@ -53,6 +63,13 @@ impl Convention {
             Self::Riscv => &[8, 9, 10, 11, 12, 13, 14, 15],
             // MIPS caller-saved in mips.rs numbering: v1(5), t0..t9(6..13,22,23), ra(24).
             Self::Mips => &[5, 6, 7, 8, 9, 10, 11, 12, 13, 22, 23, 24],
+            // n64: a4..a7 ($8..$11, IR 6..9) are argument registers, so like a0..a3 they are not
+            // in the clobbered set; the temporaries are t4..t7 ($12..$15, IR 10..13) and
+            // t8/t9 (22/23), plus v1(5) and ra(24).
+            Self::Mips64 => &[5, 10, 11, 12, 13, 22, 23, 24],
+            // PowerPC volatile registers besides the arguments r3..r10: r0 (IR 8), r11 (11),
+            // r12 (12). See ppc.rs for the numbering.
+            Self::Ppc => &[8, 11, 12],
         }
     }
 }

@@ -12,14 +12,23 @@ All notable changes to ORRESS are documented here. The format follows
   functions become readable pseudocode. **Branch delay slots are handled correctly** — the
   CFG keeps the delay-slot instruction in the branch's block so it runs on both paths (this
   also completes the MIPS disassembly, which previously dropped the delay slot after an
-  unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` is lifted; float, COP and the
-  uncommon ops (`madd`/`clz`, the conditional moves) stay as inline `asm!`.
+  unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` and the **COP1 floating-point**
+  unit are lifted — the FPU arithmetic (`add.s`/`mul.d`/`sqrt`/`abs`/`neg`), the float
+  loads/stores (`lwc1`/`ldc1`/`swc1`/`sdc1`), the GPR↔FPU moves (`mfc1`/`mtc1`) and the
+  `c.cond`/`bc1t`/`bc1f` compare-and-branch and the `cvt.*` conversions all recover as
+  `f32`/`f64` expressions (`$f12`/`$f14` arguments and the `$f0` return modelled). The
+  `madd`/`clz`, the control moves (`cfc1`/`ctc1`) and the conditional moves stay as inline
+  `asm!`.
 
-- **RISC-V decompilation**: the decompiler now lifts RV64I + M and the **full integer
+- **RISC-V decompilation**: the decompiler now lifts RV64I + M, the **full integer
   compressed (`C`) set** — the stack frame save/restore, loads/stores and C-arithmetic that
-  make up most of a function — so RISC-V functions become readable Rust-style pseudocode, not
-  just disassembly, without `asm!` noise in every prologue. Floating-point, CSR and the
-  float-compressed instructions are kept as inline `asm!`.
+  make up most of a function — and the **F/D floating-point** instructions, so RISC-V
+  functions become readable Rust-style pseudocode, not just disassembly, without `asm!` noise
+  in every prologue. Float arithmetic, min/max, `sqrt`, the comparisons, the int↔float and
+  float↔float conversions, the fused multiply-adds and the float loads/stores all recover as
+  `f32`/`f64` expressions (`fn f(a: f64, b: f64) -> f64 { a + b }`), with `fa0`–`fa7`
+  parameters and the float return value modelled. CSR and the general `fsgnj`/`fclass` stay
+  as inline `asm!`.
 - **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
   MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
   Hand-rolled pure-Rust decoder (R/I/J formats), now including the SPECIAL2 `mul`/`madd`/
@@ -29,6 +38,31 @@ All notable changes to ORRESS are documented here. The format follows
   compares (`c.eq.d`/`c.lt.s`/…), conversions (`cvt.*`/`trunc.w.*`/…), GPR↔FPU moves
   (`mfc1`/`mtc1`/…) and the FP-condition branches (`bc1t`/`bc1f`, a real control-flow edge) —
   where these previously showed as a generic `cop0x11`. Byte order is picked from the ELF.
+- **MIPS64 disassembly** (big- and little-endian): ORRESS now loads and disassembles 64-bit
+  MIPS ELFs, with 8-byte pointers and the MIPS64 **doubleword** instruction set on top of the
+  shared base decoder — `daddu`/`dsubu`/`dadd`/`dsub`, `daddi`/`daddiu`, the doubleword
+  shifts (`dsll`/`dsrl`/`dsra` and their `*32` forms, plus `dsllv`/`dsrlv`/`dsrav`), the
+  doubleword multiply/divide (`dmult`/`dmultu`/`ddiv`/`ddivu`) and the doubleword/unsigned
+  loads and stores (`ld`/`sd`/`lwu`, `ldl`/`ldr`/`sdl`/`sdr`). These encodings stay invalid
+  on MIPS32, as on real hardware. The **decompiler lifts MIPS64 too** — registers, pointers and
+  native arithmetic are modelled at 64 bits (sub-word loads sign/zero-extend into the register),
+  so a doubleword `daddu` recovers as a 64-bit `a + b`. The **n64 ABI** is modelled — eight
+  integer argument registers (`$a0`–`$a7`) and eight float argument registers (`$f12`–`$f19`),
+  versus o32's four (`$a0`–`$a3`) and two (`$f12`/`$f14`) on MIPS32.
+- **PowerPC disassembly** (PPC32 and PPC64, big- and little-endian incl. `ppc64le`): ORRESS now
+  loads and disassembles PowerPC ELFs — functions, cross-references, the linear and graph views,
+  hex and strings. Hand-rolled pure-Rust decoder (no new dependency) covering the common integer
+  set (`addi`/`addis`/`add`/`subf`/`mullw`/`divw`/the logical and rotate/shift ops, with the
+  `li`/`lis`/`mr`/`nop` aliases), the D-form and indexed loads/stores (including `lfs`/`lfd`/
+  `stfs`/`stfd` and the PPC64 `ld`/`std`), the floating-point arithmetic (`fadd(s)`/`fmul(s)`/…),
+  and the branches with correct control flow — `b`/`bl`, the conditional `bc`, `blr` (return),
+  `bctr`/`bctrl` (computed jump/call) and `mflr`/`mtlr`/`mtctr`. Byte order and bitness are picked
+  from the ELF. The **decompiler lifts PowerPC too** — the integer and float arithmetic,
+  loads/stores and calls recover as pseudocode (registers/pointers at 32 or 64 bits, `r3`–`r10`
+  arguments, `f1`–`f13` float arguments), and PowerPC's split compare/branch (`cmpw` then `bc`)
+  is reconstructed into structured `if`/`while` by remembering the compare per condition-register
+  field. The rotate-and-mask `rlwinm` is lifted for its `slwi`/`srwi` shift aliases; other forms
+  stay as inline `asm!`.
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and
@@ -57,7 +91,17 @@ All notable changes to ORRESS are documented here. The format follows
   fused multiply-adds — with the float-register ABI names (`fa0`, `ft0`, …), where these
   previously showed as raw data. CSR instructions now show the full `csrrw rd, csr, rs1` /
   `csrrwi rd, csr, zimm` form (the CSR number and the immediate variants' operand were
-  previously dropped).
+  previously dropped). The **A (atomic) extension** is decoded too — `lr`/`sc` and the
+  `amo*.w`/`amo*.d` read-modify-writes (`amoadd`, `amoswap`, `amoor`, `amomaxu`, …) — so
+  RV64GC concurrency primitives no longer show as raw data.
+- **RISC-V 32-bit (RV32)** disassembly: ORRESS now also loads 32-bit RISC-V ELFs (common in
+  embedded/firmware), with 4-byte pointers and the RV32 compressed set. The five compressed
+  encodings that differ by XLEN are decoded per the ISA — `c.jal` (a **call**, so RV32
+  control flow is recovered correctly), `c.flw`/`c.fsw`/`c.flwsp`/`c.fswsp` — where RV64 has
+  `c.addiw`/`c.ld`/`c.sd`/`c.ldsp`/`c.sdsp`. The base integer set is shared with RV64. The
+  **decompiler lifts RV32 too** — the RISC-V lifter is width-parametric, so registers, pointers
+  and native arithmetic are 32-bit (doubles, which stay 64-bit, and the shared compressed float
+  loads are handled), and the RV32 `c.jal` lifts to a call.
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,

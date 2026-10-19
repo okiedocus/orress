@@ -55,6 +55,40 @@ fn decompiled(funcs: &[(&str, &[u8])], index: usize) -> String {
     out.text()
 }
 
+/// A tiny RISC-V (RV32) program with one function `f` at BASE.
+fn riscv32_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "RISC-V (32-bit)".into(),
+        bits: Some(32),
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("riscv32")
+}
+
 /// A tiny RISC-V (RV64) program with one function `f` at BASE.
 fn riscv_program(code: &[u8]) -> Program {
     let mut file = vec![0u8; 0x200];
@@ -124,6 +158,181 @@ fn mips_program(code: &[u8]) -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("mips")
 }
 
+/// A tiny big-endian MIPS64 program with one function `f` at BASE.
+fn mips64_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "MIPS64".into(),
+        bits: Some(64),
+        endian: orress_loaders::Endian::Big,
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("mips64")
+}
+
+/// A tiny big-endian PPC32 program with one function `f` at BASE.
+fn ppc_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "PowerPC (32-bit)".into(),
+        bits: Some(32),
+        endian: orress_loaders::Endian::Big,
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("ppc")
+}
+
+#[test]
+fn ppc_lifts_add_and_return() {
+    // f(a, b): add r3,r3,r4 ; blr  ->  returns a + b.
+    let code: &[u8] = &[
+        0x7C, 0x63, 0x22, 0x14, // add r3, r3, r4
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Ppc32);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+}
+
+#[test]
+fn ppc_lifts_compare_and_branch() {
+    // f(a, b): if a < b return 1 else 0 — a cmpw/bc pair must become structured control flow.
+    //   cmpw r3,r4 ; bc 12,0,+0x10 ; li r3,0 ; blr ; nop ; li r3,1 ; blr
+    let code: &[u8] = &[
+        0x7C, 0x03, 0x20, 0x00, // cmpw r3, r4        (cr0 = r3 cmp r4, signed)
+        0x41, 0x80, 0x00, 0x10, // bc 12,0,+0x10      (branch to 0x14 if lt)
+        0x38, 0x60, 0x00, 0x00, // li r3, 0
+        0x4E, 0x80, 0x00, 0x20, // blr
+        0x60, 0x00, 0x00, 0x00, // nop (unreachable padding)
+        0x38, 0x60, 0x00, 0x01, // li r3, 1           (0x14: the taken path)
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(text.contains("if "), "cmpw/bc recovered as an if:\n{text}");
+}
+
+#[test]
+fn ppc_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  fadd f1,f1,f2 ; blr
+    let code: &[u8] = &[
+        0xFC, 0x21, 0x10, 0x2A, // fadd f1, f1, f2
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
+    );
+}
+
+#[test]
+fn mips64_lifts_doubleword_add() {
+    // f(a, b): daddu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b (64-bit).
+    // The MIPS64 doubleword add previously fell back to `asm!`.
+    let code: &[u8] = &[
+        0x00, 0x85, 0x10, 0x2d, // daddu v0,a0,a1
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips64_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Mips64);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "doubleword sum recovered:\n{text}"
+    );
+    // MIPS64 registers are 64-bit, so the arguments are a 64-bit type.
+    assert!(
+        text.contains("64"),
+        "64-bit register width reflected in the types:\n{text}"
+    );
+}
+
+#[test]
+fn mips64_uses_n64_argument_registers() {
+    // f(..., a3, a4): daddu v0,a3,a4 ; jr ra ; nop  ->  returns the 4th + 5th integer args.
+    // $a4 ($8) is an argument only under n64; o32 would treat it as a temporary (t0), so the
+    // 5th argument proves the n64 convention is in effect for MIPS64.
+    let code: &[u8] = &[
+        0x00, 0xe8, 0x10, 0x2d, // daddu v0,a3,a4
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips64_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a4 + a5") || text.contains("a4 +"),
+        "fifth integer argument (a4/$8) recovered under n64:\n{text}"
+    );
+}
+
 #[test]
 fn mips_lifts_add_through_delay_slot() {
     // f(a, b): addu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b
@@ -160,6 +369,67 @@ fn mips_lifts_special2_mul() {
     assert!(
         text.contains("a1 * a2") || text.contains("a1 *"),
         "product recovered:\n{text}"
+    );
+}
+
+#[test]
+fn mips_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  add.d $f0,$f12,$f14 ; jr ra ; nop(delay)
+    // o32 passes the doubles in $f12/$f14 and returns in $f0; the COP1 op must lift to float IR.
+    let code: &[u8] = &[
+        0x46, 0x2e, 0x60, 0x00, // add.d $f0, $f12, $f14
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
+    );
+}
+
+#[test]
+fn mips_lifts_float_conversion() {
+    // f(a: f64) -> f32 { a as f32 }:  cvt.s.d $f0, $f12 ; jr ra ; nop(delay)
+    let code: &[u8] = &[
+        0x46, 0x20, 0x60, 0x20, // cvt.s.d $f0, $f12
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(text.contains("f32"), "conversion to f32 recovered:\n{text}");
+}
+
+#[test]
+fn rv32_lifts_add() {
+    // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b. The base integer set is shared with RV64;
+    // this checks the lifter runs on the 32-bit ISA and recovers the sum.
+    let code: &[u8] = &[
+        0x33, 0x05, 0xb5, 0x00, // add a0, a0, a1
+        0x67, 0x80, 0x00, 0x00, // ret
+    ];
+    let p = riscv32_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Riscv32);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+    // RV32 registers are 32-bit, so the arguments are a 32-bit type — not the 64-bit one RV64 uses.
+    assert!(
+        !text.contains("i64") && !text.contains("u64"),
+        "32-bit register width (no 64-bit types):\n{text}"
     );
 }
 
@@ -212,6 +482,25 @@ fn riscv_lifts_compressed_arithmetic() {
     assert!(
         text.contains("a1 - a2") || text.contains("a1 -"),
         "subtraction recovered:\n{text}"
+    );
+}
+
+#[test]
+fn riscv_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  fadd.d fa0, fa0, fa1 ; ret
+    // Float ops previously fell back to `asm!`; they must now lift to floating-point IR.
+    let code: &[u8] = &[
+        0x53, 0x75, 0xb5, 0x02, // fadd.d fa0, fa0, fa1
+        0x67, 0x80, 0x00, 0x00, // ret
+    ];
+    let p = riscv_program(code);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
     );
 }
 
