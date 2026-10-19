@@ -38,6 +38,13 @@ All notable changes to ORRESS are documented here. The format follows
   compares (`c.eq.d`/`c.lt.s`/…), conversions (`cvt.*`/`trunc.w.*`/…), GPR↔FPU moves
   (`mfc1`/`mtc1`/…) and the FP-condition branches (`bc1t`/`bc1f`, a real control-flow edge) —
   where these previously showed as a generic `cop0x11`. Byte order is picked from the ELF.
+- **MIPS64 disassembly** (big- and little-endian): ORRESS now loads and disassembles 64-bit
+  MIPS ELFs, with 8-byte pointers and the MIPS64 **doubleword** instruction set on top of the
+  shared base decoder — `daddu`/`dsubu`/`dadd`/`dsub`, `daddi`/`daddiu`, the doubleword
+  shifts (`dsll`/`dsrl`/`dsra` and their `*32` forms, plus `dsllv`/`dsrlv`/`dsrav`), the
+  doubleword multiply/divide (`dmult`/`dmultu`/`ddiv`/`ddivu`) and the doubleword/unsigned
+  loads and stores (`ld`/`sd`/`lwu`, `ldl`/`ldr`/`sdl`/`sdr`). These encodings stay invalid
+  on MIPS32, as on real hardware.
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and

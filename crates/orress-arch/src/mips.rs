@@ -1,11 +1,13 @@
-//! A hand-rolled MIPS32 disassembler (big- and little-endian). MIPS instructions are a fixed
-//! 32 bits in three simple formats (R/I/J), so decoding is field extraction plus a couple of
-//! opcode tables. Branches and jumps have a delay slot (the next instruction runs before the
+//! A hand-rolled MIPS32/MIPS64 disassembler (big- and little-endian). MIPS instructions are a
+//! fixed 32 bits in three simple formats (R/I/J), so decoding is field extraction plus a couple
+//! of opcode tables. Branches and jumps have a delay slot (the next instruction runs before the
 //! transfer); conditional branches and calls fall through to it naturally, so it is decoded.
 //! The delay slot after an *unconditional* `j`/`jr` is not a control-flow successor, so it may
 //! show as data — a documented limitation. The COP1 FPU (loads/stores, arithmetic, compares,
 //! conversions, moves and branch-on-condition) is decoded; the other coprocessors and the rarer
-//! ops are shown generically. Pure Rust, no decoder dependency.
+//! ops are shown generically. `bits64` enables the MIPS64 doubleword set (`daddu`, `ld`/`sd`,
+//! `dsll` …); on MIPS32 those encodings stay invalid, as on real hardware. Pure Rust, no decoder
+//! dependency.
 
 use crate::{Flow, Insn, Token, TokenKind};
 
@@ -15,14 +17,14 @@ const REG: [&str; 32] = [
     "ra",
 ];
 
-pub fn decode(bytes: &[u8], address: u64, big_endian: bool) -> Option<Insn> {
+pub fn decode(bytes: &[u8], address: u64, big_endian: bool, bits64: bool) -> Option<Insn> {
     let raw: [u8; 4] = bytes.get(..4)?.try_into().ok()?;
     let w = if big_endian {
         u32::from_be_bytes(raw)
     } else {
         u32::from_le_bytes(raw)
     };
-    decode_word(w, address)
+    decode_word(w, address, bits64)
 }
 
 fn reg(n: u32) -> Token {
@@ -80,7 +82,7 @@ fn insn(address: u64, mnemonic: &str, operands: Vec<Token>, flow: Flow) -> Insn 
     }
 }
 
-fn decode_word(w: u32, address: u64) -> Option<Insn> {
+fn decode_word(w: u32, address: u64, bits64: bool) -> Option<Insn> {
     let opcode = w >> 26;
     let rs = (w >> 21) & 0x1f;
     let rt = (w >> 16) & 0x1f;
@@ -92,8 +94,43 @@ fn decode_word(w: u32, address: u64) -> Option<Insn> {
     // Jump target: the 26-bit index shifted into the current 256 MiB region.
     let jump_target = ((address + 4) & 0xffff_ffff_f000_0000) | u64::from((w & 0x03ff_ffff) << 2);
 
+    // The `op rt, imm(rs)` load/store shape, shared by the word and doubleword forms.
+    let mem = |m: &str| {
+        insn(
+            address,
+            m,
+            vec![
+                reg(rt),
+                punct(","),
+                imm(imm16),
+                punct("("),
+                reg(rs),
+                punct(")"),
+            ],
+            Flow::Next,
+        )
+    };
+
     Some(match opcode {
-        0x00 => return decode_special(w, address, rs, rt, rd, shamt),
+        0x00 => return decode_special(w, address, rs, rt, rd, shamt, bits64),
+        // MIPS64 doubleword add-immediate: `daddi`/`daddiu rt, rs, imm`.
+        0x18 | 0x19 if bits64 => {
+            let m = if opcode == 0x18 { "daddi" } else { "daddiu" };
+            insn(
+                address,
+                m,
+                vec![reg(rt), punct(","), reg(rs), punct(","), imm(imm16)],
+                Flow::Next,
+            )
+        }
+        // MIPS64 doubleword / unsigned-word loads and stores (`op rt, imm(rs)`).
+        0x1a if bits64 => mem("ldl"),
+        0x1b if bits64 => mem("ldr"),
+        0x27 if bits64 => mem("lwu"),
+        0x2c if bits64 => mem("sdl"),
+        0x2d if bits64 => mem("sdr"),
+        0x37 if bits64 => mem("ld"),
+        0x3f if bits64 => mem("sd"),
         0x01 => {
             // REGIMM: bltz/bgez (and link variants).
             let (m, link) = match rt {
@@ -360,9 +397,63 @@ fn decode_special2(w: u32, address: u64, rs: u32, rt: u32, rd: u32) -> Option<In
     })
 }
 
-/// SPECIAL (opcode 0): R-type instructions selected by the `funct` field.
-fn decode_special(w: u32, address: u64, rs: u32, rt: u32, rd: u32, shamt: u32) -> Option<Insn> {
+/// SPECIAL (opcode 0): R-type instructions selected by the `funct` field. `bits64` enables the
+/// MIPS64 doubleword forms, which occupy otherwise-reserved `funct` slots.
+fn decode_special(
+    w: u32,
+    address: u64,
+    rs: u32,
+    rt: u32,
+    rd: u32,
+    shamt: u32,
+    bits64: bool,
+) -> Option<Insn> {
     let funct = w & 0x3f;
+    // `rd, rt, shamt` (shift) and `rd, rs, rt` (3-register) operand shapes.
+    let shift = |m: &str, sa: u32| {
+        insn(
+            address,
+            m,
+            vec![reg(rd), punct(","), reg(rt), punct(","), imm(sa as i64)],
+            Flow::Next,
+        )
+    };
+    let three = |m: &str| {
+        insn(
+            address,
+            m,
+            vec![reg(rd), punct(","), reg(rs), punct(","), reg(rt)],
+            Flow::Next,
+        )
+    };
+    let pair = |m: &str| insn(address, m, vec![reg(rs), punct(","), reg(rt)], Flow::Next);
+    if bits64 {
+        // MIPS64 doubleword shifts, multiply/divide and arithmetic (reserved on MIPS32).
+        let dw = match funct {
+            0x14 => Some(three("dsllv")),
+            0x16 => Some(three("dsrlv")),
+            0x17 => Some(three("dsrav")),
+            0x1c => Some(pair("dmult")),
+            0x1d => Some(pair("dmultu")),
+            0x1e => Some(pair("ddiv")),
+            0x1f => Some(pair("ddivu")),
+            0x2c => Some(three("dadd")),
+            0x2d => Some(three("daddu")),
+            0x2e => Some(three("dsub")),
+            0x2f => Some(three("dsubu")),
+            0x38 => Some(shift("dsll", shamt)),
+            0x3a => Some(shift("dsrl", shamt)),
+            0x3b => Some(shift("dsra", shamt)),
+            // The `*32` shifts add 32 to the shift amount (shift by 32..63).
+            0x3c => Some(shift("dsll32", shamt + 32)),
+            0x3e => Some(shift("dsrl32", shamt + 32)),
+            0x3f => Some(shift("dsra32", shamt + 32)),
+            _ => None,
+        };
+        if let Some(i) = dw {
+            return Some(i);
+        }
+    }
     Some(match funct {
         0x00 if w == 0 => insn(address, "nop", vec![], Flow::Next),
         0x00 | 0x02 | 0x03 => {
@@ -453,7 +544,11 @@ mod tests {
     use super::*;
 
     fn be(w: u32, addr: u64) -> Insn {
-        decode(&w.to_be_bytes(), addr, true).expect("decodes")
+        decode(&w.to_be_bytes(), addr, true, false).expect("decodes")
+    }
+
+    fn be64(w: u32, addr: u64) -> Insn {
+        decode(&w.to_be_bytes(), addr, true, true).expect("decodes")
     }
 
     #[test]
@@ -541,13 +636,47 @@ mod tests {
     }
 
     #[test]
+    fn mips64_doubleword_ops() {
+        // daddu t0, t1, t2 : SPECIAL funct=0x2d rd=t0(8) rs=t1(9) rt=t2(10) -> 0x012A402D
+        let i = be64(0x012A_402D, 0);
+        assert_eq!(i.mnemonic, "daddu");
+        assert_eq!(i.operands[0].text, "t0");
+        assert_eq!(i.operands[2].text, "t1");
+        assert_eq!(i.operands[4].text, "t2");
+        // The same word is invalid on MIPS32 (the funct slot is reserved).
+        assert!(decode(&0x012A_402Du32.to_be_bytes(), 0, true, false).is_none());
+
+        // ld t0, 16(sp) : opcode=0x37 rt=t0(8) rs=sp(29) imm=16 -> 0xDFA80010
+        let ld = be64(0xDFA8_0010, 0);
+        assert_eq!(ld.mnemonic, "ld");
+        assert_eq!(
+            ld.operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>(),
+            ["t0", ",", "0x10", "(", "sp", ")"]
+        );
+        // On MIPS32 opcode 0x37 is an unknown coprocessor op, shown generically (not `ld`).
+        assert_ne!(be(0xDFA8_0010, 0).mnemonic, "ld");
+
+        // sd ra, 8(sp) : opcode=0x3f rt=ra(31) rs=sp(29) imm=8 -> 0xFFBF0008
+        assert_eq!(be64(0xFFBF_0008, 0).mnemonic, "sd");
+        // daddiu sp, sp, -32 : opcode=0x19 rt=sp rs=sp imm=-32 -> 0x67BDFFE0
+        assert_eq!(be64(0x67BD_FFE0, 0).mnemonic, "daddiu");
+        // dsll32 v0, v0, 0 : SPECIAL funct=0x3c, shift reported as 32 -> 0x0002103C
+        let dsll = be64(0x0002_103C, 0);
+        assert_eq!(dsll.mnemonic, "dsll32");
+        assert_eq!(dsll.operands[4].text, "0x20");
+    }
+
+    #[test]
     fn endianness_is_respected() {
         // The big-endian word 0x00000000 and its little-endian bytes decode differently from
         // the raw byte order: feeding LE bytes as BE would misdecode. `addu` BE 0x012A4021.
         let be_bytes = 0x012A_4021u32.to_be_bytes();
-        assert_eq!(decode(&be_bytes, 0, true).unwrap().mnemonic, "addu");
+        assert_eq!(decode(&be_bytes, 0, true, false).unwrap().mnemonic, "addu");
         // The same bytes read little-endian are a different word, not necessarily `addu`.
-        let le = decode(&be_bytes, 0, false);
+        let le = decode(&be_bytes, 0, false, false);
         assert!(le.is_none() || le.unwrap().mnemonic != "addu");
     }
 }
