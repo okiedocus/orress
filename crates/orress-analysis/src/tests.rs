@@ -184,6 +184,31 @@ fn listing_covers_code_and_padding() {
 }
 
 #[test]
+fn listing_shows_data_section_strings() {
+    let p = analyzed();
+    // The non-executable `.rodata` region is now part of the linear listing.
+    assert!(
+        p.lines
+            .iter()
+            .any(|l| l.addr == DATA && l.kind == LineKind::Region),
+        "data region header present"
+    );
+    // "Wrong password\0" (15 bytes incl. NUL) shows as one string line at DATA.
+    let str_line = p
+        .lines
+        .iter()
+        .find(|l| l.addr == DATA && matches!(l.kind, LineKind::Str(_)));
+    assert_eq!(str_line.map(|l| l.kind), Some(LineKind::Str(15)));
+    // The rest of the data region renders as bounded `db` runs, not one giant line.
+    assert!(
+        p.lines
+            .iter()
+            .any(|l| l.addr > DATA && matches!(l.kind, LineKind::Data(_))),
+        "trailing data shown as db"
+    );
+}
+
+#[test]
 fn unsupported_arch_is_none() {
     let (mut info, data) = crackme();
     info.arch = "MIPS (32-bit)".into();
