@@ -217,18 +217,32 @@ fn decode_base(w: u32, address: u64) -> Option<Insn> {
             } else if w == 0x0010_0073 {
                 insn(address, 4, "ebreak", vec![], Flow::Stop)
             } else {
-                // CSR instructions: shown generically.
+                // CSR instructions: `csrrw rd, csr, rs1` / `csrrwi rd, csr, zimm`. The CSR number
+                // is the unsigned 12-bit immediate; the `*i` forms (f3 bit 2 set) take a 5-bit
+                // zero-extended immediate in place of the source register.
                 let m = [
                     "", "csrrw", "csrrs", "csrrc", "", "csrrwi", "csrrsi", "csrrci",
                 ][f3 as usize];
                 if m.is_empty() {
                     return None;
                 }
+                let csr = (w >> 20) & 0xfff;
+                let src = if f3 & 0b100 != 0 {
+                    imm(i64::from(rs1))
+                } else {
+                    reg(rs1)
+                };
                 insn(
                     address,
                     4,
                     m,
-                    vec![reg(rd), punct(","), reg(rs1)],
+                    vec![
+                        reg(rd),
+                        punct(","),
+                        num(format!("0x{csr:x}")),
+                        punct(","),
+                        src,
+                    ],
                     Flow::Next,
                 )
             }
@@ -780,6 +794,25 @@ mod tests {
         // c.slli a0, 0x1
         assert_eq!(d(0x0506, 0).mnemonic, "c.slli");
         assert_eq!(ops(0x0506), ["a0", ",", "0x1"]);
+    }
+
+    #[test]
+    fn csr_instructions() {
+        let ops = |w: u32| {
+            d(w, 0)
+                .operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>()
+        };
+        // csrrw a0, 0x300, a1 — register source.
+        let i = d(0x3005_9573, 0);
+        assert_eq!(i.mnemonic, "csrrw");
+        assert_eq!(ops(0x3005_9573), ["a0", ",", "0x300", ",", "a1"]);
+        // csrrwi a0, 0x300, 0x5 — the `*i` form takes a 5-bit zero-extended immediate.
+        let i = d(0x3002_d573, 0);
+        assert_eq!(i.mnemonic, "csrrwi");
+        assert_eq!(ops(0x3002_d573), ["a0", ",", "0x300", ",", "0x5"]);
     }
 
     #[test]

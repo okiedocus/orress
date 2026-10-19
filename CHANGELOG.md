@@ -44,8 +44,9 @@ All notable changes to ORRESS are documented here. The format follows
   (`C`) set** is decoded with operands — the stack loads/stores (`c.lwsp`/`c.ldsp`/`c.swsp`/
   `c.sdsp`/`c.addi4spn`), reg+offset loads/stores (`c.lw`/`c.ld`/`c.sw`/`c.sd`) and the
   `c.addi`/`c.lui`/`c.addi16sp`/`c.slli`/`c.sub`/… arithmetic that make up most of a RISC-V
-  function; floating-point compressed halves stay length-aware. The decompiler is x86/ARM64
-  only for now.
+  function; floating-point compressed halves stay length-aware. CSR instructions now show the
+  full `csrrw rd, csr, rs1` / `csrrwi rd, csr, zimm` form (the CSR number and the immediate
+  variants' operand were previously dropped). The decompiler is x86/ARM64 only for now.
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,
