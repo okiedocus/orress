@@ -448,6 +448,75 @@ impl OrressApp {
         }
     }
 
+    /// Imports names (and comments) from a file — the ORRESS JSON export, or a plain
+    /// `addr name` / Ghidra-style CSV list — and applies them to the open binary.
+    fn import_annotations(&mut self, ctx: &Context) {
+        if self.docs.active().is_none() {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Names/comments", &["json", "csv", "txt"])
+            .set_title("Import names and comments")
+            .pick_file()
+        else {
+            return;
+        };
+        let parsed = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| orress_project::interop::parse(&text));
+        match parsed {
+            Ok(imported) => {
+                let (mut named, mut commented) = (0, 0);
+                if let Some(doc) = self.docs.active_mut() {
+                    for (addr, name) in &imported.names {
+                        if doc.rename(*addr, name).is_ok() {
+                            named += 1;
+                        }
+                    }
+                    for (addr, text) in &imported.comments {
+                        doc.set_comment(*addr, text);
+                        commented += 1;
+                    }
+                }
+                self.notify(
+                    ctx,
+                    format!("Imported {named} name(s) and {commented} comment(s)"),
+                    false,
+                );
+            }
+            Err(e) => self.notify(ctx, format!("Could not import: {e}"), true),
+        }
+    }
+
+    /// Exports the open binary's names and comments as portable JSON.
+    fn export_annotations(&mut self, ctx: &Context) {
+        let Some(json) = self
+            .docs
+            .active()
+            .map(|d| orress_project::interop::export(&d.annotations))
+        else {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Names/comments", &["json"])
+            .set_title("Export names and comments")
+            .set_file_name("annotations.json")
+            .save_file()
+        else {
+            return;
+        };
+        match std::fs::write(&path, json) {
+            Ok(()) => self.notify(ctx, "Exported names and comments", false),
+            Err(e) => self.notify(
+                ctx,
+                format!("Could not write {}: {e}", path.display()),
+                true,
+            ),
+        }
+    }
+
     /// Saves settings immediately (the eframe `save` hook also does this periodically, but a
     /// folder/project change is worth persisting at once).
     fn save_settings(&self) {
@@ -794,6 +863,8 @@ impl OrressApp {
             }
             "analysis::ApplySignatures" => self.apply_signatures(ctx),
             "analysis::GenerateSignatures" => self.generate_signatures(ctx),
+            "annotations::Import" => self.import_annotations(ctx),
+            "annotations::Export" => self.export_annotations(ctx),
             "hex::GoTo" => self.hex_command(ctx, ViewCommand::GoTo),
             "hex::Find" => self.hex_command(ctx, ViewCommand::Find),
             "hex::FindNext" => self.hex_command(ctx, ViewCommand::FindNext),
@@ -1174,6 +1245,8 @@ impl OrressApp {
                     ui.separator();
                     self.menu_entry(ui, "analysis::ApplySignatures", &mut clicked);
                     self.menu_entry(ui, "analysis::GenerateSignatures", &mut clicked);
+                    self.menu_entry(ui, "annotations::Import", &mut clicked);
+                    self.menu_entry(ui, "annotations::Export", &mut clicked);
                     ui.separator();
                     self.menu_entry(ui, "challenge::OpenWorkbench", &mut clicked);
                 });

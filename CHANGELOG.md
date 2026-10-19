@@ -19,6 +19,10 @@ All notable changes to ORRESS are documented here. The format follows
   statements and basic blocks, before it is structured into `if`/`while` and printed as
   Rust. A window on how decompilation works; each line keeps its source address and block
   labels are clickable.
+- **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
+  binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
+  them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,
+  objdump) — so you can move your work between tools or back it up.
 - **Linear view covers data sections**: the disassembly (linear) view now lists the
   non-executable regions too (`.rodata`/`.data`/…), not just code — detected ASCII strings
   render as quoted literals and other bytes as `db` runs, so you can scroll the whole image

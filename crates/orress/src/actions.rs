@@ -59,6 +59,18 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          same functions later in stripped binaries.",
     )
     .register(
+        "annotations::Import",
+        "Import Names/Comments…",
+        "Bring names and comments into the open binary from a file — the ORRESS JSON export, or \
+         a plain `address name` / CSV list from IDA, Ghidra, radare2 or objdump.",
+    )
+    .register(
+        "annotations::Export",
+        "Export Names/Comments…",
+        "Save the open binary's names and comments as portable JSON, to back them up or carry \
+         your work to another tool.",
+    )
+    .register(
         "workspace::CloseProject",
         "Close Project",
         "Close the open project folder: the folder tree disappears and no project is reopened \
