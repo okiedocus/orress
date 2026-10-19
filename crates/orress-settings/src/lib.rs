@@ -20,9 +20,12 @@ pub struct Settings {
     pub explain_mode: bool,
     /// Last opened files, newest first.
     pub recent_files: Vec<PathBuf>,
-    /// The open project folder (Zed-style), if any. Restored on startup so the folder tree
-    /// reappears. `None` when no folder is open.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Last opened project folders, newest first. Persisted so "Open Recent Project" can
+    /// reopen one, even though the open project itself is not restored on startup.
+    pub recent_projects: Vec<PathBuf>,
+    /// The open project folder (Zed-style), if any; `None` when no folder is open. Session-only
+    /// and never persisted (`#[serde(skip)]`), so every launch starts fresh with no project open.
+    #[serde(skip)]
     pub project_root: Option<PathBuf>,
     /// Per-language-server configuration, keyed by server name/id. Mirrors Zed's `lsp` settings
     /// section, so it both configures ORRESS's own LSP client and is handed to Zed language
@@ -38,6 +41,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             explain_mode: true,
             recent_files: Vec::new(),
+            recent_projects: Vec::new(),
             project_root: None,
             lsp: BTreeMap::new(),
         }
@@ -115,6 +119,13 @@ impl Settings {
         self.recent_files.retain(|p| p != &path);
         self.recent_files.insert(0, path);
         self.recent_files.truncate(MAX_RECENT);
+    }
+
+    /// Records a project folder as recently opened (newest first, de-duplicated, capped).
+    pub fn push_recent_project(&mut self, path: PathBuf) {
+        self.recent_projects.retain(|p| p != &path);
+        self.recent_projects.insert(0, path);
+        self.recent_projects.truncate(MAX_RECENT);
     }
 
     /// The editor settings in the JSON shape a Zed language extension reads via `get-settings`:
@@ -255,6 +266,34 @@ mod tests {
                 .filter(|p| p.as_os_str() == "f10")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn recent_projects_dedupe_and_cap() {
+        let mut s = Settings::default();
+        for i in 0..15 {
+            s.push_recent_project(PathBuf::from(format!("p{i}")));
+        }
+        s.push_recent_project(PathBuf::from("p10"));
+        assert_eq!(s.recent_projects.len(), MAX_RECENT);
+        assert_eq!(s.recent_projects[0], PathBuf::from("p10"));
+    }
+
+    #[test]
+    fn project_root_is_not_persisted() {
+        // The open project is session-only: it must not survive a save/load round-trip, so
+        // every launch starts fresh with no project open.
+        let s = Settings {
+            project_root: Some(PathBuf::from("/some/project")),
+            recent_projects: vec![PathBuf::from("/some/project")],
+            ..Default::default()
+        };
+        let reloaded = Settings::from_json(&s.to_json()).unwrap();
+        assert_eq!(reloaded.project_root, None);
+        assert_eq!(
+            reloaded.recent_projects,
+            vec![PathBuf::from("/some/project")]
         );
     }
 }

@@ -8,6 +8,12 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **Close project / fresh start**: a **Close Project** command in the File menu closes the
+  open folder, and the open project is now session-only — ORRESS starts fresh with no
+  project each launch (open files already started clean). The File menu's "Open Recent" is
+  renamed **Open Recent File**, and a new **Open Recent Project** submenu reopens a recent
+  folder.
+
 - **User-defined types**: a Types view to declare `struct`/`union`/`enum`/`typedef` with a
   form builder (field name, type, array count, pointer), with a live C-layout preview
   (offsets, sizes, padding). Apply a type to a data address from the hex view's right-click
