@@ -8,6 +8,11 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **Linear view covers data sections**: the disassembly (linear) view now lists the
+  non-executable regions too (`.rodata`/`.data`/…), not just code — detected ASCII strings
+  render as quoted literals and other bytes as `db` runs, so you can scroll the whole image
+  in address order like IDA/Binary Ninja.
+
 - **Close project / fresh start**: a **Close Project** command in the File menu closes the
   open folder, and the open project is now session-only — ORRESS starts fresh with no
   project each launch (open files already started clean). The File menu's "Open Recent" is

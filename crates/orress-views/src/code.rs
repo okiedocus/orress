@@ -446,6 +446,25 @@ pub fn render_line(doc: &Document, program: &Program, line: &Line, style: &Style
             let text: Vec<String> = bytes.iter().map(|x| format!("0x{x:02x}")).collect();
             b.push(&text.join(","), style.muted, None);
         }
+        LineKind::Str(n) => {
+            b.push(
+                &address_text(line.addr, style.wide),
+                hex_color(&c.address),
+                None,
+            );
+            b.push("  ", style.text, None);
+            let start = b.chars;
+            b.push("db", style.muted, None);
+            b.pad_to(start + 8);
+            // Drop the trailing NUL; show the text as a quoted, escaped string literal.
+            let bytes = program.memory.read(line.addr, n.into()).unwrap_or(&[]);
+            let text: String = bytes
+                .iter()
+                .take_while(|&&x| x != 0)
+                .flat_map(|&x| (x as char).escape_default())
+                .collect();
+            b.push(&format!("\"{text}\""), hex_color(&c.string), None);
+        }
     }
     b.finish()
 }
