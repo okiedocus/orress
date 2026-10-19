@@ -40,8 +40,12 @@ All notable changes to ORRESS are documented here. The format follows
   labels are clickable.
 - **RISC-V (RV64I + M) disassembly**: ORRESS now loads and disassembles 64-bit RISC-V ELFs —
   functions, cross-references, the linear and graph views, hex and strings all work.
-  Hand-rolled pure-Rust decoder (no new dependency); compressed (`C`) instructions are
-  length-aware so the listing stays aligned. The decompiler is x86/ARM64 only for now.
+  Hand-rolled pure-Rust decoder (no new dependency); the **full RV64 integer compressed
+  (`C`) set** is decoded with operands — the stack loads/stores (`c.lwsp`/`c.ldsp`/`c.swsp`/
+  `c.sdsp`/`c.addi4spn`), reg+offset loads/stores (`c.lw`/`c.ld`/`c.sw`/`c.sd`) and the
+  `c.addi`/`c.lui`/`c.addi16sp`/`c.slli`/`c.sub`/… arithmetic that make up most of a RISC-V
+  function; floating-point compressed halves stay length-aware. The decompiler is x86/ARM64
+  only for now.
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,
