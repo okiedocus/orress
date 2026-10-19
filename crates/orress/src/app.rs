@@ -366,10 +366,18 @@ impl OrressApp {
     /// Opens a project folder (Zed-style): roots the folder tree at `dir` and persists it so the
     /// tree reappears next session.
     fn open_folder(&mut self, dir: PathBuf) {
+        self.settings.push_recent_project(dir.clone());
         self.settings.project_root = Some(dir);
         self.save_settings();
         // Make sure the left panel (with the tree) is visible.
         self.workspace.open(TabKind::ProjectTree);
+    }
+
+    /// Closes the open project: the folder tree disappears and no project is remembered for
+    /// next launch (the project is session-only). The recent-projects list is kept.
+    fn close_project(&mut self) {
+        self.settings.project_root = None;
+        self.save_settings();
     }
 
     /// Saves settings immediately (the eframe `save` hook also does this periodically, but a
@@ -624,6 +632,7 @@ impl OrressApp {
                     self.open_folder(dir);
                 }
             }
+            "workspace::CloseProject" => self.close_project(),
             "workspace::NewProject" => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_title("New project folder")
@@ -906,6 +915,7 @@ impl OrressApp {
     fn menu_bar(&mut self, ui: &mut Ui) -> Vec<ActionId> {
         let mut clicked = Vec::new();
         let mut open_recent = None;
+        let mut open_recent_project = None;
         let mut edit_event: Option<egui::Event> = None;
         // Save / Save As act on the focused code editor, so enable them only for an editor tab.
         let editor_active = self.workspace.active_is_editor();
@@ -917,8 +927,23 @@ impl OrressApp {
                 ui.menu_button("File", |ui| {
                     self.menu_entry(ui, "workspace::NewProject", &mut clicked);
                     self.menu_entry(ui, "workspace::OpenProject", &mut clicked);
+                    ui.menu_button("Open Recent Project", |ui| {
+                        if self.settings.recent_projects.is_empty() {
+                            ui.label(RichText::new("No recent projects").weak());
+                        }
+                        for path in &self.settings.recent_projects {
+                            if ui.button(path.display().to_string()).clicked() {
+                                open_recent_project = Some(path.clone());
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.add_enabled_ui(self.settings.project_root.is_some(), |ui| {
+                        self.menu_entry(ui, "workspace::CloseProject", &mut clicked);
+                    });
+                    ui.separator();
                     self.menu_entry(ui, "workspace::Open", &mut clicked);
-                    ui.menu_button("Open Recent", |ui| {
+                    ui.menu_button("Open Recent File", |ui| {
                         if self.settings.recent_files.is_empty() {
                             ui.label(RichText::new("No recent files").weak());
                         }
@@ -1093,6 +1118,9 @@ impl OrressApp {
         });
         if let Some(path) = open_recent {
             self.open_file(path);
+        }
+        if let Some(dir) = open_recent_project {
+            self.open_folder(dir);
         }
         if let Some(event) = edit_event {
             // Refocus the text field now; the queued event is injected next frame.

@@ -47,6 +47,12 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          folder can hold a target's binary, source, notes, patches and extracted resources.",
     )
     .register(
+        "workspace::CloseProject",
+        "Close Project",
+        "Close the open project folder: the folder tree disappears and no project is reopened \
+         next launch (the project is session-only). Your files, names and patches are untouched.",
+    )
+    .register(
         "workspace::NewNotes",
         "New Notes Tab",
         "Open an empty notes tab. Writing down what you learn is half of reverse engineering.",
