@@ -23,10 +23,10 @@ const FREG: [&str; 32] = [
     "fs10", "fs11", "ft8", "ft9", "ft10", "ft11",
 ];
 
-pub fn decode(bytes: &[u8], address: u64) -> Option<Insn> {
+pub fn decode(bytes: &[u8], address: u64, bits64: bool) -> Option<Insn> {
     let half = u16::from_le_bytes(bytes.get(..2)?.try_into().ok()?);
     if half & 0b11 != 0b11 {
-        return decode_compressed(half, address);
+        return decode_compressed(half, address, bits64);
     }
     let w = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
     decode_base(w, address)
@@ -549,12 +549,14 @@ fn cmem(data: Token, off: i64, base: Token) -> Vec<Token> {
     vec![data, punct(","), imm(off), punct("("), base, punct(")")]
 }
 
-fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
+fn decode_compressed(h: u16, address: u64, bits64: bool) -> Option<Insn> {
     let w = u32::from(h);
     let op = w & 0b11;
     let f3 = (w >> 13) & 0b111;
-    // The RV64 integer compressed set (quadrants 0/1/2); floating-point and reserved encodings stay
-    // length-aware (shown as `c.insn`) so the linear sweep stays aligned. `sp` is x2.
+    // The integer compressed set (quadrants 0/1/2); floating-point and reserved encodings stay
+    // length-aware (shown as `c.insn`) so the linear sweep stays aligned. `sp` is x2. Five slots
+    // differ by width: on RV32 they are `c.jal`/`c.flw`/`c.fsw`/`c.flwsp`/`c.fswsp` where RV64 has
+    // `c.addiw`/`c.ld`/`c.sd`/`c.ldsp`/`c.sdsp`.
     Some(match (op, f3) {
         // ---- Quadrant 0: reg+imm and stack loads/stores (`rs1'`/`rd'` are x8..x15) ----
         // C.ADDI4SPN: `addi rd', sp, nzuimm`. An all-zero immediate is the reserved/illegal form.
@@ -579,11 +581,19 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
             cmem(creg((w >> 2) & 7), clw_imm(w), creg((w >> 7) & 7)),
             Flow::Next,
         ),
-        (0b00, 0b011) => insn(
+        // RV64 C.LD / RV32 C.FLW.
+        (0b00, 0b011) if bits64 => insn(
             address,
             2,
             "c.ld",
             cmem(creg((w >> 2) & 7), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b011) => insn(
+            address,
+            2,
+            "c.flw",
+            cmem(freg(8 + ((w >> 2) & 7)), clw_imm(w), creg((w >> 7) & 7)),
             Flow::Next,
         ),
         (0b00, 0b110) => insn(
@@ -593,11 +603,19 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
             cmem(creg((w >> 2) & 7), clw_imm(w), creg((w >> 7) & 7)),
             Flow::Next,
         ),
-        (0b00, 0b111) => insn(
+        // RV64 C.SD / RV32 C.FSW.
+        (0b00, 0b111) if bits64 => insn(
             address,
             2,
             "c.sd",
             cmem(creg((w >> 2) & 7), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b111) => insn(
+            address,
+            2,
+            "c.fsw",
+            cmem(freg(8 + ((w >> 2) & 7)), clw_imm(w), creg((w >> 7) & 7)),
             Flow::Next,
         ),
 
@@ -617,14 +635,24 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
                 )
             }
         }
-        // C.ADDIW (RV64): `addiw rd, rd, imm`.
-        (0b01, 0b001) => insn(
+        // RV64 C.ADDIW (`addiw rd, rd, imm`) / RV32 C.JAL (a call to pc-relative target).
+        (0b01, 0b001) if bits64 => insn(
             address,
             2,
             "c.addiw",
             vec![reg((w >> 7) & 0x1f), punct(","), imm(ci_imm(w))],
             Flow::Next,
         ),
+        (0b01, 0b001) => {
+            let target = address.wrapping_add_signed(cj_imm(w));
+            insn(
+                address,
+                2,
+                "c.jal",
+                vec![addr_tok(target)],
+                Flow::Call(target),
+            )
+        }
         // C.LI.
         (0b01, 0b010) => insn(
             address,
@@ -697,11 +725,19 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
             cmem(reg((w >> 7) & 0x1f), lwsp_imm(w), reg(2)),
             Flow::Next,
         ),
-        (0b10, 0b011) => insn(
+        // RV64 C.LDSP / RV32 C.FLWSP.
+        (0b10, 0b011) if bits64 => insn(
             address,
             2,
             "c.ldsp",
             cmem(reg((w >> 7) & 0x1f), ldsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        (0b10, 0b011) => insn(
+            address,
+            2,
+            "c.flwsp",
+            cmem(freg((w >> 7) & 0x1f), lwsp_imm(w), reg(2)),
             Flow::Next,
         ),
         // C.JR / C.MV / C.EBREAK / C.JALR / C.ADD.
@@ -760,11 +796,19 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
             cmem(reg((w >> 2) & 0x1f), swsp_imm(w), reg(2)),
             Flow::Next,
         ),
-        (0b10, 0b111) => insn(
+        // RV64 C.SDSP / RV32 C.FSWSP.
+        (0b10, 0b111) if bits64 => insn(
             address,
             2,
             "c.sdsp",
             cmem(reg((w >> 2) & 0x1f), sdsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        (0b10, 0b111) => insn(
+            address,
+            2,
+            "c.fswsp",
+            cmem(freg((w >> 2) & 0x1f), swsp_imm(w), reg(2)),
             Flow::Next,
         ),
 
@@ -939,7 +983,12 @@ mod tests {
     use super::*;
 
     fn d(w: u32, addr: u64) -> Insn {
-        decode(&w.to_le_bytes(), addr).expect("decodes")
+        decode(&w.to_le_bytes(), addr, true).expect("decodes")
+    }
+
+    /// Decode a 16-bit compressed half-word as RV32 (`bits64 = false`).
+    fn c32(h: u16, addr: u64) -> Insn {
+        decode(&h.to_le_bytes(), addr, false).expect("decodes")
     }
 
     #[test]
@@ -985,12 +1034,12 @@ mod tests {
     #[test]
     fn compressed_is_length_aware_and_flows() {
         // c.ret (c.jr ra) = 0x8082 -> 2 bytes, Return
-        let ret = decode(&0x8082u16.to_le_bytes(), 0).unwrap();
+        let ret = decode(&0x8082u16.to_le_bytes(), 0, true).unwrap();
         assert_eq!(ret.len, 2);
         assert_eq!(ret.flow, Flow::Return);
         // A reserved compressed half (quadrant 0, funct3=100) still decodes as a 2-byte generic
         // c.insn (keeps the sweep aligned without claiming to know the operands).
-        let other = decode(&0x8000u16.to_le_bytes(), 0).unwrap();
+        let other = decode(&0x8000u16.to_le_bytes(), 0, true).unwrap();
         assert_eq!(other.len, 2);
         assert_eq!(other.mnemonic, "c.insn");
     }
@@ -1085,6 +1134,37 @@ mod tests {
 
     #[test]
     fn rejects_truncated() {
-        assert!(decode(&[0x13], 0).is_none());
+        assert!(decode(&[0x13], 0, true).is_none());
+    }
+
+    #[test]
+    fn rv32_compressed_collisions() {
+        // The five slots that differ by XLEN. c.addiw (0x0001 | f3=001 | op=01 => 0x2001) is
+        // c.addiw on RV64 but c.jal (a call) on RV32.
+        let w = 0x2001u16;
+        assert_eq!(d(u32::from(w), 0).mnemonic, "c.addiw");
+        let jal = c32(w, 0x1000);
+        assert_eq!(jal.mnemonic, "c.jal");
+        assert!(
+            matches!(jal.flow, Flow::Call(_)),
+            "c.jal is a call: {:?}",
+            jal.flow
+        );
+
+        // Quadrant 0 funct3=011: c.ld (RV64) vs c.flw (RV32).
+        let ld = 0x4000u16 | (1 << 13); // op=00, f3=011
+        assert_eq!(d(u32::from(ld), 0).mnemonic, "c.ld");
+        assert_eq!(c32(ld, 0).mnemonic, "c.flw");
+        // funct3=111: c.sd (RV64) vs c.fsw (RV32).
+        let sd = 0xc000u16 | (1 << 13);
+        assert_eq!(d(u32::from(sd), 0).mnemonic, "c.sd");
+        assert_eq!(c32(sd, 0).mnemonic, "c.fsw");
+        // Quadrant 2 funct3=011/111: c.ldsp/c.sdsp (RV64) vs c.flwsp/c.fswsp (RV32).
+        let ldsp = 0x6002u16;
+        assert_eq!(d(u32::from(ldsp), 0).mnemonic, "c.ldsp");
+        assert_eq!(c32(ldsp, 0).mnemonic, "c.flwsp");
+        let sdsp = 0xe002u16;
+        assert_eq!(d(u32::from(sdsp), 0).mnemonic, "c.sdsp");
+        assert_eq!(c32(sdsp, 0).mnemonic, "c.fswsp");
     }
 }

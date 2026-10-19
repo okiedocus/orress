@@ -21,6 +21,8 @@ pub enum Isa {
     Arm64,
     /// RISC-V 64-bit (RV64I + M; compressed instructions are length-aware).
     Riscv64,
+    /// RISC-V 32-bit (RV32I + M + C; common in embedded/firmware).
+    Riscv32,
     /// MIPS32, big-endian (the classic byte order).
     Mips32,
     /// MIPS32, little-endian (`mipsel`).
@@ -46,6 +48,7 @@ impl Isa {
             "x86-64" | "x86-64 (x32 ABI)" => Some(Self::X64),
             "ARM64 (AArch64)" => Some(Self::Arm64),
             "RISC-V (64-bit)" => Some(Self::Riscv64),
+            "RISC-V (32-bit)" => Some(Self::Riscv32),
             "MIPS (32-bit)" => Some(if little { Self::Mips32El } else { Self::Mips32 }),
             "MIPS64" => Some(if little { Self::Mips64El } else { Self::Mips64 }),
             "PowerPC (32-bit)" => Some(Self::Ppc32),
@@ -60,6 +63,7 @@ impl Isa {
             Self::X64 => "x86-64",
             Self::Arm64 => "ARM64",
             Self::Riscv64 => "RISC-V (64-bit)",
+            Self::Riscv32 => "RISC-V (32-bit)",
             Self::Mips32 | Self::Mips32El => "MIPS (32-bit)",
             Self::Mips64 | Self::Mips64El => "MIPS64",
             Self::Ppc32 => "PowerPC (32-bit)",
@@ -73,6 +77,7 @@ impl Isa {
             Self::X86 | Self::X64 => 15,
             Self::Arm64
             | Self::Riscv64
+            | Self::Riscv32
             | Self::Mips32
             | Self::Mips32El
             | Self::Mips64
@@ -85,7 +90,7 @@ impl Isa {
 
     pub fn pointer_size(self) -> u64 {
         match self {
-            Self::X86 | Self::Mips32 | Self::Mips32El | Self::Ppc32 => 4,
+            Self::X86 | Self::Riscv32 | Self::Mips32 | Self::Mips32El | Self::Ppc32 => 4,
             Self::X64
             | Self::Arm64
             | Self::Riscv64
@@ -220,7 +225,8 @@ pub fn decode(isa: Isa, bytes: &[u8], address: u64) -> Option<Insn> {
         Isa::X86 => x86::decode(32, bytes, address),
         Isa::X64 => x86::decode(64, bytes, address),
         Isa::Arm64 => arm64::decode(bytes, address),
-        Isa::Riscv64 => riscv::decode(bytes, address),
+        Isa::Riscv64 => riscv::decode(bytes, address, true),
+        Isa::Riscv32 => riscv::decode(bytes, address, false),
         Isa::Mips32 => mips::decode(bytes, address, true, false),
         Isa::Mips32El => mips::decode(bytes, address, false, false),
         Isa::Mips64 => mips::decode(bytes, address, true, true),
@@ -273,6 +279,7 @@ pub fn reg_info(isa: Isa, bytes: &[u8], address: u64) -> Option<RegInfo> {
         Isa::X64 => x86::reg_info(64, bytes, address),
         Isa::Arm64
         | Isa::Riscv64
+        | Isa::Riscv32
         | Isa::Mips32
         | Isa::Mips32El
         | Isa::Mips64

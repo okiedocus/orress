@@ -92,6 +92,11 @@ All notable changes to ORRESS are documented here. The format follows
   previously showed as raw data. CSR instructions now show the full `csrrw rd, csr, rs1` /
   `csrrwi rd, csr, zimm` form (the CSR number and the immediate variants' operand were
   previously dropped).
+- **RISC-V 32-bit (RV32)** disassembly: ORRESS now also loads 32-bit RISC-V ELFs (common in
+  embedded/firmware), with 4-byte pointers and the RV32 compressed set. The five compressed
+  encodings that differ by XLEN are decoded per the ISA — `c.jal` (a **call**, so RV32
+  control flow is recovered correctly), `c.flw`/`c.fsw`/`c.flwsp`/`c.fswsp` — where RV64 has
+  `c.addiw`/`c.ld`/`c.sd`/`c.ldsp`/`c.sdsp`. The base integer set is shared with RV64.
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,
