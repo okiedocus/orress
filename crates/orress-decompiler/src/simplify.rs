@@ -72,6 +72,8 @@ pub fn float_arg_regs(conv: Convention) -> &'static [u8] {
         // MIPS o32 passes up to two FP arguments in $f12/$f14 (modelled as XMM 12/14 — the MIPS
         // lifter maps $fN to Xmm(N), keeping the return register $f0 on Xmm(0)).
         Convention::Mips => &[12, 14],
+        // MIPS n64 passes FP arguments in $f12–$f19 (modelled as XMM 12–19).
+        Convention::Mips64 => &[12, 13, 14, 15, 16, 17, 18, 19],
     }
 }
 

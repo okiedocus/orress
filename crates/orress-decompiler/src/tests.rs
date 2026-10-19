@@ -186,6 +186,27 @@ fn mips64_lifts_doubleword_add() {
 }
 
 #[test]
+fn mips64_uses_n64_argument_registers() {
+    // f(..., a3, a4): daddu v0,a3,a4 ; jr ra ; nop  ->  returns the 4th + 5th integer args.
+    // $a4 ($8) is an argument only under n64; o32 would treat it as a temporary (t0), so the
+    // 5th argument proves the n64 convention is in effect for MIPS64.
+    let code: &[u8] = &[
+        0x00, 0xe8, 0x10, 0x2d, // daddu v0,a3,a4
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips64_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a4 + a5") || text.contains("a4 +"),
+        "fifth integer argument (a4/$8) recovered under n64:\n{text}"
+    );
+}
+
+#[test]
 fn mips_lifts_add_through_delay_slot() {
     // f(a, b): addu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b
     // The `nop` is the jr's delay slot; the CFG must keep it in the block.

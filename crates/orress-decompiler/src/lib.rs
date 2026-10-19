@@ -203,7 +203,8 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
     let conv = match program.isa {
         Isa::Arm64 => Convention::Aarch64,
         Isa::Riscv64 => Convention::Riscv,
-        Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => Convention::Mips,
+        Isa::Mips32 | Isa::Mips32El => Convention::Mips,
+        Isa::Mips64 | Isa::Mips64El => Convention::Mips64,
         _ => conv,
     };
     let f = program

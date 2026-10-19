@@ -10,8 +10,8 @@
 //! The *register width* is 64-bit on MIPS64 and 32-bit on MIPS32; it is the width of a register
 //! value, a pointer and the native-word arithmetic. MIPS64 adds the doubleword instructions
 //! (`daddu`, `dsll`, `ld`/`sd` …); the sub-word loads sign- or zero-extend to the register width,
-//! as on hardware. The n64 ABI's extra argument registers (`$a4`..`$a7`) are not yet modelled —
-//! argument detection uses the o32 `$a0`..`$a3`.
+//! as on hardware. The calling convention follows the ISA: o32 on MIPS32 (`$a0`..`$a3`,
+//! `$f12`/`$f14`) and n64 on MIPS64 (`$a0`..`$a7`, `$f12`..`$f19`) — see [`Convention`].
 //!
 //! The *branch delay slot* (the instruction after a transfer, which runs before it) is kept in
 //! the branch's block by the CFG builder, so lifting the block in order is correct — unless the
@@ -30,7 +30,8 @@ pub struct MipsLifter<'a> {
 }
 
 struct State {
-    /// Argument registers (1..5, i.e. a0..a3) written since the last call, for argument counting.
+    /// Argument registers written since the last call, for argument counting: a0..a3 (and, on
+    /// n64, a4..a7).
     written: Vec<u8>,
 }
 
@@ -132,6 +133,15 @@ impl MipsLifter<'_> {
         }
     }
 
+    /// The calling convention: n64 on MIPS64, o32 on MIPS32.
+    fn conv(&self) -> Convention {
+        if matches!(self.program.isa, Isa::Mips64 | Isa::Mips64El) {
+            Convention::Mips64
+        } else {
+            Convention::Mips
+        }
+    }
+
     fn lift_block(&self, f: &Function, index: usize) -> Block {
         let fb = &f.blocks[index];
         let mut st = State {
@@ -186,8 +196,10 @@ impl MipsLifter<'_> {
     }
 
     fn note(st: &mut State, v: &Var) {
+        // Argument registers in mips.rs numbering: a0..a3 (1..4) for o32, plus a4..a7 (6..9) for
+        // n64. Tracking both is harmless on o32, whose `arg_regs` list stops at a3.
         if let Var::Reg(r) = v
-            && (1..=4).contains(r)
+            && ((1..=4).contains(r) || (6..=9).contains(r))
         {
             st.written.push(*r);
         }
@@ -690,7 +702,8 @@ impl MipsLifter<'_> {
             CallTarget::Direct(a) => self.program.name(*a).map(|n| n.text.clone()),
             _ => None,
         };
-        let regs = Convention::Mips.arg_regs();
+        let conv = self.conv();
+        let regs = conv.arg_regs();
         let count = match &target {
             CallTarget::Direct(a) => self
                 .param_counts
@@ -706,7 +719,7 @@ impl MipsLifter<'_> {
             .map(|&r| Expr::Var(Var::Reg(r), rw))
             .collect();
         out.push((addr, Stmt::Assign(Var::Reg(0), Expr::Call(target, args))));
-        for &r in Convention::Mips.clobbered() {
+        for &r in conv.clobbered() {
             out.push((
                 addr,
                 Stmt::Assign(Var::Reg(r), Expr::Unknown("clobbered".into())),
