@@ -64,6 +64,13 @@ impl Isa {
             Self::X64 | Self::Arm64 | Self::Riscv64 => 8,
         }
     }
+
+    /// Whether a control-flow instruction has a *delay slot*: the next instruction executes
+    /// before the transfer takes effect. True for MIPS, so the CFG keeps the delay slot in the
+    /// branch's block (it runs on both the taken and not-taken paths).
+    pub fn has_delay_slots(self) -> bool {
+        matches!(self, Self::Mips32 | Self::Mips32El)
+    }
 }
 
 /// A statically-addressable jump table `[base + index*entry]`: `base` is the absolute address
