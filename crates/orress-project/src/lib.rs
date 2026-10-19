@@ -7,6 +7,7 @@
 
 mod annotations;
 pub mod ctypes;
+pub mod interop;
 pub mod types;
 
 use std::path::{Path, PathBuf};

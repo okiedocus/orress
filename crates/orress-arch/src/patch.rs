@@ -21,6 +21,10 @@ pub fn try_nop(isa: Isa, len: usize) -> Option<Vec<u8>> {
         Isa::Arm64 => len
             .is_multiple_of(4)
             .then(|| 0xd503_201fu32.to_le_bytes().repeat(len / 4)),
+        // RISC-V base instructions are 4 bytes; NOP is `addi x0,x0,0` = 0x00000013.
+        Isa::Riscv64 => len
+            .is_multiple_of(4)
+            .then(|| 0x0000_0013u32.to_le_bytes().repeat(len / 4)),
     }
 }
 
@@ -75,6 +79,8 @@ pub fn invert(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             out[..4].copy_from_slice(&new.to_le_bytes());
         }
+        // Branch patching for RISC-V is not implemented yet.
+        Isa::Riscv64 => return None,
     }
     Some(out)
 }
@@ -108,6 +114,7 @@ pub fn force(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             Some(new.to_le_bytes().to_vec())
         }
+        Isa::Riscv64 => None,
     }
 }
 
