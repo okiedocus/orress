@@ -12,7 +12,10 @@ All notable changes to ORRESS are documented here. The format follows
   non-executable regions too (`.rodata`/`.data`/…), not just code — detected ASCII strings
   render as quoted literals and other bytes as `db` runs, so you can scroll the whole image
   in address order like IDA/Binary Ninja.
-
+- **Paste C types**: the Types view has a **Paste C…** button that parses pasted C
+  declarations (`struct`/`union`/`enum`/`typedef`, with arrays, pointers and `<stdint.h>`
+  types) into catalog types — a fast second input alongside the GUI form. Pure-Rust parser,
+  LP64 widths.
 - **Close project / fresh start**: a **Close Project** command in the File menu closes the
   open folder, and the open project is now session-only — ORRESS starts fresh with no
   project each launch (open files already started clean). The File menu's "Open Recent" is

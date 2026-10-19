@@ -6,12 +6,14 @@
 //! a string or a section moves the hex view and updates the inspector.
 
 mod annotations;
+pub mod ctypes;
 pub mod types;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub use annotations::{Annotations, validate_name};
+pub use ctypes::parse_c_decls;
 pub use orress_analysis::Program;
 use orress_bytes::Endian;
 use orress_bytes::strings::FoundString;
