@@ -59,6 +59,12 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          same functions later in stripped binaries.",
     )
     .register(
+        "types::ImportHeader",
+        "Import C Header…",
+        "Read type definitions (struct/union/enum/typedef) from a C header into the catalog, \
+         best-effort — declarations the model cannot represent are skipped.",
+    )
+    .register(
         "annotations::Import",
         "Import Names/Comments…",
         "Bring names and comments into the open binary from a file — the ORRESS JSON export, or \
