@@ -1,8 +1,9 @@
 //! A hand-rolled RISC-V (RV64I + M) disassembler. The base ISA is fixed 32-bit and very
 //! regular, so decoding is a handful of field extractions per format. Compressed (`C`)
-//! instructions are 16-bit; the flow-relevant ones are decoded and the rest are length-aware
-//! (shown as `c.*`) so the linear sweep stays aligned. Floating-point, vector and CSR details
-//! beyond the basics are shown generically. Pure Rust, no decoder dependency.
+//! instructions are 16-bit; the full RV64 *integer* compressed set is decoded with operands, and
+//! the floating-point / reserved halves stay length-aware (shown as a generic `c.insn`) so the
+//! linear sweep stays aligned. Floating-point, vector and CSR details beyond the basics are shown
+//! generically. Pure Rust, no decoder dependency.
 
 use crate::{Flow, Insn, Token, TokenKind};
 
@@ -216,18 +217,32 @@ fn decode_base(w: u32, address: u64) -> Option<Insn> {
             } else if w == 0x0010_0073 {
                 insn(address, 4, "ebreak", vec![], Flow::Stop)
             } else {
-                // CSR instructions: shown generically.
+                // CSR instructions: `csrrw rd, csr, rs1` / `csrrwi rd, csr, zimm`. The CSR number
+                // is the unsigned 12-bit immediate; the `*i` forms (f3 bit 2 set) take a 5-bit
+                // zero-extended immediate in place of the source register.
                 let m = [
                     "", "csrrw", "csrrs", "csrrc", "", "csrrwi", "csrrsi", "csrrci",
                 ][f3 as usize];
                 if m.is_empty() {
                     return None;
                 }
+                let csr = (w >> 20) & 0xfff;
+                let src = if f3 & 0b100 != 0 {
+                    imm(i64::from(rs1))
+                } else {
+                    reg(rs1)
+                };
                 insn(
                     address,
                     4,
                     m,
-                    vec![reg(rd), punct(","), reg(rs1)],
+                    vec![
+                        reg(rd),
+                        punct(","),
+                        num(format!("0x{csr:x}")),
+                        punct(","),
+                        src,
+                    ],
                     Flow::Next,
                 )
             }
@@ -322,46 +337,174 @@ fn creg(n: u32) -> Token {
     reg(8 + (n & 7))
 }
 
+/// `off(base)` memory operand layout, shared by compressed loads and stores.
+fn cmem(data: Token, off: i64, base: Token) -> Vec<Token> {
+    vec![data, punct(","), imm(off), punct("("), base, punct(")")]
+}
+
 fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
     let w = u32::from(h);
     let op = w & 0b11;
     let f3 = (w >> 13) & 0b111;
-    // The flow-relevant and common compressed forms; everything else stays length-aware.
-    match (op, f3) {
-        // C.J: jump.
+    // The RV64 integer compressed set (quadrants 0/1/2); floating-point and reserved encodings stay
+    // length-aware (shown as `c.insn`) so the linear sweep stays aligned. `sp` is x2.
+    Some(match (op, f3) {
+        // ---- Quadrant 0: reg+imm and stack loads/stores (`rs1'`/`rd'` are x8..x15) ----
+        // C.ADDI4SPN: `addi rd', sp, nzuimm`. An all-zero immediate is the reserved/illegal form.
+        (0b00, 0b000) => {
+            let nz = ciw_imm(w);
+            if nz == 0 {
+                insn(address, 2, "c.unimp", vec![], Flow::Next)
+            } else {
+                insn(
+                    address,
+                    2,
+                    "c.addi4spn",
+                    vec![creg((w >> 2) & 7), punct(","), reg(2), punct(","), imm(nz)],
+                    Flow::Next,
+                )
+            }
+        }
+        (0b00, 0b010) => insn(
+            address,
+            2,
+            "c.lw",
+            cmem(creg((w >> 2) & 7), clw_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b011) => insn(
+            address,
+            2,
+            "c.ld",
+            cmem(creg((w >> 2) & 7), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b110) => insn(
+            address,
+            2,
+            "c.sw",
+            cmem(creg((w >> 2) & 7), clw_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+        (0b00, 0b111) => insn(
+            address,
+            2,
+            "c.sd",
+            cmem(creg((w >> 2) & 7), cld_imm(w), creg((w >> 7) & 7)),
+            Flow::Next,
+        ),
+
+        // ---- Quadrant 1 ----
+        // C.NOP / C.ADDI.
+        (0b01, 0b000) => {
+            let rd = (w >> 7) & 0x1f;
+            if rd == 0 {
+                insn(address, 2, "c.nop", vec![], Flow::Next)
+            } else {
+                insn(
+                    address,
+                    2,
+                    "c.addi",
+                    vec![reg(rd), punct(","), imm(ci_imm(w))],
+                    Flow::Next,
+                )
+            }
+        }
+        // C.ADDIW (RV64): `addiw rd, rd, imm`.
+        (0b01, 0b001) => insn(
+            address,
+            2,
+            "c.addiw",
+            vec![reg((w >> 7) & 0x1f), punct(","), imm(ci_imm(w))],
+            Flow::Next,
+        ),
+        // C.LI.
+        (0b01, 0b010) => insn(
+            address,
+            2,
+            "c.li",
+            vec![reg((w >> 7) & 0x1f), punct(","), imm(ci_imm(w))],
+            Flow::Next,
+        ),
+        // C.ADDI16SP (rd == sp) / C.LUI (any other rd).
+        (0b01, 0b011) => {
+            let rd = (w >> 7) & 0x1f;
+            if rd == 2 {
+                insn(
+                    address,
+                    2,
+                    "c.addi16sp",
+                    vec![reg(2), punct(","), imm(addi16sp_imm(w))],
+                    Flow::Next,
+                )
+            } else {
+                insn(
+                    address,
+                    2,
+                    "c.lui",
+                    vec![reg(rd), punct(","), imm(clui_imm(w) >> 12)],
+                    Flow::Next,
+                )
+            }
+        }
+        // C.SRLI / C.SRAI / C.ANDI / C.SUB / C.XOR / C.OR / C.AND / C.SUBW / C.ADDW.
+        (0b01, 0b100) => decode_c_arith(w, address),
+        // C.J.
         (0b01, 0b101) => {
-            let off = cj_imm(w);
-            let target = address.wrapping_add_signed(off);
-            Some(insn(
+            let target = address.wrapping_add_signed(cj_imm(w));
+            insn(
                 address,
                 2,
                 "c.j",
                 vec![addr_tok(target)],
                 Flow::Jump(target),
-            ))
+            )
         }
         // C.BEQZ / C.BNEZ.
         (0b01, 0b110) | (0b01, 0b111) => {
-            let off = cb_imm(w);
-            let target = address.wrapping_add_signed(off);
-            let rs1 = creg((w >> 7) & 7);
+            let target = address.wrapping_add_signed(cb_imm(w));
             let m = if f3 == 0b110 { "c.beqz" } else { "c.bnez" };
-            Some(insn(
+            insn(
                 address,
                 2,
                 m,
-                vec![rs1, punct(","), addr_tok(target)],
+                vec![creg((w >> 7) & 7), punct(","), addr_tok(target)],
                 Flow::CondJump(target),
-            ))
+            )
         }
-        // C.JR / C.MV / C.EBREAK / C.JALR / C.ADD (quadrant 2, funct3=100).
+
+        // ---- Quadrant 2 ----
+        // C.SLLI.
+        (0b10, 0b000) => insn(
+            address,
+            2,
+            "c.slli",
+            vec![reg((w >> 7) & 0x1f), punct(","), imm(cshamt(w))],
+            Flow::Next,
+        ),
+        // C.LWSP / C.LDSP.
+        (0b10, 0b010) => insn(
+            address,
+            2,
+            "c.lwsp",
+            cmem(reg((w >> 7) & 0x1f), lwsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        (0b10, 0b011) => insn(
+            address,
+            2,
+            "c.ldsp",
+            cmem(reg((w >> 7) & 0x1f), ldsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        // C.JR / C.MV / C.EBREAK / C.JALR / C.ADD.
         (0b10, 0b100) => {
             let rs1 = (w >> 7) & 0x1f;
             let rs2 = (w >> 2) & 0x1f;
             let bit12 = (w >> 12) & 1;
-            Some(match (bit12, rs1, rs2) {
+            match (bit12, rs1, rs2) {
                 (0, r, 0) if r != 0 => {
-                    // C.JR: ret if it jumps through ra, else an indirect jump.
+                    // C.JR: `ret` if it jumps through ra, else an indirect jump.
                     if r == 1 {
                         insn(address, 2, "ret", vec![], Flow::Return)
                     } else {
@@ -400,36 +543,68 @@ fn decode_compressed(h: u16, address: u64) -> Option<Insn> {
                     Flow::Next,
                 ),
                 _ => insn(address, 2, "c.unknown", vec![], Flow::Next),
-            })
-        }
-        // C.NOP / C.ADDI.
-        (0b01, 0b000) => {
-            let rd = (w >> 7) & 0x1f;
-            if rd == 0 {
-                Some(insn(address, 2, "c.nop", vec![], Flow::Next))
-            } else {
-                Some(insn(
-                    address,
-                    2,
-                    "c.addi",
-                    vec![reg(rd), punct(","), imm(ci_imm(w))],
-                    Flow::Next,
-                ))
             }
         }
-        // C.LI / C.LUI-or-ADDI16SP (shown generically, flow is Next).
-        (0b01, 0b010) => {
-            let rd = (w >> 7) & 0x1f;
-            Some(insn(
-                address,
-                2,
-                "c.li",
-                vec![reg(rd), punct(","), imm(ci_imm(w))],
-                Flow::Next,
-            ))
+        // C.SWSP / C.SDSP.
+        (0b10, 0b110) => insn(
+            address,
+            2,
+            "c.swsp",
+            cmem(reg((w >> 2) & 0x1f), swsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+        (0b10, 0b111) => insn(
+            address,
+            2,
+            "c.sdsp",
+            cmem(reg((w >> 2) & 0x1f), sdsp_imm(w), reg(2)),
+            Flow::Next,
+        ),
+
+        // Floating-point (FLD/FSD/FLDSP/FSDSP) and reserved: length-aware only.
+        _ => insn(address, 2, "c.insn", vec![], Flow::Next),
+    })
+}
+
+/// The quadrant-1 `funct3=100` arithmetic group: shift/mask immediates and the register-register
+/// forms, selected by bits 11:10 (and bits 6:5 plus bit 12 for the register forms).
+fn decode_c_arith(w: u32, address: u64) -> Insn {
+    let rd = creg((w >> 7) & 7);
+    match (w >> 10) & 0b11 {
+        0b00 => insn(
+            address,
+            2,
+            "c.srli",
+            vec![rd, punct(","), imm(cshamt(w))],
+            Flow::Next,
+        ),
+        0b01 => insn(
+            address,
+            2,
+            "c.srai",
+            vec![rd, punct(","), imm(cshamt(w))],
+            Flow::Next,
+        ),
+        0b10 => insn(
+            address,
+            2,
+            "c.andi",
+            vec![rd, punct(","), imm(ci_imm(w))],
+            Flow::Next,
+        ),
+        _ => {
+            let rs2 = creg((w >> 2) & 7);
+            let m = match ((w >> 12) & 1, (w >> 5) & 0b11) {
+                (0, 0b00) => "c.sub",
+                (0, 0b01) => "c.xor",
+                (0, 0b10) => "c.or",
+                (0, 0b11) => "c.and",
+                (1, 0b00) => "c.subw",
+                (1, 0b01) => "c.addw",
+                _ => "c.unknown", // (bit12=1, 0b10/0b11) are reserved.
+            };
+            insn(address, 2, m, vec![rd, punct(","), rs2], Flow::Next)
         }
-        // Any other compressed form: keep it length-aware so the sweep stays aligned.
-        _ => Some(insn(address, 2, "c.insn", vec![], Flow::Next)),
     }
 }
 
@@ -459,6 +634,68 @@ fn cb_imm(w: u32) -> i64 {
         | (((w >> 3) & 3) << 1)
         | (((w >> 2) & 1) << 5);
     sext(v, 9)
+}
+
+/// CIW immediate (`c.addi4spn`): a zero-extended, 4-scaled `nzuimm`.
+fn ciw_imm(w: u32) -> i64 {
+    i64::from(
+        (((w >> 11) & 0b11) << 4)
+            | (((w >> 7) & 0b1111) << 6)
+            | (((w >> 6) & 1) << 2)
+            | (((w >> 5) & 1) << 3),
+    )
+}
+
+/// CL/CS word offset (`c.lw`/`c.sw`): zero-extended, 4-scaled.
+fn clw_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 6) & 1) << 2) | (((w >> 5) & 1) << 6))
+}
+
+/// CL/CS double offset (`c.ld`/`c.sd`): zero-extended, 8-scaled.
+fn cld_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 5) & 0b11) << 6))
+}
+
+/// C.LWSP offset: zero-extended, 4-scaled.
+fn lwsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 12) & 1) << 5) | (((w >> 4) & 0b111) << 2) | (((w >> 2) & 0b11) << 6))
+}
+
+/// C.LDSP offset: zero-extended, 8-scaled.
+fn ldsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 12) & 1) << 5) | (((w >> 5) & 0b11) << 3) | (((w >> 2) & 0b111) << 6))
+}
+
+/// C.SWSP offset: zero-extended, 4-scaled.
+fn swsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 9) & 0b1111) << 2) | (((w >> 7) & 0b11) << 6))
+}
+
+/// C.SDSP offset: zero-extended, 8-scaled.
+fn sdsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 7) & 0b111) << 6))
+}
+
+/// A 6-bit shift amount (`c.slli`/`c.srli`/`c.srai`): shamt[5] at bit 12, shamt[4:0] at bits 6:2.
+fn cshamt(w: u32) -> i64 {
+    i64::from((((w >> 12) & 1) << 5) | ((w >> 2) & 0x1f))
+}
+
+/// C.ADDI16SP immediate: a sign-extended, 16-scaled `nzimm`.
+fn addi16sp_imm(w: u32) -> i64 {
+    let v = (((w >> 12) & 1) << 9)
+        | (((w >> 6) & 1) << 4)
+        | (((w >> 5) & 1) << 6)
+        | (((w >> 3) & 0b11) << 7)
+        | (((w >> 2) & 1) << 5);
+    sext(v, 10)
+}
+
+/// C.LUI immediate: `nzimm[17]` at bit 12, `nzimm[16:12]` at bits 6:2, sign-extended into bit 17 so
+/// the printed value (`clui_imm >> 12`) matches the base `lui` operand.
+fn clui_imm(w: u32) -> i64 {
+    let v = (((w >> 12) & 1) << 17) | (((w >> 2) & 0x1f) << 12);
+    sext(v, 18)
 }
 
 #[cfg(test)]
@@ -515,9 +752,67 @@ mod tests {
         let ret = decode(&0x8082u16.to_le_bytes(), 0).unwrap();
         assert_eq!(ret.len, 2);
         assert_eq!(ret.flow, Flow::Return);
-        // An unknown compressed half still decodes as a 2-byte c.insn (keeps the sweep aligned).
-        let other = decode(&0x0001u16.to_le_bytes(), 0).unwrap();
+        // A float/reserved compressed half (C.FLDSP) still decodes as a 2-byte generic c.insn
+        // (keeps the sweep aligned without claiming to know the operands).
+        let other = decode(&0x2002u16.to_le_bytes(), 0).unwrap();
         assert_eq!(other.len, 2);
+        assert_eq!(other.mnemonic, "c.insn");
+    }
+
+    #[test]
+    fn compressed_integer_set() {
+        // Each operand check also pins the immediate decoder for that format.
+        let ops = |w: u32| {
+            d(w, 0)
+                .operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // c.addi4spn a0, sp, 0x10
+        let i = d(0x0808, 0);
+        assert_eq!(i.mnemonic, "c.addi4spn");
+        assert_eq!(ops(0x0808), ["a0", ",", "sp", ",", "0x10"]);
+        // c.lw a0, 0x0(a1)
+        assert_eq!(d(0x4188, 0).mnemonic, "c.lw");
+        assert_eq!(ops(0x4188), ["a0", ",", "0x0", "(", "a1", ")"]);
+        // c.ldsp ra, 0x8(sp)
+        assert_eq!(d(0x60a2, 0).mnemonic, "c.ldsp");
+        assert_eq!(ops(0x60a2), ["ra", ",", "0x8", "(", "sp", ")"]);
+        // c.sdsp ra, 0x8(sp)
+        assert_eq!(d(0xe406, 0).mnemonic, "c.sdsp");
+        assert_eq!(ops(0xe406), ["ra", ",", "0x8", "(", "sp", ")"]);
+        // c.swsp ra, 0x0(sp)
+        assert_eq!(d(0xc006, 0).mnemonic, "c.swsp");
+        // c.lui a0, 0x1
+        assert_eq!(d(0x6505, 0).mnemonic, "c.lui");
+        assert_eq!(ops(0x6505), ["a0", ",", "0x1"]);
+        // c.sub a0, a1
+        assert_eq!(d(0x8d0d, 0).mnemonic, "c.sub");
+        assert_eq!(ops(0x8d0d), ["a0", ",", "a1"]);
+        // c.slli a0, 0x1
+        assert_eq!(d(0x0506, 0).mnemonic, "c.slli");
+        assert_eq!(ops(0x0506), ["a0", ",", "0x1"]);
+    }
+
+    #[test]
+    fn csr_instructions() {
+        let ops = |w: u32| {
+            d(w, 0)
+                .operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>()
+        };
+        // csrrw a0, 0x300, a1 — register source.
+        let i = d(0x3005_9573, 0);
+        assert_eq!(i.mnemonic, "csrrw");
+        assert_eq!(ops(0x3005_9573), ["a0", ",", "0x300", ",", "a1"]);
+        // csrrwi a0, 0x300, 0x5 — the `*i` form takes a 5-bit zero-extended immediate.
+        let i = d(0x3002_d573, 0);
+        assert_eq!(i.mnemonic, "csrrwi");
+        assert_eq!(ops(0x3002_d573), ["a0", ",", "0x300", ",", "0x5"]);
     }
 
     #[test]

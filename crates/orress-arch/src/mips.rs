@@ -185,8 +185,43 @@ fn decode_word(w: u32, address: u64) -> Option<Insn> {
                 Flow::Next,
             )
         }
+        // SPECIAL2: MIPS32 multiply-accumulate and count-leading-bits.
+        0x1c => return decode_special2(w, address, rs, rt, rd),
         // Coprocessor / float / rarer ops: shown generically so they are not mistaken for data.
         0x10..=0x13 | 0x30..=0x3f => insn(address, &format!("cop0x{opcode:x}"), vec![], Flow::Next),
+        _ => return None,
+    })
+}
+
+/// SPECIAL2 (opcode 0x1c): the MIPS32 `mul`/`madd`/`msub` family and `clz`/`clo`.
+fn decode_special2(w: u32, address: u64, rs: u32, rt: u32, rd: u32) -> Option<Insn> {
+    let funct = w & 0x3f;
+    let two = |m| insn(address, m, vec![reg(rs), punct(","), reg(rt)], Flow::Next);
+    Some(match funct {
+        0x00 => two("madd"),
+        0x01 => two("maddu"),
+        // `mul rd, rs, rt` — the MIPS32 three-operand multiply compilers emit instead of
+        // `mult`+`mflo`, so it is common in real code.
+        0x02 => insn(
+            address,
+            "mul",
+            vec![reg(rd), punct(","), reg(rs), punct(","), reg(rt)],
+            Flow::Next,
+        ),
+        0x04 => two("msub"),
+        0x05 => two("msubu"),
+        0x20 => insn(
+            address,
+            "clz",
+            vec![reg(rd), punct(","), reg(rs)],
+            Flow::Next,
+        ),
+        0x21 => insn(
+            address,
+            "clo",
+            vec![reg(rd), punct(","), reg(rs)],
+            Flow::Next,
+        ),
         _ => return None,
     })
 }
@@ -232,10 +267,23 @@ fn decode_special(w: u32, address: u64, rs: u32, rt: u32, rd: u32, shamt: u32) -
             vec![reg(rd), punct(","), reg(rs)],
             Flow::IndirectCall { slot: None },
         ),
+        0x0a | 0x0b => {
+            // Conditional moves: movz/movn rd, rs, rt.
+            let m = if funct == 0x0a { "movz" } else { "movn" };
+            insn(
+                address,
+                m,
+                vec![reg(rd), punct(","), reg(rs), punct(","), reg(rt)],
+                Flow::Next,
+            )
+        }
         0x0c => insn(address, "syscall", vec![], Flow::Next),
         0x0d => insn(address, "break", vec![], Flow::Stop),
+        0x0f => insn(address, "sync", vec![], Flow::Next),
         0x10 => insn(address, "mfhi", vec![reg(rd)], Flow::Next),
+        0x11 => insn(address, "mthi", vec![reg(rs)], Flow::Next),
         0x12 => insn(address, "mflo", vec![reg(rd)], Flow::Next),
+        0x13 => insn(address, "mtlo", vec![reg(rs)], Flow::Next),
         0x18..=0x1b => {
             let m = ["mult", "multu", "div", "divu"][(funct - 0x18) as usize];
             insn(address, m, vec![reg(rs), punct(","), reg(rt)], Flow::Next)
@@ -298,6 +346,27 @@ mod tests {
         let beq = be(0x1109_0002, 0x3000);
         assert_eq!(beq.mnemonic, "beq");
         assert_eq!(beq.flow, Flow::CondJump(0x3000 + 4 + 8));
+    }
+
+    #[test]
+    fn special2_and_moves() {
+        // mul v0, a0, a1 : SPECIAL2 rd=v0(2) rs=a0(4) rt=a1(5) funct=0x02 -> 0x70851002
+        let i = be(0x7085_1002, 0);
+        assert_eq!(i.mnemonic, "mul");
+        assert_eq!(i.operands[0].text, "v0");
+        assert_eq!(i.operands[2].text, "a0");
+        assert_eq!(i.operands[4].text, "a1");
+        // clz v0, a0 : SPECIAL2 funct=0x20 -> 0x70801020
+        let i = be(0x7080_1020, 0);
+        assert_eq!(i.mnemonic, "clz");
+        assert_eq!(i.operands[0].text, "v0");
+        assert_eq!(i.operands[2].text, "a0");
+        // movn v0, a0, a1 : SPECIAL funct=0x0b -> 0x0085100B
+        let i = be(0x0085_100B, 0);
+        assert_eq!(i.mnemonic, "movn");
+        assert_eq!(i.operands[0].text, "v0");
+        // mthi a0 : SPECIAL funct=0x11, rs=a0(4) -> 0x00800011
+        assert_eq!(be(0x0080_0011, 0).mnemonic, "mthi");
     }
 
     #[test]

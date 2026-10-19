@@ -625,6 +625,155 @@ impl RiscvLifter<'_> {
                     Self::assign(out, addr, st, d, Expr::konst(ci_imm(w) as u64, b64));
                 }
             }
+            // ---- Quadrant 0: frame and reg+offset loads/stores (`rs1'`/`rd'` are x8..x15) ----
+            // C.ADDI4SPN: addi rd', sp, nzuimm. An all-zero immediate is reserved.
+            (0b00, 0b000) => {
+                let nz = ciw_imm(w);
+                if nz == 0 {
+                    return self.asm(w, addr, out);
+                }
+                if let Some(d) = dest(8 + ((w >> 2) & 7)) {
+                    let v = Expr::bin(BinOp::Add, src(2, b64), Expr::konst(nz as u64, b64), b64);
+                    Self::assign(out, addr, st, d, v);
+                }
+            }
+            // C.LW / C.LD.
+            (0b00, 0b010) | (0b00, 0b011) => {
+                let (width, off) = if f3 == 0b010 {
+                    (Width::B32, clw_imm(w))
+                } else {
+                    (b64, cld_imm(w))
+                };
+                if let Some(d) = dest(8 + ((w >> 2) & 7)) {
+                    let mut value = self.load(8 + ((w >> 7) & 7), off, width);
+                    // `c.lw` sign-extends its 32-bit result to the 64-bit register.
+                    if width != b64 {
+                        value = Expr::Cast(Box::new(value), b64, true);
+                    }
+                    Self::assign(out, addr, st, d, value);
+                }
+            }
+            // C.SW / C.SD.
+            (0b00, 0b110) | (0b00, 0b111) => {
+                let (width, off) = if f3 == 0b110 {
+                    (Width::B32, clw_imm(w))
+                } else {
+                    (b64, cld_imm(w))
+                };
+                self.store(
+                    8 + ((w >> 7) & 7),
+                    off,
+                    src(8 + ((w >> 2) & 7), width),
+                    width,
+                    addr,
+                    out,
+                );
+            }
+            // ---- Quadrant 1 ----
+            // C.ADDIW (RV64): addiw rd, rd, imm.
+            (0b01, 0b001) => {
+                let rd = (w >> 7) & 0x1f;
+                if let Some(d) = dest(rd) {
+                    let v = self.widen(
+                        Expr::bin(
+                            BinOp::Add,
+                            src(rd, b64),
+                            Expr::konst(ci_imm(w) as u64, b64),
+                            b64,
+                        ),
+                        true,
+                    );
+                    Self::assign(out, addr, st, d, v);
+                }
+            }
+            // C.LUI (rd != 0, 2) / C.ADDI16SP (rd == 2).
+            (0b01, 0b011) => {
+                let rd = (w >> 7) & 0x1f;
+                if rd == 2 {
+                    if let Some(d) = dest(2) {
+                        let v = Expr::bin(
+                            BinOp::Add,
+                            src(2, b64),
+                            Expr::konst(addi16sp_imm(w) as u64, b64),
+                            b64,
+                        );
+                        Self::assign(out, addr, st, d, v);
+                    }
+                } else if let Some(d) = dest(rd) {
+                    Self::assign(
+                        out,
+                        addr,
+                        st,
+                        d,
+                        Expr::konst((clui_imm(w) as u64) & 0xffff_ffff, b64),
+                    );
+                }
+            }
+            // C.SRLI / C.SRAI / C.ANDI / C.SUB / C.XOR / C.OR / C.AND / C.SUBW / C.ADDW.
+            (0b01, 0b100) => {
+                let rd = 8 + ((w >> 7) & 7);
+                let d = dest(rd)?;
+                let value = match (w >> 10) & 0b11 {
+                    0b00 => Expr::bin(BinOp::Shr, src(rd, b64), Expr::konst(cshamt(w), b64), b64),
+                    0b01 => Expr::bin(BinOp::Sar, src(rd, b64), Expr::konst(cshamt(w), b64), b64),
+                    0b10 => Expr::bin(
+                        BinOp::And,
+                        src(rd, b64),
+                        Expr::konst(ci_imm(w) as u64, b64),
+                        b64,
+                    ),
+                    _ => {
+                        let rs2 = src(8 + ((w >> 2) & 7), b64);
+                        match ((w >> 12) & 1, (w >> 5) & 0b11) {
+                            (0, 0b00) => Expr::bin(BinOp::Sub, src(rd, b64), rs2, b64),
+                            (0, 0b01) => Expr::bin(BinOp::Xor, src(rd, b64), rs2, b64),
+                            (0, 0b10) => Expr::bin(BinOp::Or, src(rd, b64), rs2, b64),
+                            (0, 0b11) => Expr::bin(BinOp::And, src(rd, b64), rs2, b64),
+                            (1, 0b00) => {
+                                self.widen(Expr::bin(BinOp::Sub, src(rd, b64), rs2, b64), true)
+                            }
+                            (1, 0b01) => {
+                                self.widen(Expr::bin(BinOp::Add, src(rd, b64), rs2, b64), true)
+                            }
+                            _ => return self.asm(w, addr, out),
+                        }
+                    }
+                };
+                Self::assign(out, addr, st, d, value);
+            }
+            // ---- Quadrant 2 ----
+            // C.SLLI.
+            (0b10, 0b000) => {
+                let rd = (w >> 7) & 0x1f;
+                if let Some(d) = dest(rd) {
+                    let v = Expr::bin(BinOp::Shl, src(rd, b64), Expr::konst(cshamt(w), b64), b64);
+                    Self::assign(out, addr, st, d, v);
+                }
+            }
+            // C.LWSP / C.LDSP (base is sp = x2).
+            (0b10, 0b010) | (0b10, 0b011) => {
+                let (width, off) = if f3 == 0b010 {
+                    (Width::B32, lwsp_imm(w))
+                } else {
+                    (b64, ldsp_imm(w))
+                };
+                if let Some(d) = dest((w >> 7) & 0x1f) {
+                    let mut value = self.load(2, off, width);
+                    if width != b64 {
+                        value = Expr::Cast(Box::new(value), b64, true);
+                    }
+                    Self::assign(out, addr, st, d, value);
+                }
+            }
+            // C.SWSP / C.SDSP (base is sp = x2).
+            (0b10, 0b110) | (0b10, 0b111) => {
+                let (width, off) = if f3 == 0b110 {
+                    (Width::B32, swsp_imm(w))
+                } else {
+                    (b64, sdsp_imm(w))
+                };
+                self.store(2, off, src((w >> 2) & 0x1f, width), width, addr, out);
+            }
             _ => return self.asm(w, addr, out),
         }
         None
@@ -654,4 +803,67 @@ fn cb_imm(w: u32) -> i64 {
         | (((w >> 3) & 3) << 1)
         | (((w >> 2) & 1) << 5);
     sext(v, 9)
+}
+
+// Compressed immediate decoders, matching the disassembler in `orress-arch`.
+
+/// CIW `nzuimm` (`c.addi4spn`): zero-extended, 4-scaled.
+fn ciw_imm(w: u32) -> i64 {
+    i64::from(
+        (((w >> 11) & 0b11) << 4)
+            | (((w >> 7) & 0b1111) << 6)
+            | (((w >> 6) & 1) << 2)
+            | (((w >> 5) & 1) << 3),
+    )
+}
+
+/// CL/CS word offset (`c.lw`/`c.sw`): zero-extended, 4-scaled.
+fn clw_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 6) & 1) << 2) | (((w >> 5) & 1) << 6))
+}
+
+/// CL/CS double offset (`c.ld`/`c.sd`): zero-extended, 8-scaled.
+fn cld_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 5) & 0b11) << 6))
+}
+
+/// C.LWSP offset: zero-extended, 4-scaled.
+fn lwsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 12) & 1) << 5) | (((w >> 4) & 0b111) << 2) | (((w >> 2) & 0b11) << 6))
+}
+
+/// C.LDSP offset: zero-extended, 8-scaled.
+fn ldsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 12) & 1) << 5) | (((w >> 5) & 0b11) << 3) | (((w >> 2) & 0b111) << 6))
+}
+
+/// C.SWSP offset: zero-extended, 4-scaled.
+fn swsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 9) & 0b1111) << 2) | (((w >> 7) & 0b11) << 6))
+}
+
+/// C.SDSP offset: zero-extended, 8-scaled.
+fn sdsp_imm(w: u32) -> i64 {
+    i64::from((((w >> 10) & 0b111) << 3) | (((w >> 7) & 0b111) << 6))
+}
+
+/// A 6-bit shift amount (`c.slli`/`c.srli`/`c.srai`).
+fn cshamt(w: u32) -> u64 {
+    u64::from((((w >> 12) & 1) << 5) | ((w >> 2) & 0x1f))
+}
+
+/// C.ADDI16SP `nzimm`: sign-extended, 16-scaled.
+fn addi16sp_imm(w: u32) -> i64 {
+    let v = (((w >> 12) & 1) << 9)
+        | (((w >> 6) & 1) << 4)
+        | (((w >> 5) & 1) << 6)
+        | (((w >> 3) & 0b11) << 7)
+        | (((w >> 2) & 1) << 5);
+    sext(v, 10)
+}
+
+/// C.LUI immediate (the value loaded, i.e. `nzimm << 12`), sign-extended.
+fn clui_imm(w: u32) -> i64 {
+    let v = (((w >> 12) & 1) << 17) | (((w >> 2) & 0x1f) << 12);
+    sext(v, 18)
 }

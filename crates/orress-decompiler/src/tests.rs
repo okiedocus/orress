@@ -144,6 +144,26 @@ fn mips_lifts_add_through_delay_slot() {
 }
 
 #[test]
+fn mips_lifts_special2_mul() {
+    // f(a, b): mul v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a * b.
+    // SPECIAL2 `mul` previously fell back to `asm!`.
+    let code: &[u8] = &[
+        0x70, 0x85, 0x10, 0x02, // mul v0,a0,a1
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 * a2") || text.contains("a1 *"),
+        "product recovered:\n{text}"
+    );
+}
+
+#[test]
 fn riscv_lifts_add_and_branch() {
     // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b
     let add: &[u8] = &[0x33, 0x05, 0xb5, 0x00, 0x67, 0x80, 0x00, 0x00];
@@ -173,6 +193,25 @@ fn riscv_lifts_add_and_branch() {
     assert!(
         text.contains('1') && text.contains('2'),
         "both arms:\n{text}"
+    );
+}
+
+#[test]
+fn riscv_lifts_compressed_arithmetic() {
+    // f(a, b): c.sub a0,a1 ; c.jr ra (ret)  ->  returns a - b.
+    // c.sub previously fell back to `asm!`; it must now lift to real IR.
+    let code: &[u8] = &[
+        0x0d, 0x8d, // c.sub a0, a1
+        0x82, 0x80, // c.jr ra (ret)
+    ];
+    let p = riscv_program(code);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 - a2") || text.contains("a1 -"),
+        "subtraction recovered:\n{text}"
     );
 }
 

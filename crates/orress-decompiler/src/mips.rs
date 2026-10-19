@@ -279,9 +279,32 @@ impl MipsLifter<'_> {
                 };
                 self.store(rs, imm, src(rt), width, addr, out);
             }
+            0x1c => return self.special2(w, addr, rs, rt, rd, st, out),
             _ => return self.asm(addr, out),
         }
         None
+    }
+
+    /// SPECIAL2 (opcode 0x1c): the MIPS32 three-operand `mul rd, rs, rt`. The multiply-accumulate
+    /// (`madd`/`msub`) and `clz`/`clo` forms have no direct IR and stay as `asm!`.
+    #[allow(clippy::too_many_arguments)]
+    fn special2(
+        &self,
+        w: u32,
+        addr: u64,
+        rs: u32,
+        rt: u32,
+        rd: u32,
+        st: &mut State,
+        out: &mut Vec<(u64, Stmt)>,
+    ) -> Option<Term> {
+        if w & 0x3f == 0x02 {
+            if let Some(d) = dest(rd) {
+                Self::put(out, addr, st, d, Expr::bin(BinOp::Mul, src(rs), src(rt), W));
+            }
+            return None;
+        }
+        self.asm(addr, out)
     }
 
     #[allow(clippy::too_many_arguments)]

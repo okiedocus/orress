@@ -12,16 +12,19 @@ All notable changes to ORRESS are documented here. The format follows
   functions become readable pseudocode. **Branch delay slots are handled correctly** — the
   CFG keeps the delay-slot instruction in the branch's block so it runs on both paths (this
   also completes the MIPS disassembly, which previously dropped the delay slot after an
-  unconditional `j`/`jr`). Float, COP and uncommon ops stay as inline `asm!`.
+  unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` is lifted; float, COP and the
+  uncommon ops (`madd`/`clz`, the conditional moves) stay as inline `asm!`.
 
-- **RISC-V decompilation**: the decompiler now lifts RV64I + M (and the common compressed
-  forms), so RISC-V functions become readable Rust-style pseudocode — not just disassembly.
-  Floating-point, CSR and uncommon compressed instructions are kept as inline `asm!`.
+- **RISC-V decompilation**: the decompiler now lifts RV64I + M and the **full integer
+  compressed (`C`) set** — the stack frame save/restore, loads/stores and C-arithmetic that
+  make up most of a function — so RISC-V functions become readable Rust-style pseudocode, not
+  just disassembly, without `asm!` noise in every prologue. Floating-point, CSR and the
+  float-compressed instructions are kept as inline `asm!`.
 - **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
   MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
-  Hand-rolled pure-Rust decoder (R/I/J formats). Byte order is picked from the ELF; the
-  delay slot after an unconditional `j`/`jr` may show as data (a documented limit). The
-  decompiler is x86/ARM64 only for now.
+  Hand-rolled pure-Rust decoder (R/I/J formats), now including the SPECIAL2 `mul`/`madd`/
+  `msub`/`clz`/`clo` family (the three-operand `mul` compilers emit instead of `mult`+`mflo`)
+  and the `movz`/`movn`/`mthi`/`mtlo`/`sync` moves. Byte order is picked from the ELF.
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and
@@ -40,8 +43,13 @@ All notable changes to ORRESS are documented here. The format follows
   labels are clickable.
 - **RISC-V (RV64I + M) disassembly**: ORRESS now loads and disassembles 64-bit RISC-V ELFs —
   functions, cross-references, the linear and graph views, hex and strings all work.
-  Hand-rolled pure-Rust decoder (no new dependency); compressed (`C`) instructions are
-  length-aware so the listing stays aligned. The decompiler is x86/ARM64 only for now.
+  Hand-rolled pure-Rust decoder (no new dependency); the **full RV64 integer compressed
+  (`C`) set** is decoded with operands — the stack loads/stores (`c.lwsp`/`c.ldsp`/`c.swsp`/
+  `c.sdsp`/`c.addi4spn`), reg+offset loads/stores (`c.lw`/`c.ld`/`c.sw`/`c.sd`) and the
+  `c.addi`/`c.lui`/`c.addi16sp`/`c.slli`/`c.sub`/… arithmetic that make up most of a RISC-V
+  function; floating-point compressed halves stay length-aware. CSR instructions now show the
+  full `csrrw rd, csr, rs1` / `csrrwi rd, csr, zimm` form (the CSR number and the immediate
+  variants' operand were previously dropped).
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,
