@@ -57,7 +57,12 @@ All notable changes to ORRESS are documented here. The format follows
   `stfs`/`stfd` and the PPC64 `ld`/`std`), the floating-point arithmetic (`fadd(s)`/`fmul(s)`/…),
   and the branches with correct control flow — `b`/`bl`, the conditional `bc`, `blr` (return),
   `bctr`/`bctrl` (computed jump/call) and `mflr`/`mtlr`/`mtctr`. Byte order and bitness are picked
-  from the ELF.
+  from the ELF. The **decompiler lifts PowerPC too** — the integer and float arithmetic,
+  loads/stores and calls recover as pseudocode (registers/pointers at 32 or 64 bits, `r3`–`r10`
+  arguments, `f1`–`f13` float arguments), and PowerPC's split compare/branch (`cmpw` then `bc`)
+  is reconstructed into structured `if`/`while` by remembering the compare per condition-register
+  field. The rotate-and-mask `rlwinm` is lifted for its `slwi`/`srwi` shift aliases; other forms
+  stay as inline `asm!`.
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and

@@ -74,6 +74,9 @@ pub fn float_arg_regs(conv: Convention) -> &'static [u8] {
         Convention::Mips => &[12, 14],
         // MIPS n64 passes FP arguments in $f12–$f19 (modelled as XMM 12–19).
         Convention::Mips64 => &[12, 13, 14, 15, 16, 17, 18, 19],
+        // PowerPC passes FP arguments in f1–f13; the ppc lifter maps fN to Xmm(N-1), so these are
+        // XMM 0–12 and the float return (f1) lands on Xmm(0).
+        Convention::Ppc => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     }
 }
 

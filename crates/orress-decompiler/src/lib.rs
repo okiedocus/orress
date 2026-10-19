@@ -21,6 +21,7 @@ pub mod deobfuscate;
 pub mod ir;
 pub mod lift;
 pub mod mips;
+pub mod ppc;
 pub mod print;
 pub mod riscv;
 pub mod simplify;
@@ -160,6 +161,12 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
+    } else if matches!(program.isa, Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El) {
+        ppc::PpcLifter {
+            program,
+            param_counts: counts,
+        }
+        .lift(f)
     } else {
         lifter(program, conv, counts).lift(f)
     }
@@ -196,6 +203,9 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
             | Isa::Mips32El
             | Isa::Mips64
             | Isa::Mips64El
+            | Isa::Ppc32
+            | Isa::Ppc64
+            | Isa::Ppc64El
     ) {
         return Err(Error::Unsupported(program.isa));
     }
@@ -205,6 +215,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
         Isa::Riscv64 => Convention::Riscv,
         Isa::Mips32 | Isa::Mips32El => Convention::Mips,
         Isa::Mips64 | Isa::Mips64El => Convention::Mips64,
+        Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El => Convention::Ppc,
         _ => conv,
     };
     let f = program

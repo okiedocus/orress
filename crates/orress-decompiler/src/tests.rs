@@ -159,6 +159,99 @@ fn mips64_program(code: &[u8]) -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("mips64")
 }
 
+/// A tiny big-endian PPC32 program with one function `f` at BASE.
+fn ppc_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "PowerPC (32-bit)".into(),
+        bits: Some(32),
+        endian: orress_loaders::Endian::Big,
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("ppc")
+}
+
+#[test]
+fn ppc_lifts_add_and_return() {
+    // f(a, b): add r3,r3,r4 ; blr  ->  returns a + b.
+    let code: &[u8] = &[
+        0x7C, 0x63, 0x22, 0x14, // add r3, r3, r4
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Ppc32);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+}
+
+#[test]
+fn ppc_lifts_compare_and_branch() {
+    // f(a, b): if a < b return 1 else 0 — a cmpw/bc pair must become structured control flow.
+    //   cmpw r3,r4 ; bc 12,0,+0x10 ; li r3,0 ; blr ; nop ; li r3,1 ; blr
+    let code: &[u8] = &[
+        0x7C, 0x03, 0x20, 0x00, // cmpw r3, r4        (cr0 = r3 cmp r4, signed)
+        0x41, 0x80, 0x00, 0x10, // bc 12,0,+0x10      (branch to 0x14 if lt)
+        0x38, 0x60, 0x00, 0x00, // li r3, 0
+        0x4E, 0x80, 0x00, 0x20, // blr
+        0x60, 0x00, 0x00, 0x00, // nop (unreachable padding)
+        0x38, 0x60, 0x00, 0x01, // li r3, 1           (0x14: the taken path)
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(text.contains("if "), "cmpw/bc recovered as an if:\n{text}");
+}
+
+#[test]
+fn ppc_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  fadd f1,f1,f2 ; blr
+    let code: &[u8] = &[
+        0xFC, 0x21, 0x10, 0x2A, // fadd f1, f1, f2
+        0x4E, 0x80, 0x00, 0x20, // blr
+    ];
+    let p = ppc_program(code);
+    let text = decompile(&p, BASE, Convention::Ppc)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
+    );
+}
+
 #[test]
 fn mips64_lifts_doubleword_add() {
     // f(a, b): daddu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b (64-bit).
