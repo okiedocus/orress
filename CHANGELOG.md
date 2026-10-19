@@ -8,6 +8,11 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **IL view**: a read-only **IL** tab shows the decompiler's lifted intermediate
+  representation for the function under the cursor — machine code lifted into simple
+  statements and basic blocks, before it is structured into `if`/`while` and printed as
+  Rust. A window on how decompilation works; each line keeps its source address and block
+  labels are clickable.
 - **Linear view covers data sections**: the disassembly (linear) view now lists the
   non-executable regions too (`.rodata`/`.data`/…), not just code — detected ASCII strings
   render as quoted literals and other bytes as `db` runs, so you can scroll the whole image

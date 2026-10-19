@@ -88,6 +88,8 @@ pub enum TabKind {
     Inspector,
     /// User-defined types: declare structs/unions/enums/typedefs and see their layout.
     Types,
+    /// The decompiler's lifted IR for the function under the cursor (read-only).
+    Il,
     /// Extension manager: installed extensions, install/uninstall.
     Extensions,
     /// Team collaboration: shared project over a relay, presence/follow, claims, chat, CTF.
@@ -163,6 +165,7 @@ impl TabKind {
             Self::Explain => "Explain".into(),
             Self::Inspector => "Inspector".into(),
             Self::Types => "Types".into(),
+            Self::Il => "IL".into(),
             Self::Extensions => "Extensions".into(),
             Self::Collaboration => "Collaboration".into(),
             Self::Diff => "Binary diff".into(),
@@ -202,9 +205,12 @@ impl TabKind {
     pub fn home(&self) -> Slot {
         match self {
             Self::ProjectTree => Slot::Left,
-            Self::Explain | Self::Inspector | Self::Lesson | Self::Decompiler | Self::Assistant => {
-                Slot::Right
-            }
+            Self::Explain
+            | Self::Inspector
+            | Self::Lesson
+            | Self::Decompiler
+            | Self::Il
+            | Self::Assistant => Slot::Right,
             Self::Xrefs
             | Self::Terminal
             | Self::Problems

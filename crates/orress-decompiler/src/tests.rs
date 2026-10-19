@@ -1138,6 +1138,19 @@ fn struct_pointer_recovery() {
 }
 
 #[test]
+fn il_shows_blocks_and_expressions() {
+    // getter(p): load p->flag (u8) + p->count (u32), return the sum.
+    let getter: &[u8] = &[0x0F, 0xB6, 0x07, 0x8B, 0x57, 0x04, 0x01, 0xD0, 0xC3];
+    let p = program(&[("getter", getter)]);
+    let out = il(&p, BASE, Convention::SysV).expect("lifts");
+    let text = out.text();
+    assert!(text.contains("block_"), "has a block label:\n{text}");
+    assert!(text.contains("return"), "has a terminator:\n{text}");
+    // Every non-header line carries the source machine address it came from.
+    assert!(out.lines.iter().any(|l| l.addr.is_some()));
+}
+
+#[test]
 fn output_exposes_recovered_structs() {
     // Same getter: field_0 (u8 @0) + field_4 (u32 @4) => one struct, offered for promotion.
     let getter: &[u8] = &[0x0F, 0xB6, 0x07, 0x8B, 0x57, 0x04, 0x01, 0xD0, 0xC3];

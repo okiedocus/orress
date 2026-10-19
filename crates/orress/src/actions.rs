@@ -358,6 +358,12 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
         "Declare structs, unions, enums and typedefs, then apply them to data.",
     )
     .register(
+        "view::Il",
+        "Open IL",
+        "Show the decompiler's lifted intermediate representation for the function under the \
+         cursor — the stage between assembly and pseudocode.",
+    )
+    .register(
         "view::Extensions",
         "Manage Extensions",
         "Install, view and uninstall ORRESS and Zed-compatible extensions (themes, grammars, \
