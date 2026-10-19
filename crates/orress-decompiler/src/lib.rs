@@ -21,6 +21,7 @@ pub mod deobfuscate;
 pub mod ir;
 pub mod lift;
 pub mod print;
+pub mod riscv;
 pub mod simplify;
 pub mod ssa;
 pub mod structure;
@@ -143,6 +144,12 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
+    } else if program.isa == Isa::Riscv64 {
+        riscv::RiscvLifter {
+            program,
+            param_counts: counts,
+        }
+        .lift(f)
     } else {
         lifter(program, conv, counts).lift(f)
     }
@@ -169,14 +176,14 @@ struct Decompiled {
 /// Runs the decompilation pipeline for the function containing `addr`, up to (but not including)
 /// printing — so the result can be rendered as readable pseudocode or as a Rust port.
 fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Error> {
-    if !matches!(program.isa, Isa::X86 | Isa::X64 | Isa::Arm64) {
+    if !matches!(program.isa, Isa::X86 | Isa::X64 | Isa::Arm64 | Isa::Riscv64) {
         return Err(Error::Unsupported(program.isa));
     }
-    // ARM64 uses its own calling convention regardless of the caller's x86 choice.
-    let conv = if program.isa == Isa::Arm64 {
-        Convention::Aarch64
-    } else {
-        conv
+    // ARM64 and RISC-V use their own calling conventions regardless of the caller's x86 choice.
+    let conv = match program.isa {
+        Isa::Arm64 => Convention::Aarch64,
+        Isa::Riscv64 => Convention::Riscv,
+        _ => conv,
     };
     let f = program
         .functions
