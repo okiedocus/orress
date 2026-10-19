@@ -8,6 +8,7 @@
 mod arm64;
 pub mod explain;
 pub mod patch;
+mod riscv;
 mod x86;
 
 /// Instruction set architecture.
@@ -16,6 +17,8 @@ pub enum Isa {
     X86,
     X64,
     Arm64,
+    /// RISC-V 64-bit (RV64I + M; compressed instructions are length-aware).
+    Riscv64,
 }
 
 impl Isa {
@@ -25,6 +28,7 @@ impl Isa {
             "x86 (32-bit)" => Some(Self::X86),
             "x86-64" | "x86-64 (x32 ABI)" => Some(Self::X64),
             "ARM64 (AArch64)" => Some(Self::Arm64),
+            "RISC-V (64-bit)" => Some(Self::Riscv64),
             _ => None,
         }
     }
@@ -34,6 +38,7 @@ impl Isa {
             Self::X86 => "x86",
             Self::X64 => "x86-64",
             Self::Arm64 => "ARM64",
+            Self::Riscv64 => "RISC-V (64-bit)",
         }
     }
 
@@ -42,13 +47,14 @@ impl Isa {
         match self {
             Self::X86 | Self::X64 => 15,
             Self::Arm64 => 4,
+            Self::Riscv64 => 4,
         }
     }
 
     pub fn pointer_size(self) -> u64 {
         match self {
             Self::X86 => 4,
-            Self::X64 | Self::Arm64 => 8,
+            Self::X64 | Self::Arm64 | Self::Riscv64 => 8,
         }
     }
 }
@@ -166,6 +172,7 @@ pub fn decode(isa: Isa, bytes: &[u8], address: u64) -> Option<Insn> {
         Isa::X86 => x86::decode(32, bytes, address),
         Isa::X64 => x86::decode(64, bytes, address),
         Isa::Arm64 => arm64::decode(bytes, address),
+        Isa::Riscv64 => riscv::decode(bytes, address),
     }
 }
 
@@ -209,7 +216,7 @@ pub fn reg_info(isa: Isa, bytes: &[u8], address: u64) -> Option<RegInfo> {
     match isa {
         Isa::X86 => x86::reg_info(32, bytes, address),
         Isa::X64 => x86::reg_info(64, bytes, address),
-        Isa::Arm64 => None,
+        Isa::Arm64 | Isa::Riscv64 => None,
     }
 }
 
