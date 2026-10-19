@@ -211,7 +211,7 @@ fn listing_shows_data_section_strings() {
 #[test]
 fn unsupported_arch_is_none() {
     let (mut info, data) = crackme();
-    info.arch = "MIPS (32-bit)".into();
+    info.arch = "PowerPC (32-bit)".into();
     assert!(Program::analyze(&info, data, &[]).is_none());
 }
 

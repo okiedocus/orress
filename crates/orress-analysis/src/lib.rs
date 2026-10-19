@@ -155,7 +155,7 @@ impl Program {
     /// Analyzes the code of a triaged binary. Returns `None` for architectures ORRESS
     /// cannot disassemble yet.
     pub fn analyze(info: &BinaryInfo, data: Arc<Vec<u8>>, strings: &[FoundString]) -> Option<Self> {
-        let isa = Isa::from_arch_name(&info.arch)?;
+        let isa = Isa::from_arch_name(&info.arch, info.endian == orress_bytes::Endian::Little)?;
         let memory = Memory::new(info, data);
         let mut p = Self {
             isa,
