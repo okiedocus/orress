@@ -355,10 +355,54 @@ impl MipsLifter<'_> {
                 };
                 return Some(Term::Branch(cond, branch, addr + 4));
             }
-            // Computational formats S (single) and D (double).
-            0x10 | 0x11 => {
-                let fw = if sub == 0x10 { Width::B32 } else { Width::B64 };
-                self.lift_cop1_compute(w & 0x3f, addr, fw, fd, fs, ft, st, out);
+            // Computational formats: S (single), D (double), W (32-bit int), L (64-bit int).
+            0x10 | 0x11 | 0x14 | 0x15 => {
+                let funct = w & 0x3f;
+                let (srcw, src_is_int) = match sub {
+                    0x10 => (Width::B32, false),
+                    0x11 => (Width::B64, false),
+                    0x14 => (Width::B32, true),
+                    _ => (Width::B64, true),
+                };
+                let src = fsrc(fs, srcw);
+                // Conversions are valid from any source format.
+                match funct {
+                    0x20 | 0x21 => {
+                        // cvt.s.* / cvt.d.* — to a float.
+                        let dstw = if funct == 0x20 {
+                            Width::B32
+                        } else {
+                            Width::B64
+                        };
+                        let kind = if src_is_int {
+                            FCast::SIntToFloat
+                        } else {
+                            FCast::FloatToFloat
+                        };
+                        Self::put(
+                            out,
+                            addr,
+                            st,
+                            fdest(fd),
+                            Expr::FCast(Box::new(src), dstw, kind),
+                        );
+                    }
+                    // cvt.w.* / cvt.l.* — float to an integer (kept in the float register).
+                    0x24 | 0x25 if !src_is_int => {
+                        let dstw = if funct == 0x24 {
+                            Width::B32
+                        } else {
+                            Width::B64
+                        };
+                        let v = Expr::FCast(Box::new(src), dstw, FCast::FloatToSInt);
+                        Self::put(out, addr, st, fdest(fd), v);
+                    }
+                    // Arithmetic and compares exist only for the float formats.
+                    _ if !src_is_int => {
+                        self.lift_cop1_compute(funct, addr, srcw, fd, fs, ft, st, out);
+                    }
+                    _ => return self.asm(addr, out),
+                }
             }
             _ => return self.asm(addr, out),
         }

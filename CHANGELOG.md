@@ -15,9 +15,10 @@ All notable changes to ORRESS are documented here. The format follows
   unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` and the **COP1 floating-point**
   unit are lifted — the FPU arithmetic (`add.s`/`mul.d`/`sqrt`/`abs`/`neg`), the float
   loads/stores (`lwc1`/`ldc1`/`swc1`/`sdc1`), the GPR↔FPU moves (`mfc1`/`mtc1`) and the
-  `c.cond`/`bc1t`/`bc1f` compare-and-branch all recover as `f32`/`f64` expressions (`$f12`/
-  `$f14` arguments and the `$f0` return modelled). The `cvt.*` conversions, `madd`/`clz`, the
-  control moves and the conditional moves stay as inline `asm!`.
+  `c.cond`/`bc1t`/`bc1f` compare-and-branch and the `cvt.*` conversions all recover as
+  `f32`/`f64` expressions (`$f12`/`$f14` arguments and the `$f0` return modelled). The
+  `madd`/`clz`, the control moves (`cfc1`/`ctc1`) and the conditional moves stay as inline
+  `asm!`.
 
 - **RISC-V decompilation**: the decompiler now lifts RV64I + M, the **full integer
   compressed (`C`) set** — the stack frame save/restore, loads/stores and C-arithmetic that
