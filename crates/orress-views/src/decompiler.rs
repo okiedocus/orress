@@ -166,6 +166,8 @@ struct PanelState {
     /// The right-clicked line and the address under the pointer.
     menu: Option<(usize, Option<u64>)>,
     popup: Option<EditPopup>,
+    /// The open "set prototype" editor, if any.
+    proto: Option<crate::prototype::ProtoDraft>,
 }
 
 fn state_id() -> egui::Id {
@@ -299,7 +301,26 @@ fn panel(
                 state.find.show();
             }
         }
+        ui.separator();
+        let has_proto = doc.annotations.func_prototypes.contains_key(&func);
+        let label = if has_proto {
+            "Prototype ✎"
+        } else {
+            "Set prototype…"
+        };
+        if ui
+            .selectable_label(state.proto.is_some(), label)
+            .on_hover_text("Pin this function's return type and parameter names/types")
+            .clicked()
+        {
+            state.proto = if state.proto.is_some() {
+                None
+            } else {
+                Some(crate::prototype::ProtoDraft::load(doc, func))
+            };
+        }
     });
+    crate::prototype::window(ui, &mut state.proto, doc, &name);
     if state.find.open {
         let bar = find::bar(ui, &mut state.find, "e.g. a1, while, 0x5a", FIND_EXPLAIN);
         if bar.changed {

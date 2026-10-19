@@ -15,7 +15,9 @@ All notable changes to ORRESS are documented here. The format follows
   binary alongside names and comments. The decompiler uses the catalog too: when a
   recovered struct parameter matches a user struct, its fields print with the user's names
   (`p.magic` instead of `p.field_0`), and applied function prototypes override the
-  recovered signature.
+  recovered signature. A **Set prototype** editor in the decompiler header pins a
+  function's return type and named, typed parameters (a pointer-to-struct parameter then
+  prints as field accesses).
 - **Symbol demangling** (`orress-demangle`): mangled linker names in the imports, exports
   and function-symbol lists are now shown readable — Rust (legacy `_ZN…E` and v0 `_R…`),
   C++ Itanium (`_Z…`) and MSVC (`?…`). Pure Rust, no C `__cxa_demangle`. GOT/PLT slot

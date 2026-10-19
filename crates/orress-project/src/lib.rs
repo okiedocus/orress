@@ -350,6 +350,19 @@ impl Document {
         }
     }
 
+    /// Pins a function prototype to `addr` (consumed by the decompiler).
+    pub fn set_prototype(&mut self, addr: u64, proto: FuncProto) {
+        self.annotations.func_prototypes.insert(addr, proto);
+        self.save_annotations();
+    }
+
+    /// Removes any prototype pinned to `addr`.
+    pub fn clear_prototype(&mut self, addr: u64) {
+        if self.annotations.func_prototypes.remove(&addr).is_some() {
+            self.save_annotations();
+        }
+    }
+
     pub fn toggle_bookmark(&mut self, addr: u64) {
         if !self.annotations.bookmarks.remove(&addr) {
             self.annotations.bookmarks.insert(addr);
