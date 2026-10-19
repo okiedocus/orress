@@ -17,7 +17,9 @@ All notable changes to ORRESS are documented here. The format follows
   (`p.magic` instead of `p.field_0`), and applied function prototypes override the
   recovered signature. A **Set prototype** editor in the decompiler header pins a
   function's return type and named, typed parameters (a pointer-to-struct parameter then
-  prints as field accesses).
+  prints as field accesses). A **Save struct** menu in the decompiler header promotes a
+  struct the decompiler recovered (its `field_N` layout) into a reusable catalog type to
+  name and apply elsewhere.
 - **Symbol demangling** (`orress-demangle`): mangled linker names in the imports, exports
   and function-symbol lists are now shown readable — Rust (legacy `_ZN…E` and v0 `_R…`),
   C++ Itanium (`_Z…`) and MSVC (`?…`). Pure Rust, no C `__cxa_demangle`. GOT/PLT slot
