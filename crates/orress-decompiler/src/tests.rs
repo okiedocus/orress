@@ -215,6 +215,25 @@ fn riscv_lifts_compressed_arithmetic() {
     );
 }
 
+#[test]
+fn riscv_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  fadd.d fa0, fa0, fa1 ; ret
+    // Float ops previously fell back to `asm!`; they must now lift to floating-point IR.
+    let code: &[u8] = &[
+        0x53, 0x75, 0xb5, 0x02, // fadd.d fa0, fa0, fa1
+        0x67, 0x80, 0x00, 0x00, // ret
+    ];
+    let p = riscv_program(code);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
+    );
+}
+
 fn ported(funcs: &[(&str, &[u8])], index: usize) -> String {
     let p = program(funcs);
     port(&p, BASE + index as u64 * 0x40, Convention::SysV).expect("ports")

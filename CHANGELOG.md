@@ -15,11 +15,15 @@ All notable changes to ORRESS are documented here. The format follows
   unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` is lifted; float, COP and the
   uncommon ops (`madd`/`clz`, the conditional moves) stay as inline `asm!`.
 
-- **RISC-V decompilation**: the decompiler now lifts RV64I + M and the **full integer
+- **RISC-V decompilation**: the decompiler now lifts RV64I + M, the **full integer
   compressed (`C`) set** — the stack frame save/restore, loads/stores and C-arithmetic that
-  make up most of a function — so RISC-V functions become readable Rust-style pseudocode, not
-  just disassembly, without `asm!` noise in every prologue. Floating-point, CSR and the
-  float-compressed instructions are kept as inline `asm!`.
+  make up most of a function — and the **F/D floating-point** instructions, so RISC-V
+  functions become readable Rust-style pseudocode, not just disassembly, without `asm!` noise
+  in every prologue. Float arithmetic, min/max, `sqrt`, the comparisons, the int↔float and
+  float↔float conversions, the fused multiply-adds and the float loads/stores all recover as
+  `f32`/`f64` expressions (`fn f(a: f64, b: f64) -> f64 { a + b }`), with `fa0`–`fa7`
+  parameters and the float return value modelled. CSR and the general `fsgnj`/`fclass` stay
+  as inline `asm!`.
 - **MIPS32 disassembly** (big- and little-endian): ORRESS now loads and disassembles 32-bit
   MIPS ELFs — functions, cross-references, the linear and graph views, hex and strings.
   Hand-rolled pure-Rust decoder (R/I/J formats), now including the SPECIAL2 `mul`/`madd`/

@@ -58,6 +58,27 @@ fn dest(x: u32) -> Option<Var> {
     (x != 0).then(|| Var::Reg(reg_num(x)))
 }
 
+/// Maps an f-register to the IR float-register numbering (reusing `Var::Xmm`), chosen so the
+/// floating-point argument/return registers `fa0..fa7` are 0..7 — matching `float_arg_regs` and
+/// `retarget_float_return` in `simplify`, exactly as the integer [`reg_num`] does for `a0..a7`.
+fn freg_num(f: u32) -> u8 {
+    match f {
+        10..=17 => (f - 10) as u8, // fa0..fa7 -> 0..7
+        0..=9 => (f + 8) as u8,    // ft0..ft7 -> 8..15, fs0,fs1 -> 16,17
+        _ => f as u8,              // fs2..fs11 (18..27), ft8..ft11 (28..31)
+    }
+}
+
+/// A source f-register as a float-valued expression.
+fn fsrc(f: u32, w: Width) -> Expr {
+    Expr::Var(Var::Xmm(freg_num(f)), w)
+}
+
+/// The destination f-register (float writes are never discarded — there is no float zero register).
+fn fdest(f: u32) -> Var {
+    Var::Xmm(freg_num(f))
+}
+
 fn sext(value: u32, bits: u32) -> i64 {
     let shift = 32 - bits;
     ((value << shift) as i32 >> shift) as i64
@@ -309,10 +330,145 @@ impl RiscvLifter<'_> {
                 }
                 return self.asm(w, addr, out); // ecall / CSR
             }
+            // Floating-point loads/stores (f3 2 = single, 3 = double).
+            0x07 if f3 == 2 || f3 == 3 => {
+                let fw = if f3 == 3 { b64 } else { Width::B32 };
+                let v = self.load(rs1, i_imm, fw);
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            0x27 if f3 == 2 || f3 == 3 => {
+                let fw = if f3 == 3 { b64 } else { Width::B32 };
+                self.store(rs1, s_imm, fsrc(rs2, fw), fw, addr, out);
+            }
+            // OP-FP and fused multiply-add.
+            0x53 => return self.lift_fp(w, addr, rd, rs1, rs2, f3, f7, st, out),
+            0x43 | 0x47 | 0x4b | 0x4f => self.lift_fma(w, addr, opcode, rd, rs1, rs2, st, out),
             0x0f => {} // fence: no effect on the recovered logic.
             _ => return self.asm(w, addr, out),
         }
         None
+    }
+
+    /// OP-FP (opcode 0x53): the single/double arithmetic, min/max, compares (integer result),
+    /// conversions and reinterpreting moves. The general `fsgnj` and `fclass` have no direct IR
+    /// and stay as `asm!`.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_fp(
+        &self,
+        w: u32,
+        addr: u64,
+        rd: u32,
+        rs1: u32,
+        rs2: u32,
+        f3: u32,
+        f7: u32,
+        st: &mut State,
+        out: &mut Vec<(u64, Stmt)>,
+    ) -> Option<Term> {
+        let fw = if f7 & 1 == 0 { Width::B32 } else { Width::B64 };
+        let b64 = Width::B64;
+        let fab = |op| Expr::fbin(op, fsrc(rs1, fw), fsrc(rs2, fw), fw);
+        match f7 >> 1 {
+            0x00 => Self::assign(out, addr, st, fdest(rd), fab(BinOp::Add)),
+            0x02 => Self::assign(out, addr, st, fdest(rd), fab(BinOp::Sub)),
+            0x04 => Self::assign(out, addr, st, fdest(rd), fab(BinOp::Mul)),
+            0x06 => Self::assign(out, addr, st, fdest(rd), fab(BinOp::Div)),
+            0x16 => {
+                let v = Expr::FUn(FUnOp::Sqrt, Box::new(fsrc(rs1, fw)), fw);
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            // fsgnj group — the fmv/fneg/fabs pseudo-ops (when the two sources are the same reg).
+            0x08 if rs1 == rs2 => {
+                let v = match f3 {
+                    0 => fsrc(rs1, fw),
+                    1 => Expr::FUn(FUnOp::Neg, Box::new(fsrc(rs1, fw)), fw),
+                    2 => Expr::FUn(FUnOp::Abs, Box::new(fsrc(rs1, fw)), fw),
+                    _ => return self.asm(w, addr, out),
+                };
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            // fmin / fmax.
+            0x0a => {
+                let name = if f3 == 0 { "min" } else { "max" };
+                let v = Expr::method(fsrc(rs1, fw), name, vec![fsrc(rs2, fw)], fw);
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            // feq / flt / fle -> a bool in an integer register.
+            0x28 => {
+                let op = match f3 {
+                    0 => CmpOp::Le,
+                    1 => CmpOp::Lt,
+                    2 => CmpOp::Eq,
+                    _ => return self.asm(w, addr, out),
+                };
+                if let Some(d) = dest(rd) {
+                    let cond = Expr::fcmp(op, fsrc(rs1, fw), fsrc(rs2, fw));
+                    Self::assign(out, addr, st, d, Expr::Cast(Box::new(cond), b64, false));
+                }
+            }
+            // fcvt.s.d / fcvt.d.s.
+            0x10 => {
+                let (dstw, srcw) = if f7 & 1 == 0 {
+                    (Width::B32, b64)
+                } else {
+                    (b64, Width::B32)
+                };
+                let v = Expr::FCast(Box::new(fsrc(rs1, srcw)), dstw, FCast::FloatToFloat);
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            // Float -> integer (fcvt.w/wu/l/lu).
+            0x30 => {
+                if let Some(d) = dest(rd) {
+                    let v = Expr::FCast(Box::new(fsrc(rs1, fw)), b64, FCast::FloatToSInt);
+                    Self::assign(out, addr, st, d, v);
+                }
+            }
+            // Integer -> float (fcvt.{s,d}.w/...).
+            0x34 => {
+                let v = Expr::FCast(Box::new(src(rs1, b64)), fw, FCast::SIntToFloat);
+                Self::assign(out, addr, st, fdest(rd), v);
+            }
+            // fmv.x.w: reinterpret the float's bits as an integer.
+            0x38 if f3 == 0 => {
+                if let Some(d) = dest(rd) {
+                    Self::assign(out, addr, st, d, fsrc(rs1, fw));
+                }
+            }
+            // fmv.w.x: reinterpret an integer's bits as a float.
+            0x3c => Self::assign(out, addr, st, fdest(rd), src(rs1, fw)),
+            _ => return self.asm(w, addr, out),
+        }
+        None
+    }
+
+    /// Fused multiply-add (opcodes 0x43/0x47/0x4b/0x4f): `±(rs1 * rs2) ± rs3`.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_fma(
+        &self,
+        w: u32,
+        addr: u64,
+        opcode: u32,
+        rd: u32,
+        rs1: u32,
+        rs2: u32,
+        st: &mut State,
+        out: &mut Vec<(u64, Stmt)>,
+    ) {
+        let fw = if (w >> 25) & 1 == 0 {
+            Width::B32
+        } else {
+            Width::B64
+        };
+        let rs3 = (w >> 27) & 0x1f;
+        let mul = Expr::fbin(BinOp::Mul, fsrc(rs1, fw), fsrc(rs2, fw), fw);
+        let c = fsrc(rs3, fw);
+        let v = match opcode {
+            0x43 => Expr::fbin(BinOp::Add, mul, c, fw), // fmadd: a*b + c
+            0x47 => Expr::fbin(BinOp::Sub, mul, c, fw), // fmsub: a*b - c
+            0x4b => Expr::fbin(BinOp::Sub, c, mul, fw), // fnmsub: c - a*b
+            _ => Expr::FUn(FUnOp::Neg, Box::new(Expr::fbin(BinOp::Add, mul, c, fw)), fw), // fnmadd
+        };
+        Self::assign(out, addr, st, fdest(rd), v);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -773,6 +929,28 @@ impl RiscvLifter<'_> {
                     (b64, sdsp_imm(w))
                 };
                 self.store(2, off, src((w >> 2) & 0x1f, width), width, addr, out);
+            }
+            // Compressed double-precision float loads/stores (RV64).
+            (0b00, 0b001) => {
+                let v = self.load(8 + ((w >> 7) & 7), cld_imm(w), b64);
+                Self::assign(out, addr, st, fdest(8 + ((w >> 2) & 7)), v);
+            }
+            (0b00, 0b101) => {
+                self.store(
+                    8 + ((w >> 7) & 7),
+                    cld_imm(w),
+                    fsrc(8 + ((w >> 2) & 7), b64),
+                    b64,
+                    addr,
+                    out,
+                );
+            }
+            (0b10, 0b001) => {
+                let v = self.load(2, ldsp_imm(w), b64);
+                Self::assign(out, addr, st, fdest((w >> 7) & 0x1f), v);
+            }
+            (0b10, 0b101) => {
+                self.store(2, sdsp_imm(w), fsrc((w >> 2) & 0x1f, b64), b64, addr, out);
             }
             _ => return self.asm(w, addr, out),
         }
