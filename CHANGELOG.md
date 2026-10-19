@@ -13,6 +13,11 @@ All notable changes to ORRESS are documented here. The format follows
   Hand-rolled pure-Rust decoder (R/I/J formats). Byte order is picked from the ELF; the
   delay slot after an unconditional `j`/`jr` may show as data (a documented limit). The
   decompiler is x86/ARM64 only for now.
+- **Import C header**: **Tools ▸ Import C Header…** reads type definitions
+  (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
+  preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and
+  declarations the model cannot represent (function prototypes, bitfields) are stripped or
+  skipped. Reuses the pure-Rust C parser; no new dependency.
 - **Function signatures (FLIRT-style)**: identify known library functions (libc, the
   Rust/MSVC runtime, …) in a stripped binary by matching the leading bytes of each
   function, with relocatable call/jump operands masked so a function matches wherever it is

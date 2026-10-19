@@ -23,6 +23,32 @@ pub fn parse_c_decls(src: &str) -> Result<Vec<UserType>, String> {
     Ok(out)
 }
 
+/// Best-effort parse of a whole C header: preprocessor directives, `__attribute__`/`__declspec`
+/// and comments are stripped, then each top-level declaration is parsed; anything the model does
+/// not represent (function prototypes, typedef'd function pointers, bitfields, anonymous members)
+/// is skipped rather than failing the import. Returns the recovered types and how many
+/// declarations were skipped.
+pub fn parse_header(src: &str) -> Result<(Vec<UserType>, usize), String> {
+    let cleaned = preprocess(src);
+    let tokens = tokenize(&cleaned)?;
+    let mut p = Parser { tokens, pos: 0 };
+    let mut out = Vec::new();
+    let mut skipped = 0;
+    while p.peek().is_some() {
+        let before = p.pos;
+        if p.declaration(&mut out).is_err() {
+            skipped += 1;
+            // Resync to the next top-level `;` so one bad declaration does not stop the import.
+            p.skip_declaration();
+            // Guarantee forward progress even if nothing was consumed.
+            if p.pos == before {
+                p.pos += 1;
+            }
+        }
+    }
+    Ok((out, skipped))
+}
+
 // ---------------------------------------------------------------------------- tokenizer
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,9 +107,12 @@ fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         ) {
             out.push(Tok::Punct(c as char));
             i += 1;
-        } else if c == b'-' {
-            // A leading minus on an enum value.
-            out.push(Tok::Punct('-'));
+        } else if c.is_ascii_punctuation() {
+            // Any other ASCII punctuation (`-`, `:`, `<`, `&`, …) becomes a generic token. The
+            // parser only acts on the ones it expects; the rest let header import skip a
+            // declaration it does not model (a bitfield `:`, an operator in a macro, …) rather
+            // than failing to tokenize.
+            out.push(Tok::Punct(c as char));
             i += 1;
         } else {
             return Err(format!("unexpected character `{}`", c as char));
@@ -195,6 +224,7 @@ impl Parser {
             let mut ty = base.clone();
             while self.is_punct('*') {
                 self.next();
+                self.skip_qualifiers(); // `char * const p`
                 ty = TypeRef::Pointer(Box::new(ty));
             }
             let name = self.ident()?;
@@ -338,7 +368,33 @@ impl Parser {
 
     /// Parses a base type: a `struct/union/enum Tag` reference, a run of primitive specifier
     /// words, or a bare named type (another user type / typedef).
+    /// Advances past the rest of a declaration after an error: to and over the next `;` at
+    /// brace depth 0 (skipping any `{ … }` body along the way).
+    fn skip_declaration(&mut self) {
+        let mut depth = 0i32;
+        while let Some(tok) = self.next() {
+            match tok {
+                Tok::Punct('{') => depth += 1,
+                Tok::Punct('}') => depth -= 1,
+                Tok::Punct(';') if depth <= 0 => break,
+                _ => {}
+            }
+        }
+    }
+
+    /// Skips C qualifier keywords the type model does not represent (`const`, `volatile`, …).
+    fn skip_qualifiers(&mut self) {
+        while let Some(Tok::Ident(s)) = self.peek() {
+            if is_qualifier(s) {
+                self.next();
+            } else {
+                break;
+            }
+        }
+    }
+
     fn base_type(&mut self) -> Result<TypeRef, String> {
+        self.skip_qualifiers();
         if let Some(Tok::Ident(kw)) = self.peek()
             && (kw == "struct" || kw == "union" || kw == "enum")
         {
@@ -388,6 +444,86 @@ fn rename_last(out: &mut [UserType], name: &str) {
 
 /// Primitive type specifier keywords (plus `<stdint.h>` names), so the parser knows where a
 /// base type ends and the declarator begins.
+/// C qualifiers and storage/linkage keywords the type model ignores.
+fn is_qualifier(w: &str) -> bool {
+    matches!(
+        w,
+        "const"
+            | "volatile"
+            | "restrict"
+            | "__restrict"
+            | "__restrict__"
+            | "register"
+            | "_Atomic"
+            | "__extension__"
+            | "inline"
+            | "__inline"
+            | "__inline__"
+            | "static"
+            | "extern"
+            | "auto"
+    )
+}
+
+/// Strips what the type grammar cannot parse from a C header: preprocessor directives
+/// (`#...`, with `\`-continuation), and `__attribute__((…))` / `__declspec(…)` groups. Comments
+/// are handled by the tokenizer.
+fn preprocess(src: &str) -> String {
+    // Drop preprocessor directive lines.
+    let mut body = String::new();
+    let mut continued = false;
+    for line in src.lines() {
+        let directive = continued || line.trim_start().starts_with('#');
+        continued = directive && line.trim_end().ends_with('\\');
+        if directive {
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    // Remove `__attribute__((…))` and `__declspec(…)` balanced groups.
+    for name in ["__attribute__", "__declspec"] {
+        body = strip_balanced(&body, name);
+    }
+    body
+}
+
+/// Removes every `name( … )` (balanced parentheses) occurrence from `s`.
+fn strip_balanced(s: &str, name: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(pos) = rest.find(name) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + name.len()..];
+        // Skip whitespace, then a balanced parenthesis group if present.
+        let trimmed = after.trim_start();
+        if let Some(stripped) = trimmed.strip_prefix('(') {
+            let mut depth = 1i32;
+            let mut end = 0;
+            for (i, c) in stripped.char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest = &stripped[end..];
+        } else {
+            // `name` not followed by `(`: keep it as-is to avoid an infinite loop.
+            out.push_str(name);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn is_specifier(w: &str) -> bool {
     matches!(
         w,
@@ -613,5 +749,56 @@ mod tests {
                 .contains("no type declarations")
         );
         assert!(parse_c_decls("int x;").is_err()); // not a type declaration
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    #[test]
+    fn imports_structs_and_skips_noise() {
+        let header = r#"
+            #ifndef FOO_H
+            #define FOO_H 1
+            #include <stdint.h>
+
+            /* a packet */
+            typedef struct __attribute__((packed)) Packet {
+                const uint32_t magic;
+                char body[64];
+                struct Packet *next;
+            } Packet;
+
+            // a function prototype — skipped
+            int process(Packet *p, int flags);
+
+            enum Cmd { CMD_READ = 1, CMD_WRITE = 2 };
+
+            struct WithBitfield { unsigned a : 3; unsigned b : 5; };  // skipped (bitfields)
+            #endif
+        "#;
+        let (types, _skipped) = parse_header(header).unwrap();
+        let names: Vec<&str> = types.iter().map(UserType::name).collect();
+        assert!(names.contains(&"Packet"), "{names:?}");
+        assert!(names.contains(&"Cmd"), "{names:?}");
+        // The `const` qualifier is ignored; the struct's first field is still a u32.
+        let packet = types
+            .iter()
+            .find(|t| matches!(t, UserType::Struct { name, .. } if name == "Packet"))
+            .unwrap();
+        if let UserType::Struct { fields, .. } = packet {
+            assert_eq!(fields[0].ty, TypeRef::Prim(Prim::U32));
+            assert_eq!(fields[1].count, 64);
+        }
+        // The function prototype and the bitfield struct did not abort the import.
+        assert!(!types.is_empty());
+    }
+
+    #[test]
+    fn empty_header_is_ok() {
+        let (types, skipped) = parse_header("#include <stdio.h>\nint main(void);\n").unwrap();
+        assert!(types.is_empty());
+        assert!(skipped >= 1);
     }
 }

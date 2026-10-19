@@ -450,6 +450,44 @@ impl OrressApp {
 
     /// Imports names (and comments) from a file — the ORRESS JSON export, or a plain
     /// `addr name` / Ghidra-style CSV list — and applies them to the open binary.
+    /// Imports type definitions from a C header file into the open binary's catalog
+    /// (best-effort: declarations the model cannot represent are skipped).
+    fn import_header(&mut self, ctx: &Context) {
+        if self.docs.active().is_none() {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("C header", &["h", "hpp", "hh"])
+            .set_title("Import types from a C header")
+            .pick_file()
+        else {
+            return;
+        };
+        let parsed = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| orress_project::parse_header(&text));
+        match parsed {
+            Ok((types, skipped)) => {
+                let mut added = 0;
+                if let Some(doc) = self.docs.active_mut() {
+                    for ty in types {
+                        if doc.define_type(ty).is_ok() {
+                            added += 1;
+                        }
+                    }
+                }
+                let note = if skipped > 0 {
+                    format!("Imported {added} type(s); skipped {skipped} declaration(s)")
+                } else {
+                    format!("Imported {added} type(s)")
+                };
+                self.notify(ctx, note, false);
+            }
+            Err(e) => self.notify(ctx, format!("Could not import header: {e}"), true),
+        }
+    }
+
     fn import_annotations(&mut self, ctx: &Context) {
         if self.docs.active().is_none() {
             self.notify(ctx, "Open a binary first.", true);
@@ -863,6 +901,7 @@ impl OrressApp {
             }
             "analysis::ApplySignatures" => self.apply_signatures(ctx),
             "analysis::GenerateSignatures" => self.generate_signatures(ctx),
+            "types::ImportHeader" => self.import_header(ctx),
             "annotations::Import" => self.import_annotations(ctx),
             "annotations::Export" => self.export_annotations(ctx),
             "hex::GoTo" => self.hex_command(ctx, ViewCommand::GoTo),
@@ -1245,6 +1284,7 @@ impl OrressApp {
                     ui.separator();
                     self.menu_entry(ui, "analysis::ApplySignatures", &mut clicked);
                     self.menu_entry(ui, "analysis::GenerateSignatures", &mut clicked);
+                    self.menu_entry(ui, "types::ImportHeader", &mut clicked);
                     self.menu_entry(ui, "annotations::Import", &mut clicked);
                     self.menu_entry(ui, "annotations::Export", &mut clicked);
                     ui.separator();
