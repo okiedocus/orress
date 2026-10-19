@@ -96,7 +96,10 @@ All notable changes to ORRESS are documented here. The format follows
   embedded/firmware), with 4-byte pointers and the RV32 compressed set. The five compressed
   encodings that differ by XLEN are decoded per the ISA — `c.jal` (a **call**, so RV32
   control flow is recovered correctly), `c.flw`/`c.fsw`/`c.flwsp`/`c.fswsp` — where RV64 has
-  `c.addiw`/`c.ld`/`c.sd`/`c.ldsp`/`c.sdsp`. The base integer set is shared with RV64.
+  `c.addiw`/`c.ld`/`c.sd`/`c.ldsp`/`c.sdsp`. The base integer set is shared with RV64. The
+  **decompiler lifts RV32 too** — the RISC-V lifter is width-parametric, so registers, pointers
+  and native arithmetic are 32-bit (doubles, which stay 64-bit, and the shared compressed float
+  loads are handled), and the RV32 `c.jal` lifts to a call.
 - **Import / export names and comments**: **Tools ▸ Export Names/Comments…** saves the open
   binary's names and comments as portable JSON (keyed by hex address); **Import…** brings
   them back in — from that JSON or a plain `address name` / CSV list (IDA, Ghidra, radare2,

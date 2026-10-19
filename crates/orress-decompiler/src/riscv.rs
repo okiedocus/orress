@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use orress_analysis::{EdgeKind, Function, Program};
+use orress_analysis::{EdgeKind, Function, Isa, Program};
 
 use crate::ir::*;
 use crate::lift::{Convention, import_noreturn, import_params};
@@ -158,6 +158,21 @@ impl RiscvLifter<'_> {
         Some(u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?))
     }
 
+    /// The native register/pointer width (XLEN): 32-bit on RV32, else 64-bit. Genuinely 64-bit
+    /// values (doubles, `ld`/`sd`, the `.w` sign-extension) stay `Width::B64` regardless.
+    fn xw(&self) -> Width {
+        if self.program.isa == Isa::Riscv32 {
+            Width::B32
+        } else {
+            Width::B64
+        }
+    }
+
+    /// True on RV32, where several compressed encodings differ from RV64.
+    fn rv32(&self) -> bool {
+        self.program.isa == Isa::Riscv32
+    }
+
     /// Records a write to an argument register (0..8) for counting an unknown call's arguments.
     fn note_write(st: &mut State, v: &Var) {
         if let Var::Reg(r) = v
@@ -219,7 +234,7 @@ impl RiscvLifter<'_> {
             21,
         );
         let next = addr + len;
-        let b64 = Width::B64;
+        let b64 = self.xw();
 
         match opcode {
             0x37 => {
@@ -293,7 +308,7 @@ impl RiscvLifter<'_> {
                     0 => (Width::B8, true),
                     1 => (Width::B16, true),
                     2 => (Width::B32, true),
-                    3 => (b64, false),
+                    3 => (Width::B64, false), // ld (RV64)
                     4 => (Width::B8, false),
                     5 => (Width::B16, false),
                     6 => (Width::B32, false),
@@ -313,7 +328,7 @@ impl RiscvLifter<'_> {
                     0 => Width::B8,
                     1 => Width::B16,
                     2 => Width::B32,
-                    3 => b64,
+                    3 => Width::B64, // sd (RV64)
                     _ => return self.asm(w, addr, out),
                 };
                 self.store(rs1, s_imm, src(rs2, width), width, addr, out);
@@ -330,14 +345,14 @@ impl RiscvLifter<'_> {
                 }
                 return self.asm(w, addr, out); // ecall / CSR
             }
-            // Floating-point loads/stores (f3 2 = single, 3 = double).
+            // Floating-point loads/stores (f3 2 = single, 3 = double; a double is 64-bit on RV32 too).
             0x07 if f3 == 2 || f3 == 3 => {
-                let fw = if f3 == 3 { b64 } else { Width::B32 };
+                let fw = if f3 == 3 { Width::B64 } else { Width::B32 };
                 let v = self.load(rs1, i_imm, fw);
                 Self::assign(out, addr, st, fdest(rd), v);
             }
             0x27 if f3 == 2 || f3 == 3 => {
-                let fw = if f3 == 3 { b64 } else { Width::B32 };
+                let fw = if f3 == 3 { Width::B64 } else { Width::B32 };
                 self.store(rs1, s_imm, fsrc(rs2, fw), fw, addr, out);
             }
             // OP-FP and fused multiply-add.
@@ -366,7 +381,7 @@ impl RiscvLifter<'_> {
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
         let fw = if f7 & 1 == 0 { Width::B32 } else { Width::B64 };
-        let b64 = Width::B64;
+        let b64 = self.xw();
         let fab = |op| Expr::fbin(op, fsrc(rs1, fw), fsrc(rs2, fw), fw);
         match f7 >> 1 {
             0x00 => Self::assign(out, addr, st, fdest(rd), fab(BinOp::Add)),
@@ -406,12 +421,12 @@ impl RiscvLifter<'_> {
                     Self::assign(out, addr, st, d, Expr::Cast(Box::new(cond), b64, false));
                 }
             }
-            // fcvt.s.d / fcvt.d.s.
+            // fcvt.s.d / fcvt.d.s: between single and double (both float widths, not XLEN).
             0x10 => {
                 let (dstw, srcw) = if f7 & 1 == 0 {
-                    (Width::B32, b64)
+                    (Width::B32, Width::B64)
                 } else {
-                    (b64, Width::B32)
+                    (Width::B64, Width::B32)
                 };
                 let v = Expr::FCast(Box::new(fsrc(rs1, srcw)), dstw, FCast::FloatToFloat);
                 Self::assign(out, addr, st, fdest(rd), v);
@@ -484,7 +499,7 @@ impl RiscvLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) {
-        let b64 = Width::B64;
+        let b64 = self.xw();
         let Some(d) = dest(rd) else { return };
         // addi rd, rs1, 0 is a move; addi rd, x0, imm is a load-immediate.
         if !word32 && f3 == 0 {
@@ -537,7 +552,7 @@ impl RiscvLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
-        let b64 = Width::B64;
+        let b64 = self.xw();
         let d = dest(rd)?;
         let a = src(rs1, b64);
         let b = src(rs2, b64);
@@ -545,9 +560,9 @@ impl RiscvLifter<'_> {
             // M extension.
             match f3 {
                 0 => Expr::bin(BinOp::Mul, a, b, b64),
-                4 => Expr::bin(BinOp::Div, Self::signed(a), Self::signed(b), b64),
+                4 => Expr::bin(BinOp::Div, Self::signed(a, b64), Self::signed(b, b64), b64),
                 5 => Expr::bin(BinOp::Div, a, b, b64),
-                6 => Expr::bin(BinOp::Rem, Self::signed(a), Self::signed(b), b64),
+                6 => Expr::bin(BinOp::Rem, Self::signed(a, b64), Self::signed(b, b64), b64),
                 7 => Expr::bin(BinOp::Rem, a, b, b64),
                 _ => return self.asm(w, addr, out),
             }
@@ -562,7 +577,12 @@ impl RiscvLifter<'_> {
                 (6, 0x00) => Expr::bin(BinOp::Or, a, b, b64),
                 (7, 0x00) => Expr::bin(BinOp::And, a, b, b64),
                 (2, 0x00) => Expr::Cast(
-                    Box::new(Expr::cmp(CmpOp::Lt, Self::signed(a), Self::signed(b), true)),
+                    Box::new(Expr::cmp(
+                        CmpOp::Lt,
+                        Self::signed(a, b64),
+                        Self::signed(b, b64),
+                        true,
+                    )),
                     b64,
                     false,
                 ),
@@ -588,8 +608,8 @@ impl RiscvLifter<'_> {
         }
     }
 
-    fn signed(e: Expr) -> Expr {
-        Expr::Cast(Box::new(e), Width::B64, true)
+    fn signed(e: Expr, w: Width) -> Expr {
+        Expr::Cast(Box::new(e), w, true)
     }
 
     /// A load of `width` from `off(rs1)`: a stack slot when through `sp`, else a memory read.
@@ -597,12 +617,8 @@ impl RiscvLifter<'_> {
         if rs1 == 2 {
             Expr::Var(Var::Stack(off), width)
         } else {
-            let addr = Expr::bin(
-                BinOp::Add,
-                src(rs1, Width::B64),
-                Expr::konst(off as u64, Width::B64),
-                Width::B64,
-            );
+            let xw = self.xw();
+            let addr = Expr::bin(BinOp::Add, src(rs1, xw), Expr::konst(off as u64, xw), xw);
             Expr::Load(Box::new(addr), width)
         }
     }
@@ -619,12 +635,8 @@ impl RiscvLifter<'_> {
         if rs1 == 2 {
             out.push((addr, Stmt::Assign(Var::Stack(off), value)));
         } else {
-            let a = Expr::bin(
-                BinOp::Add,
-                src(rs1, Width::B64),
-                Expr::konst(off as u64, Width::B64),
-                Width::B64,
-            );
+            let xw = self.xw();
+            let a = Expr::bin(BinOp::Add, src(rs1, xw), Expr::konst(off as u64, xw), xw);
             out.push((addr, Stmt::Store(a, value, width)));
         }
     }
@@ -655,7 +667,7 @@ impl RiscvLifter<'_> {
         let args = regs
             .iter()
             .take(count)
-            .map(|&r| Expr::Var(Var::Reg(r), Width::B64))
+            .map(|&r| Expr::Var(Var::Reg(r), self.xw()))
             .collect();
         out.push((addr, Stmt::Assign(Var::Reg(0), Expr::Call(target, args))));
         for &r in Convention::Riscv.clobbered() {
@@ -700,7 +712,7 @@ impl RiscvLifter<'_> {
         let w = u32::from(h);
         let op = w & 0b11;
         let f3 = (w >> 13) & 0b111;
-        let b64 = Width::B64;
+        let b64 = self.xw();
         match (op, f3) {
             // C.J
             (0b01, 0b101) => {
@@ -793,16 +805,32 @@ impl RiscvLifter<'_> {
                     Self::assign(out, addr, st, d, v);
                 }
             }
+            // RV32 C.FLW / C.FSW: compressed single-precision float load/store (RV64 0b011/0b111
+            // are the integer C.LD/C.SD handled below).
+            (0b00, 0b011) if self.rv32() => {
+                let v = self.load(8 + ((w >> 7) & 7), clw_imm(w), Width::B32);
+                Self::assign(out, addr, st, fdest(8 + ((w >> 2) & 7)), v);
+            }
+            (0b00, 0b111) if self.rv32() => {
+                self.store(
+                    8 + ((w >> 7) & 7),
+                    clw_imm(w),
+                    fsrc(8 + ((w >> 2) & 7), Width::B32),
+                    Width::B32,
+                    addr,
+                    out,
+                );
+            }
             // C.LW / C.LD.
             (0b00, 0b010) | (0b00, 0b011) => {
                 let (width, off) = if f3 == 0b010 {
                     (Width::B32, clw_imm(w))
                 } else {
-                    (b64, cld_imm(w))
+                    (Width::B64, cld_imm(w))
                 };
                 if let Some(d) = dest(8 + ((w >> 2) & 7)) {
                     let mut value = self.load(8 + ((w >> 7) & 7), off, width);
-                    // `c.lw` sign-extends its 32-bit result to the 64-bit register.
+                    // `c.lw` sign-extends its 32-bit result to the register width.
                     if width != b64 {
                         value = Expr::Cast(Box::new(value), b64, true);
                     }
@@ -814,7 +842,7 @@ impl RiscvLifter<'_> {
                 let (width, off) = if f3 == 0b110 {
                     (Width::B32, clw_imm(w))
                 } else {
-                    (b64, cld_imm(w))
+                    (Width::B64, cld_imm(w))
                 };
                 self.store(
                     8 + ((w >> 7) & 7),
@@ -826,7 +854,11 @@ impl RiscvLifter<'_> {
                 );
             }
             // ---- Quadrant 1 ----
-            // C.ADDIW (RV64): addiw rd, rd, imm.
+            // RV32 C.JAL: a call to a pc-relative target (links ra). RV64 C.ADDIW: addiw rd,rd,imm.
+            (0b01, 0b001) if self.rv32() => {
+                let target = addr.wrapping_add_signed(cj_imm(w));
+                return self.call(addr, CallTarget::Direct(target), st, out);
+            }
             (0b01, 0b001) => {
                 let rd = (w >> 7) & 0x1f;
                 if let Some(d) = dest(rd) {
@@ -906,12 +938,28 @@ impl RiscvLifter<'_> {
                     Self::assign(out, addr, st, d, v);
                 }
             }
+            // RV32 C.FLWSP / C.FSWSP: single-precision float load/store through sp (RV64 0b011/
+            // 0b111 are the integer C.LDSP/C.SDSP handled below).
+            (0b10, 0b011) if self.rv32() => {
+                let v = self.load(2, lwsp_imm(w), Width::B32);
+                Self::assign(out, addr, st, fdest((w >> 7) & 0x1f), v);
+            }
+            (0b10, 0b111) if self.rv32() => {
+                self.store(
+                    2,
+                    swsp_imm(w),
+                    fsrc((w >> 2) & 0x1f, Width::B32),
+                    Width::B32,
+                    addr,
+                    out,
+                );
+            }
             // C.LWSP / C.LDSP (base is sp = x2).
             (0b10, 0b010) | (0b10, 0b011) => {
                 let (width, off) = if f3 == 0b010 {
                     (Width::B32, lwsp_imm(w))
                 } else {
-                    (b64, ldsp_imm(w))
+                    (Width::B64, ldsp_imm(w))
                 };
                 if let Some(d) = dest((w >> 7) & 0x1f) {
                     let mut value = self.load(2, off, width);
@@ -926,31 +974,38 @@ impl RiscvLifter<'_> {
                 let (width, off) = if f3 == 0b110 {
                     (Width::B32, swsp_imm(w))
                 } else {
-                    (b64, sdsp_imm(w))
+                    (Width::B64, sdsp_imm(w))
                 };
                 self.store(2, off, src((w >> 2) & 0x1f, width), width, addr, out);
             }
-            // Compressed double-precision float loads/stores (RV64).
+            // Compressed double-precision float loads/stores (a double is 64-bit on RV32D too).
             (0b00, 0b001) => {
-                let v = self.load(8 + ((w >> 7) & 7), cld_imm(w), b64);
+                let v = self.load(8 + ((w >> 7) & 7), cld_imm(w), Width::B64);
                 Self::assign(out, addr, st, fdest(8 + ((w >> 2) & 7)), v);
             }
             (0b00, 0b101) => {
                 self.store(
                     8 + ((w >> 7) & 7),
                     cld_imm(w),
-                    fsrc(8 + ((w >> 2) & 7), b64),
-                    b64,
+                    fsrc(8 + ((w >> 2) & 7), Width::B64),
+                    Width::B64,
                     addr,
                     out,
                 );
             }
             (0b10, 0b001) => {
-                let v = self.load(2, ldsp_imm(w), b64);
+                let v = self.load(2, ldsp_imm(w), Width::B64);
                 Self::assign(out, addr, st, fdest((w >> 7) & 0x1f), v);
             }
             (0b10, 0b101) => {
-                self.store(2, sdsp_imm(w), fsrc((w >> 2) & 0x1f, b64), b64, addr, out);
+                self.store(
+                    2,
+                    sdsp_imm(w),
+                    fsrc((w >> 2) & 0x1f, Width::B64),
+                    Width::B64,
+                    addr,
+                    out,
+                );
             }
             _ => return self.asm(w, addr, out),
         }

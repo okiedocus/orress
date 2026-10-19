@@ -146,7 +146,7 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
-    } else if program.isa == Isa::Riscv64 {
+    } else if matches!(program.isa, Isa::Riscv64 | Isa::Riscv32) {
         riscv::RiscvLifter {
             program,
             param_counts: counts,
@@ -199,6 +199,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
             | Isa::X64
             | Isa::Arm64
             | Isa::Riscv64
+            | Isa::Riscv32
             | Isa::Mips32
             | Isa::Mips32El
             | Isa::Mips64
@@ -212,7 +213,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
     // ARM64 and RISC-V use their own calling conventions regardless of the caller's x86 choice.
     let conv = match program.isa {
         Isa::Arm64 => Convention::Aarch64,
-        Isa::Riscv64 => Convention::Riscv,
+        Isa::Riscv64 | Isa::Riscv32 => Convention::Riscv,
         Isa::Mips32 | Isa::Mips32El => Convention::Mips,
         Isa::Mips64 | Isa::Mips64El => Convention::Mips64,
         Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El => Convention::Ppc,

@@ -55,6 +55,40 @@ fn decompiled(funcs: &[(&str, &[u8])], index: usize) -> String {
     out.text()
 }
 
+/// A tiny RISC-V (RV32) program with one function `f` at BASE.
+fn riscv32_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "RISC-V (32-bit)".into(),
+        bits: Some(32),
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("riscv32")
+}
+
 /// A tiny RISC-V (RV64) program with one function `f` at BASE.
 fn riscv_program(code: &[u8]) -> Program {
     let mut file = vec![0u8; 0x200];
@@ -372,6 +406,31 @@ fn mips_lifts_float_conversion() {
         .text();
     assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
     assert!(text.contains("f32"), "conversion to f32 recovered:\n{text}");
+}
+
+#[test]
+fn rv32_lifts_add() {
+    // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b. The base integer set is shared with RV64;
+    // this checks the lifter runs on the 32-bit ISA and recovers the sum.
+    let code: &[u8] = &[
+        0x33, 0x05, 0xb5, 0x00, // add a0, a0, a1
+        0x67, 0x80, 0x00, 0x00, // ret
+    ];
+    let p = riscv32_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Riscv32);
+    let text = decompile(&p, BASE, Convention::Riscv)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+    // RV32 registers are 32-bit, so the arguments are a 32-bit type — not the 64-bit one RV64 uses.
+    assert!(
+        !text.contains("i64") && !text.contains("u64"),
+        "32-bit register width (no 64-bit types):\n{text}"
+    );
 }
 
 #[test]
