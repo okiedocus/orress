@@ -1,11 +1,17 @@
-//! Lifting MIPS32 machine code into the shared decompiler IR. Like the RISC-V and ARM64 front
-//! ends, it feeds the common simplify → structure → types → print pipeline.
+//! Lifting MIPS32/MIPS64 machine code into the shared decompiler IR. Like the RISC-V and ARM64
+//! front ends, it feeds the common simplify → structure → types → print pipeline.
 //!
 //! Registers map to `Var::Reg(n)` so the o32 ABI argument/return registers land where the
 //! pipeline expects: `v0` becomes IR register 0 (the result, like x86's `rax`) and `a0`..`a3`
 //! become registers 1..4 ([`Convention::Mips`] uses `[1, 2, 3, 4]`). `$zero` is a constant `0`;
 //! `sp`-relative loads/stores become `Var::Stack`. `mult`/`div` write the `Named("hi")`/
 //! `Named("lo")` pseudo-registers that `mfhi`/`mflo` read back.
+//!
+//! The *register width* is 64-bit on MIPS64 and 32-bit on MIPS32; it is the width of a register
+//! value, a pointer and the native-word arithmetic. MIPS64 adds the doubleword instructions
+//! (`daddu`, `dsll`, `ld`/`sd` …); the sub-word loads sign- or zero-extend to the register width,
+//! as on hardware. The n64 ABI's extra argument registers (`$a4`..`$a7`) are not yet modelled —
+//! argument detection uses the o32 `$a0`..`$a3`.
 //!
 //! The *branch delay slot* (the instruction after a transfer, which runs before it) is kept in
 //! the branch's block by the CFG builder, so lifting the block in order is correct — unless the
@@ -45,13 +51,11 @@ fn reg_num(r: u32) -> u8 {
     }
 }
 
-const W: Width = Width::B32;
-
-fn src(r: u32) -> Expr {
+fn src(r: u32, w: Width) -> Expr {
     if r == 0 {
-        Expr::konst(0, W)
+        Expr::konst(0, w)
     } else {
-        Expr::Var(Var::Reg(reg_num(r)), W)
+        Expr::Var(Var::Reg(reg_num(r)), w)
     }
 }
 
@@ -80,6 +84,11 @@ fn hi() -> Var {
 }
 fn lo() -> Var {
     Var::Named("lo")
+}
+
+/// A signed reinterpretation of `e` at width `w`, for the signed compares and sign-extension.
+fn signed(e: Expr, w: Width) -> Expr {
+    Expr::Cast(Box::new(e), w, true)
 }
 
 impl MipsLifter<'_> {
@@ -112,6 +121,15 @@ impl MipsLifter<'_> {
         let mut blocks: Vec<Block> = out.into_values().collect();
         blocks.sort_by_key(|b| b.addr);
         blocks
+    }
+
+    /// The native register/pointer width: 64-bit on MIPS64, else 32-bit.
+    fn rw(&self) -> Width {
+        if matches!(self.program.isa, Isa::Mips64 | Isa::Mips64El) {
+            Width::B64
+        } else {
+            Width::B32
+        }
     }
 
     fn lift_block(&self, f: &Function, index: usize) -> Block {
@@ -150,7 +168,8 @@ impl MipsLifter<'_> {
         }
     }
 
-    /// Reads the 32-bit instruction word with the program's byte order.
+    /// Reads the 32-bit instruction word with the program's byte order (big-endian for the
+    /// non-`El` MIPS variants).
     fn read(&self, addr: u64) -> Option<u32> {
         let b: [u8; 4] = self
             .program
@@ -159,7 +178,7 @@ impl MipsLifter<'_> {
             .get(..4)?
             .try_into()
             .ok()?;
-        Some(if self.program.isa == Isa::Mips32 {
+        Some(if matches!(self.program.isa, Isa::Mips32 | Isa::Mips64) {
             u32::from_be_bytes(b)
         } else {
             u32::from_le_bytes(b)
@@ -186,6 +205,7 @@ impl MipsLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
+        let rw = self.rw();
         let opcode = w >> 26;
         let rs = (w >> 21) & 0x1f;
         let rt = (w >> 16) & 0x1f;
@@ -207,7 +227,7 @@ impl MipsLifter<'_> {
                     0x11 => (CmpOp::Ge, true),
                     _ => return self.asm(addr, out),
                 };
-                let cond = Expr::cmp(op, Self::signed(src(rs)), Expr::konst(0, W), true);
+                let cond = Expr::cmp(op, signed(src(rs, rw), rw), Expr::konst(0, rw), true);
                 if link {
                     return Some(Term::Branch(cond, branch, next)); // link ignored
                 }
@@ -217,37 +237,37 @@ impl MipsLifter<'_> {
             0x03 => return self.call(addr, CallTarget::Direct(jump_target(w, addr)), st, out),
             0x04 | 0x05 => {
                 let op = if opcode == 0x04 { CmpOp::Eq } else { CmpOp::Ne };
-                let cond = Expr::cmp(op, src(rs), src(rt), false);
+                let cond = Expr::cmp(op, src(rs, rw), src(rt, rw), false);
                 return Some(Term::Branch(cond, branch, next));
             }
             0x06 | 0x07 => {
                 let op = if opcode == 0x06 { CmpOp::Le } else { CmpOp::Gt };
-                let cond = Expr::cmp(op, Self::signed(src(rs)), Expr::konst(0, W), true);
+                let cond = Expr::cmp(op, signed(src(rs, rw), rw), Expr::konst(0, rw), true);
                 return Some(Term::Branch(cond, branch, next));
             }
-            0x08 | 0x09 => {
-                // addi / addiu
+            0x08 | 0x09 | 0x18 | 0x19 => {
+                // addi/addiu and the MIPS64 daddi/daddiu: register-width add-immediate.
                 if let Some(d) = dest(rt) {
                     Self::put(
                         out,
                         addr,
                         st,
                         d,
-                        Expr::bin(BinOp::Add, src(rs), Expr::konst(imm as u64, W), W),
+                        Expr::bin(BinOp::Add, src(rs, rw), Expr::konst(imm as u64, rw), rw),
                     );
                 }
             }
             0x0a | 0x0b => {
                 // slti / sltiu
                 if let Some(d) = dest(rt) {
-                    let signed = opcode == 0x0a;
-                    let a = if signed {
-                        Self::signed(src(rs))
+                    let is_signed = opcode == 0x0a;
+                    let a = if is_signed {
+                        signed(src(rs, rw), rw)
                     } else {
-                        src(rs)
+                        src(rs, rw)
                     };
-                    let cond = Expr::cmp(CmpOp::Lt, a, Expr::konst(imm as u64, W), signed);
-                    Self::put(out, addr, st, d, Expr::Cast(Box::new(cond), W, false));
+                    let cond = Expr::cmp(CmpOp::Lt, a, Expr::konst(imm as u64, rw), is_signed);
+                    Self::put(out, addr, st, d, Expr::Cast(Box::new(cond), rw, false));
                 }
             }
             0x0c..=0x0e => {
@@ -258,42 +278,45 @@ impl MipsLifter<'_> {
                         addr,
                         st,
                         d,
-                        Expr::bin(op, src(rs), Expr::konst(uimm, W), W),
+                        Expr::bin(op, src(rs, rw), Expr::konst(uimm, rw), rw),
                     );
                 }
             }
             0x0f => {
                 // lui
                 if let Some(d) = dest(rt) {
-                    Self::put(out, addr, st, d, Expr::konst(uimm << 16, W));
+                    Self::put(out, addr, st, d, Expr::konst(uimm << 16, rw));
                 }
             }
-            0x20 | 0x21 | 0x23 | 0x24 | 0x25 => {
-                // loads
-                let (width, signed) = match opcode {
-                    0x20 => (Width::B8, true),
-                    0x21 => (Width::B16, true),
-                    0x23 => (W, false),
-                    0x24 => (Width::B8, false),
-                    0x25 => (Width::B16, false),
-                    _ => unreachable!(),
+            // Loads: `lb`/`lh`/`lw`/`lbu`/`lhu` and the MIPS64 `lwu`/`ld`. The access width comes
+            // from the opcode; a sub-register load is sign- or zero-extended to the register width.
+            0x20 | 0x21 | 0x23 | 0x24 | 0x25 | 0x27 | 0x37 => {
+                let (aw, is_signed) = match opcode {
+                    0x20 => (Width::B8, true),   // lb
+                    0x21 => (Width::B16, true),  // lh
+                    0x23 => (Width::B32, true),  // lw (sign-extends into a 64-bit register)
+                    0x24 => (Width::B8, false),  // lbu
+                    0x25 => (Width::B16, false), // lhu
+                    0x27 => (Width::B32, false), // lwu (MIPS64)
+                    _ => (Width::B64, false),    // ld (MIPS64)
                 };
                 if let Some(d) = dest(rt) {
-                    let mut v = self.mem(rs, imm, width);
-                    if signed && width != W {
-                        v = Expr::Cast(Box::new(v), W, true);
+                    let mut v = self.mem(rs, imm, aw);
+                    if aw != rw {
+                        v = Expr::Cast(Box::new(v), rw, is_signed);
                     }
                     Self::put(out, addr, st, d, v);
                 }
             }
-            0x28 | 0x29 | 0x2b => {
-                // stores
+            // Stores: `sb`/`sh`/`sw` and the MIPS64 `sd`.
+            0x28 | 0x29 | 0x2b | 0x3f => {
                 let width = match opcode {
                     0x28 => Width::B8,
                     0x29 => Width::B16,
-                    _ => W,
+                    0x2b => Width::B32,
+                    _ => Width::B64, // sd (MIPS64)
                 };
-                self.store(rs, imm, src(rt), width, addr, out);
+                self.store(rs, imm, src(rt, rw), width, addr, out);
             }
             0x1c => return self.special2(w, addr, rs, rt, rd, st, out),
             // COP1 (FPU).
@@ -331,6 +354,7 @@ impl MipsLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
+        let rw = self.rw();
         let sub = (w >> 21) & 0x1f;
         let ft = (w >> 16) & 0x1f;
         let fs = (w >> 11) & 0x1f;
@@ -339,19 +363,19 @@ impl MipsLifter<'_> {
             // mfc1 rt, fs — reinterpret the float's bits in a GPR.
             0x00 => {
                 if let Some(d) = dest(ft) {
-                    Self::put(out, addr, st, d, fsrc(fs, W));
+                    Self::put(out, addr, st, d, fsrc(fs, Width::B32));
                 }
             }
             // mtc1 rt, fs — reinterpret a GPR's bits as a float.
-            0x04 => Self::put(out, addr, st, fdest(fs), src(ft)),
+            0x04 => Self::put(out, addr, st, fdest(fs), src(ft, Width::B32)),
             // BC1: branch on the FP condition flag (bit 16 selects true/false).
             0x08 => {
                 let imm = (w & 0xffff) as i16 as i64;
                 let branch = (addr + 4).wrapping_add_signed(imm << 2);
                 let cond = if ft & 1 != 0 {
-                    Expr::Var(fcc(), W) // bc1t
+                    Expr::Var(fcc(), rw) // bc1t
                 } else {
-                    Expr::LNot(Box::new(Expr::Var(fcc(), W))) // bc1f
+                    Expr::LNot(Box::new(Expr::Var(fcc(), rw))) // bc1f
                 };
                 return Some(Term::Branch(cond, branch, addr + 4));
             }
@@ -364,7 +388,7 @@ impl MipsLifter<'_> {
                     0x14 => (Width::B32, true),
                     _ => (Width::B64, true),
                 };
-                let src = fsrc(fs, srcw);
+                let fs_src = fsrc(fs, srcw);
                 // Conversions are valid from any source format.
                 match funct {
                     0x20 | 0x21 => {
@@ -384,7 +408,7 @@ impl MipsLifter<'_> {
                             addr,
                             st,
                             fdest(fd),
-                            Expr::FCast(Box::new(src), dstw, kind),
+                            Expr::FCast(Box::new(fs_src), dstw, kind),
                         );
                     }
                     // cvt.w.* / cvt.l.* — float to an integer (kept in the float register).
@@ -394,7 +418,7 @@ impl MipsLifter<'_> {
                         } else {
                             Width::B64
                         };
-                        let v = Expr::FCast(Box::new(src), dstw, FCast::FloatToSInt);
+                        let v = Expr::FCast(Box::new(fs_src), dstw, FCast::FloatToSInt);
                         Self::put(out, addr, st, fdest(fd), v);
                     }
                     // Arithmetic and compares exist only for the float formats.
@@ -471,9 +495,16 @@ impl MipsLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
+        let rw = self.rw();
         if w & 0x3f == 0x02 {
             if let Some(d) = dest(rd) {
-                Self::put(out, addr, st, d, Expr::bin(BinOp::Mul, src(rs), src(rt), W));
+                Self::put(
+                    out,
+                    addr,
+                    st,
+                    d,
+                    Expr::bin(BinOp::Mul, src(rs, rw), src(rt, rw), rw),
+                );
             }
             return None;
         }
@@ -492,39 +523,58 @@ impl MipsLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
+        let rw = self.rw();
         let funct = w & 0x3f;
         match funct {
             0x00 if w == 0 => {} // nop
-            0x00 | 0x02 | 0x03 => {
-                let op = [BinOp::Shl, BinOp::Shr, BinOp::Shr, BinOp::Sar][funct as usize];
+            // Shifts by an immediate: `sll`/`srl`/`sra` and the MIPS64 doubleword forms, where the
+            // `*32` variants add 32 to the shift amount.
+            0x00 | 0x02 | 0x03 | 0x38 | 0x3a | 0x3b | 0x3c | 0x3e | 0x3f => {
+                let op = match funct & 0x07 {
+                    0x00 => BinOp::Shl, // sll / dsll / dsll32
+                    0x02 => BinOp::Shr, // srl / dsrl / dsrl32
+                    _ => BinOp::Sar,    // sra / dsra / dsra32
+                };
+                let sa = if funct >= 0x3c { shamt + 32 } else { shamt };
                 if let Some(d) = dest(rd) {
                     Self::put(
                         out,
                         addr,
                         st,
                         d,
-                        Expr::bin(op, src(rt), Expr::konst(shamt as u64, W), W),
+                        Expr::bin(op, src(rt, rw), Expr::konst(sa as u64, rw), rw),
                     );
                 }
             }
-            0x04 | 0x06 | 0x07 => {
-                let op = [BinOp::Shl, BinOp::Shr, BinOp::Shr, BinOp::Sar][funct as usize];
+            // Variable shifts: `sllv`/`srlv`/`srav` and the MIPS64 `dsllv`/`dsrlv`/`dsrav`.
+            0x04 | 0x06 | 0x07 | 0x14 | 0x16 | 0x17 => {
+                let op = match funct & 0x07 {
+                    0x04 => BinOp::Shl,
+                    0x06 => BinOp::Shr,
+                    _ => BinOp::Sar,
+                };
                 if let Some(d) = dest(rd) {
-                    Self::put(out, addr, st, d, Expr::bin(op, src(rt), src(rs), W));
+                    Self::put(
+                        out,
+                        addr,
+                        st,
+                        d,
+                        Expr::bin(op, src(rt, rw), src(rs, rw), rw),
+                    );
                 }
             }
             0x08 => {
                 // jr: return through ra, else indirect jump.
                 return Some(if rs == 31 {
-                    Term::Return(Some(Expr::Var(Var::Reg(0), W)))
+                    Term::Return(Some(Expr::Var(Var::Reg(0), rw)))
                 } else {
                     Term::TailCall(Expr::Call(
-                        CallTarget::Indirect(Box::new(src(rs))),
+                        CallTarget::Indirect(Box::new(src(rs, rw))),
                         Vec::new(),
                     ))
                 });
             }
-            0x09 => return self.call(addr, CallTarget::Indirect(Box::new(src(rs))), st, out),
+            0x09 => return self.call(addr, CallTarget::Indirect(Box::new(src(rs, rw))), st, out),
             0x0c => {
                 out.push((
                     addr,
@@ -534,59 +584,56 @@ impl MipsLifter<'_> {
             0x0d => return Some(Term::Stop), // break
             0x10 => {
                 if let Some(d) = dest(rd) {
-                    Self::put(out, addr, st, d, Expr::Var(hi(), W));
+                    Self::put(out, addr, st, d, Expr::Var(hi(), rw));
                 }
             }
             0x12 => {
                 if let Some(d) = dest(rd) {
-                    Self::put(out, addr, st, d, Expr::Var(lo(), W));
+                    Self::put(out, addr, st, d, Expr::Var(lo(), rw));
                 }
             }
-            0x18 | 0x19 => {
-                // mult / multu: low word in lo, high word in hi.
-                let signed = funct == 0x18;
-                let (a, b) = if signed {
-                    (Self::signed(src(rs)), Self::signed(src(rt)))
+            // mult/multu and the MIPS64 dmult/dmultu: low word in lo, high word in hi.
+            0x18 | 0x19 | 0x1c | 0x1d => {
+                let is_signed = funct == 0x18 || funct == 0x1c;
+                let (a, b) = if is_signed {
+                    (signed(src(rs, rw), rw), signed(src(rt, rw), rw))
                 } else {
-                    (src(rs), src(rt))
+                    (src(rs, rw), src(rt, rw))
                 };
-                out.push((
-                    addr,
-                    Stmt::Assign(lo(), Expr::bin(BinOp::Mul, a.clone(), b.clone(), W)),
-                ));
+                out.push((addr, Stmt::Assign(lo(), Expr::bin(BinOp::Mul, a, b, rw))));
                 out.push((addr, Stmt::Assign(hi(), Expr::Unknown("mulhi".into()))));
-                let _ = (a, b);
             }
-            0x1a | 0x1b => {
-                // div / divu: quotient in lo, remainder in hi.
-                let signed = funct == 0x1a;
-                let (a, b) = if signed {
-                    (Self::signed(src(rs)), Self::signed(src(rt)))
+            // div/divu and the MIPS64 ddiv/ddivu: quotient in lo, remainder in hi.
+            0x1a | 0x1b | 0x1e | 0x1f => {
+                let is_signed = funct == 0x1a || funct == 0x1e;
+                let (a, b) = if is_signed {
+                    (signed(src(rs, rw), rw), signed(src(rt, rw), rw))
                 } else {
-                    (src(rs), src(rt))
+                    (src(rs, rw), src(rt, rw))
                 };
                 out.push((
                     addr,
-                    Stmt::Assign(lo(), Expr::bin(BinOp::Div, a.clone(), b.clone(), W)),
+                    Stmt::Assign(lo(), Expr::bin(BinOp::Div, a.clone(), b.clone(), rw)),
                 ));
-                out.push((addr, Stmt::Assign(hi(), Expr::bin(BinOp::Rem, a, b, W))));
+                out.push((addr, Stmt::Assign(hi(), Expr::bin(BinOp::Rem, a, b, rw))));
             }
-            // add/addu/sub/subu/and/or/xor/nor/slt/sltu.
-            0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x2a | 0x2b => {
+            // add/addu/sub/subu/and/or/xor/slt/sltu and the MIPS64 dadd/daddu/dsub/dsubu.
+            0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x2a | 0x2b | 0x2c | 0x2d | 0x2e
+            | 0x2f => {
                 let d = dest(rd)?;
-                let (a, b) = (src(rs), src(rt));
+                let (a, b) = (src(rs, rw), src(rt, rw));
                 let value = match funct {
-                    0x20 | 0x21 => Expr::bin(BinOp::Add, a, b, W),
-                    0x22 | 0x23 => Expr::bin(BinOp::Sub, a, b, W),
-                    0x24 => Expr::bin(BinOp::And, a, b, W),
-                    0x25 => Expr::bin(BinOp::Or, a, b, W),
-                    0x26 => Expr::bin(BinOp::Xor, a, b, W),
+                    0x20 | 0x21 | 0x2c | 0x2d => Expr::bin(BinOp::Add, a, b, rw),
+                    0x22 | 0x23 | 0x2e | 0x2f => Expr::bin(BinOp::Sub, a, b, rw),
+                    0x24 => Expr::bin(BinOp::And, a, b, rw),
+                    0x25 => Expr::bin(BinOp::Or, a, b, rw),
+                    0x26 => Expr::bin(BinOp::Xor, a, b, rw),
                     0x2a => Expr::Cast(
-                        Box::new(Expr::cmp(CmpOp::Lt, Self::signed(a), Self::signed(b), true)),
-                        W,
+                        Box::new(Expr::cmp(CmpOp::Lt, signed(a, rw), signed(b, rw), true)),
+                        rw,
                         false,
                     ),
-                    0x2b => Expr::Cast(Box::new(Expr::cmp(CmpOp::Lt, a, b, false)), W, false),
+                    0x2b => Expr::Cast(Box::new(Expr::cmp(CmpOp::Lt, a, b, false)), rw, false),
                     _ => unreachable!(),
                 };
                 Self::put(out, addr, st, d, value);
@@ -594,8 +641,8 @@ impl MipsLifter<'_> {
             0x27 => {
                 // nor
                 if let Some(d) = dest(rd) {
-                    let or = Expr::bin(BinOp::Or, src(rs), src(rt), W);
-                    Self::put(out, addr, st, d, Expr::Not(Box::new(or), W));
+                    let or = Expr::bin(BinOp::Or, src(rs, rw), src(rt, rw), rw);
+                    Self::put(out, addr, st, d, Expr::Not(Box::new(or), rw));
                 }
             }
             _ => return self.asm(addr, out),
@@ -603,15 +650,12 @@ impl MipsLifter<'_> {
         None
     }
 
-    fn signed(e: Expr) -> Expr {
-        Expr::Cast(Box::new(e), W, true)
-    }
-
     fn mem(&self, base: u32, off: i64, width: Width) -> Expr {
+        let rw = self.rw();
         if base == 29 {
             Expr::Var(Var::Stack(off), width)
         } else {
-            let a = Expr::bin(BinOp::Add, src(base), Expr::konst(off as u64, W), W);
+            let a = Expr::bin(BinOp::Add, src(base, rw), Expr::konst(off as u64, rw), rw);
             Expr::Load(Box::new(a), width)
         }
     }
@@ -625,10 +669,11 @@ impl MipsLifter<'_> {
         addr: u64,
         out: &mut Vec<(u64, Stmt)>,
     ) {
+        let rw = self.rw();
         if base == 29 {
             out.push((addr, Stmt::Assign(Var::Stack(off), value)));
         } else {
-            let a = Expr::bin(BinOp::Add, src(base), Expr::konst(off as u64, W), W);
+            let a = Expr::bin(BinOp::Add, src(base, rw), Expr::konst(off as u64, rw), rw);
             out.push((addr, Stmt::Store(a, value, width)));
         }
     }
@@ -640,6 +685,7 @@ impl MipsLifter<'_> {
         st: &mut State,
         out: &mut Vec<(u64, Stmt)>,
     ) -> Option<Term> {
+        let rw = self.rw();
         let name = match &target {
             CallTarget::Direct(a) => self.program.name(*a).map(|n| n.text.clone()),
             _ => None,
@@ -657,7 +703,7 @@ impl MipsLifter<'_> {
         let args = regs
             .iter()
             .take(count)
-            .map(|&r| Expr::Var(Var::Reg(r), W))
+            .map(|&r| Expr::Var(Var::Reg(r), rw))
             .collect();
         out.push((addr, Stmt::Assign(Var::Reg(0), Expr::Call(target, args))));
         for &r in Convention::Mips.clobbered() {

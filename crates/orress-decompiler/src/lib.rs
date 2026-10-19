@@ -151,7 +151,10 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
-    } else if matches!(program.isa, Isa::Mips32 | Isa::Mips32El) {
+    } else if matches!(
+        program.isa,
+        Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El
+    ) {
         mips::MipsLifter {
             program,
             param_counts: counts,
@@ -185,7 +188,14 @@ struct Decompiled {
 fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Error> {
     if !matches!(
         program.isa,
-        Isa::X86 | Isa::X64 | Isa::Arm64 | Isa::Riscv64 | Isa::Mips32 | Isa::Mips32El
+        Isa::X86
+            | Isa::X64
+            | Isa::Arm64
+            | Isa::Riscv64
+            | Isa::Mips32
+            | Isa::Mips32El
+            | Isa::Mips64
+            | Isa::Mips64El
     ) {
         return Err(Error::Unsupported(program.isa));
     }
@@ -193,7 +203,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
     let conv = match program.isa {
         Isa::Arm64 => Convention::Aarch64,
         Isa::Riscv64 => Convention::Riscv,
-        Isa::Mips32 | Isa::Mips32El => Convention::Mips,
+        Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => Convention::Mips,
         _ => conv,
     };
     let f = program

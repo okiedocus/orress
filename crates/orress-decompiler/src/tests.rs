@@ -124,6 +124,67 @@ fn mips_program(code: &[u8]) -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("mips")
 }
 
+/// A tiny big-endian MIPS64 program with one function `f` at BASE.
+fn mips64_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "MIPS64".into(),
+        bits: Some(64),
+        endian: orress_loaders::Endian::Big,
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("mips64")
+}
+
+#[test]
+fn mips64_lifts_doubleword_add() {
+    // f(a, b): daddu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b (64-bit).
+    // The MIPS64 doubleword add previously fell back to `asm!`.
+    let code: &[u8] = &[
+        0x00, 0x85, 0x10, 0x2d, // daddu v0,a0,a1
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips64_program(code);
+    assert_eq!(p.isa, orress_analysis::Isa::Mips64);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "doubleword sum recovered:\n{text}"
+    );
+    // MIPS64 registers are 64-bit, so the arguments are a 64-bit type.
+    assert!(
+        text.contains("64"),
+        "64-bit register width reflected in the types:\n{text}"
+    );
+}
+
 #[test]
 fn mips_lifts_add_through_delay_slot() {
     // f(a, b): addu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b

@@ -44,7 +44,10 @@ All notable changes to ORRESS are documented here. The format follows
   shifts (`dsll`/`dsrl`/`dsra` and their `*32` forms, plus `dsllv`/`dsrlv`/`dsrav`), the
   doubleword multiply/divide (`dmult`/`dmultu`/`ddiv`/`ddivu`) and the doubleword/unsigned
   loads and stores (`ld`/`sd`/`lwu`, `ldl`/`ldr`/`sdl`/`sdr`). These encodings stay invalid
-  on MIPS32, as on real hardware.
+  on MIPS32, as on real hardware. The **decompiler lifts MIPS64 too** — registers, pointers and
+  native arithmetic are modelled at 64 bits (sub-word loads sign/zero-extend into the register),
+  so a doubleword `daddu` recovers as a 64-bit `a + b`. (The n64 ABI's extra argument registers
+  `$a4`–`$a7` are not yet modelled; argument detection uses the o32 `$a0`–`$a3`.)
 - **Import C header**: **Tools ▸ Import C Header…** reads type definitions
   (`struct`/`union`/`enum`/`typedef`) from a `.h` file into the catalog — best-effort, so
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and
