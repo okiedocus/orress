@@ -4159,6 +4159,7 @@ dependencies = [
  "orress-lsp",
  "orress-project",
  "orress-settings",
+ "orress-sig",
  "orress-theme",
  "orress-ui",
  "orress-views",
@@ -4265,6 +4266,7 @@ dependencies = [
  "orress-loaders",
  "orress-pwn",
  "orress-script",
+ "orress-sig",
  "orress-transforms",
  "orress-vm",
  "serde_json",
@@ -4509,6 +4511,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "orress-sig"
+version = "1.2.0"
+dependencies = [
+ "orress-analysis",
+ "orress-loaders",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

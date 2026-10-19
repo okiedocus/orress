@@ -30,6 +30,7 @@ orress-pwn.workspace = true
 orress-arch.workspace = true
 orress-bytes.workspace = true
 orress-decompiler.workspace = true
+orress-sig.workspace = true
 orress-loaders.workspace = true
 orress-transforms.workspace = true
 serde_json.workspace = true

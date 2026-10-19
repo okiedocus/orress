@@ -159,6 +159,8 @@ struct Decompiled {
     usize_locals: std::collections::BTreeSet<ir::Var>,
     returns: bool,
     body: Vec<structure::Node>,
+    /// The simplified IR blocks before structuring, kept for the IL view.
+    il_blocks: Vec<ir::Block>,
     /// Deobfuscation passes that fired on this function (for a header note), e.g. "control-flow
     /// flattening".
     deobfuscated: Vec<&'static str>,
@@ -246,6 +248,8 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
     let float_locals = types::float_locals(&blocks);
     let vec_locals = types::vec_locals(&blocks);
     let usize_locals = types::usize_locals(&blocks, &sig);
+    // Keep the simplified blocks for the IL view before `structure` consumes them.
+    let il_blocks = blocks.clone();
     let mut body = structure::structure(blocks, f.entry);
     structure::normalize_do_while(&mut body);
     // Pointer-walk loops become element iteration first (which may retype a parameter to a
@@ -272,6 +276,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
         usize_locals,
         returns,
         body,
+        il_blocks,
         deobfuscated,
     })
 }
@@ -279,6 +284,28 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
 /// Decompiles the function containing `addr` into readable Rust-syntax pseudocode.
 pub fn decompile(program: &Program, addr: u64, conv: Convention) -> Result<Output, Error> {
     decompile_with(program, addr, conv, &types::TypeHints::default())
+}
+
+/// Lifts the function containing `addr` and renders its simplified IR blocks as text — the
+/// stage between raw assembly and structured pseudocode, for the IL view.
+pub fn il(program: &Program, addr: u64, conv: Convention) -> Result<Output, Error> {
+    let d = run(program, addr, conv)?;
+    let lines = print::Printer::new(
+        program,
+        &d.sig,
+        &d.locals,
+        &d.float_locals,
+        &d.vec_locals,
+        &d.usize_locals,
+        d.returns,
+    )
+    .il_function(&d.name, &d.il_blocks);
+    Ok(Output {
+        entry: d.entry,
+        name: d.name,
+        lines,
+        structs: Vec::new(),
+    })
 }
 
 /// Like [`decompile`], but applies user type hints: names recovered struct parameters and

@@ -31,6 +31,7 @@ arboard.workspace = true
 orress-academy.workspace = true
 orress-actions.workspace = true
 orress-project.workspace = true
+orress-sig.workspace = true
 orress-views.workspace = true
 orress-lsp.workspace = true
 orress-ext.workspace = true

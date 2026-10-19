@@ -91,6 +91,20 @@ enum Command {
     },
     /// Find one-shot execve("/bin/sh") gadgets in a libc.
     OneGadget { file: PathBuf },
+    /// Generate a FLIRT-style signature library from a binary that still has symbols.
+    Sign {
+        file: PathBuf,
+        /// Write the library (JSON) here; default: stdout.
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+    /// Name library functions in a binary by matching a signature library from `sign`.
+    Identify {
+        file: PathBuf,
+        /// The signature library (JSON).
+        #[arg(long)]
+        sigs: PathBuf,
+    },
     /// Run a Workbench recipe, e.g. "from_base64 | xor key=0x41".
     Recipe {
         recipe: String,
@@ -236,6 +250,33 @@ fn main() -> Result<()> {
         Command::Exploit { file, script, eval } => run_exploit(&file, &script, eval),
         Command::Gadgets { file, filter } => list_gadgets(&file, filter.as_deref()),
         Command::OneGadget { file } => one_gadget(&file),
+        Command::Sign { file, out } => {
+            let (_info, p) = analyze(&file)?;
+            let lib = orress_sig::generate(&p);
+            match out {
+                Some(path) => {
+                    std::fs::write(&path, lib.to_json())?;
+                    eprintln!(
+                        "{} signatures written to {}",
+                        lib.signatures.len(),
+                        path.display()
+                    );
+                }
+                None => println!("{}", lib.to_json()),
+            }
+            Ok(())
+        }
+        Command::Identify { file, sigs } => {
+            let (_info, p) = analyze(&file)?;
+            let lib = orress_sig::Library::from_json(&std::fs::read_to_string(&sigs)?)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let found = orress_sig::identify(&p, &lib);
+            for (addr, name) in &found {
+                println!("0x{addr:x}  {name}");
+            }
+            eprintln!("{} functions identified", found.len());
+            Ok(())
+        }
         Command::Disasm { file, target } => disasm(&file, target.as_deref().unwrap_or("main")),
         Command::Decompile { file, target } => {
             let (info, p) = analyze(&file)?;

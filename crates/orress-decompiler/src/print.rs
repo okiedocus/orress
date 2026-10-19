@@ -1505,6 +1505,90 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// Prints the lifted, simplified IR blocks (before structuring) as readable text — the
+    /// stage between raw assembly and structured pseudocode. Reuses [`Printer::expr`] for the
+    /// expression tree; only the block/statement/terminator framing is IL-specific.
+    pub fn il_function(mut self, name: &str, blocks: &[Block]) -> Vec<Line> {
+        self.start(None);
+        self.tok(format!("// lifted IR of {name}"), TokKind::Comment);
+        self.end();
+        for block in blocks {
+            self.start(Some(block.addr));
+            self.link(
+                format!("block_{:x}:", block.addr),
+                TokKind::Function,
+                block.addr,
+            );
+            self.end();
+            self.indent = 1;
+            for (addr, stmt) in &block.stmts {
+                self.start(Some(*addr));
+                self.il_stmt(stmt);
+                self.end();
+            }
+            self.start(Some(block.term_addr));
+            self.il_term(&block.term);
+            self.end();
+            self.indent = 0;
+        }
+        self.lines
+    }
+
+    fn il_stmt(&mut self, s: &Stmt) {
+        match s {
+            Stmt::Assign(v, e) => {
+                let name = self.var_name(v);
+                self.tok(name, TokKind::Variable);
+                self.p(" = ");
+                self.expr(e, 0);
+            }
+            Stmt::Store(addr, val, w) => {
+                self.kw("store");
+                self.p(&format!(".{} [", w.bits()));
+                self.expr(addr, 0);
+                self.p("] = ");
+                self.expr(val, 0);
+            }
+            Stmt::Eval(e) => self.expr(e, 0),
+            Stmt::Asm(text, _) => {
+                self.kw("asm ");
+                self.tok(format!("{text:?}"), TokKind::Str);
+            }
+        }
+    }
+
+    fn il_term(&mut self, t: &Term) {
+        match t {
+            Term::Jump(a) => {
+                self.kw("jump ");
+                self.link(format!("block_{a:x}"), TokKind::Function, *a);
+            }
+            Term::Branch(cond, taken, not) => {
+                self.kw("branch ");
+                self.expr(cond, 0);
+                self.p(" ? ");
+                self.link(format!("block_{taken:x}"), TokKind::Function, *taken);
+                self.p(" : ");
+                self.link(format!("block_{not:x}"), TokKind::Function, *not);
+            }
+            Term::Return(Some(e)) => {
+                self.kw("return ");
+                self.expr(e, 0);
+            }
+            Term::Return(None) => self.kw("return"),
+            Term::Stop => self.kw("stop"),
+            Term::TailCall(e) => {
+                self.kw("tailcall ");
+                self.expr(e, 0);
+            }
+            Term::Switch(e, cases) => {
+                self.kw("switch ");
+                self.expr(e, 0);
+                self.p(&format!("  // {} cases", cases.len()));
+            }
+        }
+    }
+
     pub fn function(mut self, entry: u64, name: &str, body: &[Node]) -> Vec<Line> {
         self.collect_lengths(body);
         self.emit_struct_decls();
