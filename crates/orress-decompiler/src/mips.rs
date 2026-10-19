@@ -59,6 +59,22 @@ fn dest(r: u32) -> Option<Var> {
     (r != 0).then(|| Var::Reg(reg_num(r)))
 }
 
+/// Float registers map to `Var::Xmm` identically (`$fN` -> `Xmm(N)`), so the o32 FP return
+/// register `$f0` lands on `Xmm(0)` (where `retarget_float_return` expects it) and the argument
+/// registers `$f12`/`$f14` on `Xmm(12)`/`Xmm(14)` (see `simplify::float_arg_regs`).
+fn fsrc(f: u32, w: Width) -> Expr {
+    Expr::Var(Var::Xmm((f & 31) as u8), w)
+}
+
+fn fdest(f: u32) -> Var {
+    Var::Xmm((f & 31) as u8)
+}
+
+/// The MIPS FPU condition flag that `c.cond.fmt` sets and `bc1t`/`bc1f` test.
+fn fcc() -> Var {
+    Var::Named("fcc")
+}
+
 fn hi() -> Var {
     Var::Named("hi")
 }
@@ -280,9 +296,122 @@ impl MipsLifter<'_> {
                 self.store(rs, imm, src(rt), width, addr, out);
             }
             0x1c => return self.special2(w, addr, rs, rt, rd, st, out),
+            // COP1 (FPU).
+            0x11 => return self.lift_cop1(w, addr, st, out),
+            // Float loads/stores: `op ft, imm(base)`.
+            0x31 | 0x35 => {
+                let width = if opcode == 0x31 {
+                    Width::B32
+                } else {
+                    Width::B64
+                };
+                let v = self.mem(rs, imm, width);
+                Self::put(out, addr, st, fdest(rt), v);
+            }
+            0x39 | 0x3d => {
+                let width = if opcode == 0x39 {
+                    Width::B32
+                } else {
+                    Width::B64
+                };
+                self.store(rs, imm, fsrc(rt, width), width, addr, out);
+            }
             _ => return self.asm(addr, out),
         }
         None
+    }
+
+    /// COP1 (opcode 0x11): the cleanly-modelled FPU ops — arithmetic, the GPR<->FPU moves, and the
+    /// `c.cond`/`bc1` compare-and-branch. The control moves, the cvt forms and the rarer predicates
+    /// have no direct IR and stay as `asm!`.
+    fn lift_cop1(
+        &self,
+        w: u32,
+        addr: u64,
+        st: &mut State,
+        out: &mut Vec<(u64, Stmt)>,
+    ) -> Option<Term> {
+        let sub = (w >> 21) & 0x1f;
+        let ft = (w >> 16) & 0x1f;
+        let fs = (w >> 11) & 0x1f;
+        let fd = (w >> 6) & 0x1f;
+        match sub {
+            // mfc1 rt, fs — reinterpret the float's bits in a GPR.
+            0x00 => {
+                if let Some(d) = dest(ft) {
+                    Self::put(out, addr, st, d, fsrc(fs, W));
+                }
+            }
+            // mtc1 rt, fs — reinterpret a GPR's bits as a float.
+            0x04 => Self::put(out, addr, st, fdest(fs), src(ft)),
+            // BC1: branch on the FP condition flag (bit 16 selects true/false).
+            0x08 => {
+                let imm = (w & 0xffff) as i16 as i64;
+                let branch = (addr + 4).wrapping_add_signed(imm << 2);
+                let cond = if ft & 1 != 0 {
+                    Expr::Var(fcc(), W) // bc1t
+                } else {
+                    Expr::LNot(Box::new(Expr::Var(fcc(), W))) // bc1f
+                };
+                return Some(Term::Branch(cond, branch, addr + 4));
+            }
+            // Computational formats S (single) and D (double).
+            0x10 | 0x11 => {
+                let fw = if sub == 0x10 { Width::B32 } else { Width::B64 };
+                self.lift_cop1_compute(w & 0x3f, addr, fw, fd, fs, ft, st, out);
+            }
+            _ => return self.asm(addr, out),
+        }
+        None
+    }
+
+    /// A COP1 computational op (format `fw`), selected by `funct`.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_cop1_compute(
+        &self,
+        funct: u32,
+        addr: u64,
+        fw: Width,
+        fd: u32,
+        fs: u32,
+        ft: u32,
+        st: &mut State,
+        out: &mut Vec<(u64, Stmt)>,
+    ) {
+        let bin = |op| Expr::fbin(op, fsrc(fs, fw), fsrc(ft, fw), fw);
+        let un = |op| Expr::FUn(op, Box::new(fsrc(fs, fw)), fw);
+        match funct {
+            0x00 => Self::put(out, addr, st, fdest(fd), bin(BinOp::Add)),
+            0x01 => Self::put(out, addr, st, fdest(fd), bin(BinOp::Sub)),
+            0x02 => Self::put(out, addr, st, fdest(fd), bin(BinOp::Mul)),
+            0x03 => Self::put(out, addr, st, fdest(fd), bin(BinOp::Div)),
+            0x04 => Self::put(out, addr, st, fdest(fd), un(FUnOp::Sqrt)),
+            0x05 => Self::put(out, addr, st, fdest(fd), un(FUnOp::Abs)),
+            0x06 => Self::put(out, addr, st, fdest(fd), fsrc(fs, fw)), // mov
+            0x07 => Self::put(out, addr, st, fdest(fd), un(FUnOp::Neg)),
+            // c.cond.fmt: set the FP flag from a compare (the common ordered/unordered forms).
+            0x30..=0x3f => {
+                let op = match funct & 0xf {
+                    0x2 | 0x3 | 0xa | 0xb => CmpOp::Eq, // eq/ueq/seq/ngl
+                    0x4 | 0x5 | 0xc | 0xd => CmpOp::Lt, // olt/ult/lt/nge
+                    0x6 | 0x7 | 0xe | 0xf => CmpOp::Le, // ole/ule/le/ngt
+                    _ => {
+                        self.asm(addr, out);
+                        return;
+                    }
+                };
+                Self::put(
+                    out,
+                    addr,
+                    st,
+                    fcc(),
+                    Expr::fcmp(op, fsrc(fs, fw), fsrc(ft, fw)),
+                );
+            }
+            _ => {
+                self.asm(addr, out);
+            }
+        }
     }
 
     /// SPECIAL2 (opcode 0x1c): the MIPS32 three-operand `mul rd, rs, rt`. The multiply-accumulate

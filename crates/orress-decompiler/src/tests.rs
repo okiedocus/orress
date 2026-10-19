@@ -164,6 +164,26 @@ fn mips_lifts_special2_mul() {
 }
 
 #[test]
+fn mips_lifts_floating_point() {
+    // f(a: f64, b: f64) -> f64 { a + b }:  add.d $f0,$f12,$f14 ; jr ra ; nop(delay)
+    // o32 passes the doubles in $f12/$f14 and returns in $f0; the COP1 op must lift to float IR.
+    let code: &[u8] = &[
+        0x46, 0x2e, 0x60, 0x00, // add.d $f0, $f12, $f14
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(!text.contains("asm!"), "no asm fallback:\n{text}");
+    assert!(
+        text.contains("f64") && text.contains('+'),
+        "float add recovered with float types:\n{text}"
+    );
+}
+
+#[test]
 fn riscv_lifts_add_and_branch() {
     // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b
     let add: &[u8] = &[0x33, 0x05, 0xb5, 0x00, 0x67, 0x80, 0x00, 0x00];

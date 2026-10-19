@@ -69,8 +69,9 @@ pub fn float_arg_regs(conv: Convention) -> &'static [u8] {
         Convention::Aarch64 => &[0, 1, 2, 3, 4, 5, 6, 7],
         // RISC-V floating-point parameters are in fa0–fa7 (modelled as XMM 0–7).
         Convention::Riscv => &[0, 1, 2, 3, 4, 5, 6, 7],
-        // MIPS o32 passes up to two FP arguments in $f12/$f14 (modelled as XMM 0–1).
-        Convention::Mips => &[0, 1],
+        // MIPS o32 passes up to two FP arguments in $f12/$f14 (modelled as XMM 12/14 — the MIPS
+        // lifter maps $fN to Xmm(N), keeping the return register $f0 on Xmm(0)).
+        Convention::Mips => &[12, 14],
     }
 }
 

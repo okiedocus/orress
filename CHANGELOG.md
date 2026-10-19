@@ -12,8 +12,12 @@ All notable changes to ORRESS are documented here. The format follows
   functions become readable pseudocode. **Branch delay slots are handled correctly** — the
   CFG keeps the delay-slot instruction in the branch's block so it runs on both paths (this
   also completes the MIPS disassembly, which previously dropped the delay slot after an
-  unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` is lifted; float, COP and the
-  uncommon ops (`madd`/`clz`, the conditional moves) stay as inline `asm!`.
+  unconditional `j`/`jr`). The SPECIAL2 three-operand `mul` and the **COP1 floating-point**
+  unit are lifted — the FPU arithmetic (`add.s`/`mul.d`/`sqrt`/`abs`/`neg`), the float
+  loads/stores (`lwc1`/`ldc1`/`swc1`/`sdc1`), the GPR↔FPU moves (`mfc1`/`mtc1`) and the
+  `c.cond`/`bc1t`/`bc1f` compare-and-branch all recover as `f32`/`f64` expressions (`$f12`/
+  `$f14` arguments and the `$f0` return modelled). The `cvt.*` conversions, `madd`/`clz`, the
+  control moves and the conditional moves stay as inline `asm!`.
 
 - **RISC-V decompilation**: the decompiler now lifts RV64I + M, the **full integer
   compressed (`C`) set** — the stack frame save/restore, loads/stores and C-arithmetic that
