@@ -9,6 +9,7 @@ mod arm64;
 pub mod explain;
 mod mips;
 pub mod patch;
+mod ppc;
 mod riscv;
 mod x86;
 
@@ -28,6 +29,12 @@ pub enum Isa {
     Mips64,
     /// MIPS64, little-endian.
     Mips64El,
+    /// PowerPC, 32-bit, big-endian (the classic byte order).
+    Ppc32,
+    /// PowerPC, 64-bit, big-endian (ELFv1).
+    Ppc64,
+    /// PowerPC, 64-bit, little-endian (`ppc64le`, ELFv2).
+    Ppc64El,
 }
 
 impl Isa {
@@ -41,6 +48,8 @@ impl Isa {
             "RISC-V (64-bit)" => Some(Self::Riscv64),
             "MIPS (32-bit)" => Some(if little { Self::Mips32El } else { Self::Mips32 }),
             "MIPS64" => Some(if little { Self::Mips64El } else { Self::Mips64 }),
+            "PowerPC (32-bit)" => Some(Self::Ppc32),
+            "PowerPC64" => Some(if little { Self::Ppc64El } else { Self::Ppc64 }),
             _ => None,
         }
     }
@@ -53,6 +62,8 @@ impl Isa {
             Self::Riscv64 => "RISC-V (64-bit)",
             Self::Mips32 | Self::Mips32El => "MIPS (32-bit)",
             Self::Mips64 | Self::Mips64El => "MIPS64",
+            Self::Ppc32 => "PowerPC (32-bit)",
+            Self::Ppc64 | Self::Ppc64El => "PowerPC64",
         }
     }
 
@@ -65,14 +76,23 @@ impl Isa {
             | Self::Mips32
             | Self::Mips32El
             | Self::Mips64
-            | Self::Mips64El => 4,
+            | Self::Mips64El
+            | Self::Ppc32
+            | Self::Ppc64
+            | Self::Ppc64El => 4,
         }
     }
 
     pub fn pointer_size(self) -> u64 {
         match self {
-            Self::X86 | Self::Mips32 | Self::Mips32El => 4,
-            Self::X64 | Self::Arm64 | Self::Riscv64 | Self::Mips64 | Self::Mips64El => 8,
+            Self::X86 | Self::Mips32 | Self::Mips32El | Self::Ppc32 => 4,
+            Self::X64
+            | Self::Arm64
+            | Self::Riscv64
+            | Self::Mips64
+            | Self::Mips64El
+            | Self::Ppc64
+            | Self::Ppc64El => 8,
         }
     }
 
@@ -205,6 +225,9 @@ pub fn decode(isa: Isa, bytes: &[u8], address: u64) -> Option<Insn> {
         Isa::Mips32El => mips::decode(bytes, address, false, false),
         Isa::Mips64 => mips::decode(bytes, address, true, true),
         Isa::Mips64El => mips::decode(bytes, address, false, true),
+        Isa::Ppc32 => ppc::decode(bytes, address, false, false),
+        Isa::Ppc64 => ppc::decode(bytes, address, false, true),
+        Isa::Ppc64El => ppc::decode(bytes, address, true, true),
     }
 }
 
@@ -248,9 +271,15 @@ pub fn reg_info(isa: Isa, bytes: &[u8], address: u64) -> Option<RegInfo> {
     match isa {
         Isa::X86 => x86::reg_info(32, bytes, address),
         Isa::X64 => x86::reg_info(64, bytes, address),
-        Isa::Arm64 | Isa::Riscv64 | Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => {
-            None
-        }
+        Isa::Arm64
+        | Isa::Riscv64
+        | Isa::Mips32
+        | Isa::Mips32El
+        | Isa::Mips64
+        | Isa::Mips64El
+        | Isa::Ppc32
+        | Isa::Ppc64
+        | Isa::Ppc64El => None,
     }
 }
 

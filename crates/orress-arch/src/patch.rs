@@ -29,6 +29,13 @@ pub fn try_nop(isa: Isa, len: usize) -> Option<Vec<u8>> {
         Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => {
             len.is_multiple_of(4).then(|| vec![0u8; len])
         }
+        // PowerPC NOP is `ori r0,r0,0` = 0x60000000 (stored big-endian, except ppc64le).
+        Isa::Ppc32 | Isa::Ppc64 => len
+            .is_multiple_of(4)
+            .then(|| 0x6000_0000u32.to_be_bytes().repeat(len / 4)),
+        Isa::Ppc64El => len
+            .is_multiple_of(4)
+            .then(|| 0x6000_0000u32.to_le_bytes().repeat(len / 4)),
     }
 }
 
@@ -83,8 +90,15 @@ pub fn invert(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             out[..4].copy_from_slice(&new.to_le_bytes());
         }
-        // Branch patching for RISC-V is not implemented yet.
-        Isa::Riscv64 | Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => return None,
+        // Branch patching for RISC-V/MIPS/PowerPC is not implemented yet.
+        Isa::Riscv64
+        | Isa::Mips32
+        | Isa::Mips32El
+        | Isa::Mips64
+        | Isa::Mips64El
+        | Isa::Ppc32
+        | Isa::Ppc64
+        | Isa::Ppc64El => return None,
     }
     Some(out)
 }
@@ -118,7 +132,14 @@ pub fn force(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             Some(new.to_le_bytes().to_vec())
         }
-        Isa::Riscv64 | Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => None,
+        Isa::Riscv64
+        | Isa::Mips32
+        | Isa::Mips32El
+        | Isa::Mips64
+        | Isa::Mips64El
+        | Isa::Ppc32
+        | Isa::Ppc64
+        | Isa::Ppc64El => None,
     }
 }
 

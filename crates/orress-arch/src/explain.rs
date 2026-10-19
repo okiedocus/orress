@@ -10,6 +10,7 @@ pub fn mnemonic(isa: Isa, mnemonic: &str) -> Option<&'static str> {
         Isa::Arm64 => arm64(m),
         Isa::Riscv64 => None,
         Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => None,
+        Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El => None,
     }
 }
 
@@ -219,6 +220,7 @@ pub fn register(isa: Isa, reg: &str) -> Option<&'static str> {
         Isa::Arm64 => arm64_register(reg),
         Isa::Riscv64 => None,
         Isa::Mips32 | Isa::Mips32El | Isa::Mips64 | Isa::Mips64El => None,
+        Isa::Ppc32 | Isa::Ppc64 | Isa::Ppc64El => None,
     }
 }
 
