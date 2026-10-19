@@ -3,8 +3,9 @@
 //! opcode tables. Branches and jumps have a delay slot (the next instruction runs before the
 //! transfer); conditional branches and calls fall through to it naturally, so it is decoded.
 //! The delay slot after an *unconditional* `j`/`jr` is not a control-flow successor, so it may
-//! show as data — a documented limitation. Floating-point, COP and the rarer ops are shown
-//! generically. Pure Rust, no decoder dependency.
+//! show as data — a documented limitation. The COP1 FPU (loads/stores, arithmetic, compares,
+//! conversions, moves and branch-on-condition) is decoded; the other coprocessors and the rarer
+//! ops are shown generically. Pure Rust, no decoder dependency.
 
 use crate::{Flow, Insn, Token, TokenKind};
 
@@ -28,6 +29,14 @@ fn reg(n: u32) -> Token {
     Token {
         kind: TokenKind::Register,
         text: REG[(n & 31) as usize].to_owned(),
+    }
+}
+
+/// An FPU register token, `$f0`..`$f31` (MIPS floating-point registers have no ABI aliases).
+fn freg(n: u32) -> Token {
+    Token {
+        kind: TokenKind::Register,
+        text: format!("f{}", n & 31),
     }
 }
 
@@ -187,10 +196,135 @@ fn decode_word(w: u32, address: u64) -> Option<Insn> {
         }
         // SPECIAL2: MIPS32 multiply-accumulate and count-leading-bits.
         0x1c => return decode_special2(w, address, rs, rt, rd),
-        // Coprocessor / float / rarer ops: shown generically so they are not mistaken for data.
-        0x10..=0x13 | 0x30..=0x3f => insn(address, &format!("cop0x{opcode:x}"), vec![], Flow::Next),
+        // COP1 (FPU): arithmetic, moves and branch-on-FP-condition.
+        0x11 => decode_cop1(w, address),
+        // Floating-point loads/stores: `op ft, imm(base)`.
+        0x31 | 0x35 | 0x39 | 0x3d => {
+            let m = match opcode {
+                0x31 => "lwc1",
+                0x35 => "ldc1",
+                0x39 => "swc1",
+                _ => "sdc1",
+            };
+            insn(
+                address,
+                m,
+                vec![
+                    freg(rt),
+                    punct(","),
+                    imm(imm16),
+                    punct("("),
+                    reg(rs),
+                    punct(")"),
+                ],
+                Flow::Next,
+            )
+        }
+        // Other coprocessors / rarer ops: shown generically so they are not mistaken for data.
+        0x10 | 0x12 | 0x13 | 0x30 | 0x32..=0x34 | 0x36..=0x38 | 0x3a..=0x3c | 0x3e | 0x3f => {
+            insn(address, &format!("cop0x{opcode:x}"), vec![], Flow::Next)
+        }
         _ => return None,
     })
+}
+
+/// COP1 (opcode 0x11): the FPU instructions, dispatched on the `fmt`/sub-opcode field (bits 25:21).
+/// The FR format places `ft` at bits 20:16, `fs` at 15:11 and `fd` at 10:6.
+fn decode_cop1(w: u32, address: u64) -> Insn {
+    let sub = (w >> 21) & 0x1f;
+    let ft = (w >> 16) & 0x1f;
+    let fs = (w >> 11) & 0x1f;
+    let fd = (w >> 6) & 0x1f;
+    match sub {
+        // Moves between a GPR and the FPU / its control registers: `op rt, fs`.
+        0x00 | 0x01 | 0x02 | 0x04 | 0x05 | 0x06 => {
+            let m = match sub {
+                0x00 => "mfc1",
+                0x01 => "dmfc1",
+                0x02 => "cfc1",
+                0x04 => "mtc1",
+                0x05 => "dmtc1",
+                _ => "ctc1",
+            };
+            insn(address, m, vec![reg(ft), punct(","), freg(fs)], Flow::Next)
+        }
+        // BC1: branch on the FP condition flag (bit 16 = true/false, bit 17 = likely).
+        0x08 => {
+            let imm16 = (w & 0xffff) as i16 as i64;
+            let target = (address + 4).wrapping_add_signed(imm16 << 2);
+            let m = match (ft & 1 != 0, ft & 2 != 0) {
+                (false, false) => "bc1f",
+                (true, false) => "bc1t",
+                (false, true) => "bc1fl",
+                (true, true) => "bc1tl",
+            };
+            insn(address, m, vec![addr_tok(target)], Flow::CondJump(target))
+        }
+        // Computational formats: S (single), D (double), W (word), L (long).
+        0x10 | 0x11 | 0x14 | 0x15 => {
+            let fmt = match sub {
+                0x10 => "s",
+                0x11 => "d",
+                0x14 => "w",
+                _ => "l",
+            };
+            decode_cop1_compute(w & 0x3f, address, fmt, fd, fs, ft)
+        }
+        _ => insn(address, "cop0x11", vec![], Flow::Next),
+    }
+}
+
+/// A COP1 computational op, selected by `funct` for a given `fmt` suffix.
+fn decode_cop1_compute(funct: u32, address: u64, fmt: &str, fd: u32, fs: u32, ft: u32) -> Insn {
+    // `fd, fs, ft` and `fd, fs` are the two common operand shapes.
+    let fff = |m: &str| {
+        insn(
+            address,
+            m,
+            vec![freg(fd), punct(","), freg(fs), punct(","), freg(ft)],
+            Flow::Next,
+        )
+    };
+    let ff = |m: &str| insn(address, m, vec![freg(fd), punct(","), freg(fs)], Flow::Next);
+    match funct {
+        0x00 => fff(&format!("add.{fmt}")),
+        0x01 => fff(&format!("sub.{fmt}")),
+        0x02 => fff(&format!("mul.{fmt}")),
+        0x03 => fff(&format!("div.{fmt}")),
+        0x04 => ff(&format!("sqrt.{fmt}")),
+        0x05 => ff(&format!("abs.{fmt}")),
+        0x06 => ff(&format!("mov.{fmt}")),
+        0x07 => ff(&format!("neg.{fmt}")),
+        // round/trunc/ceil/floor to long (0x08..0x0b) or word (0x0c..0x0f).
+        0x08..=0x0f => {
+            let base = ["round", "trunc", "ceil", "floor"][(funct & 3) as usize];
+            let tgt = if funct < 0x0c { "l" } else { "w" };
+            ff(&format!("{base}.{tgt}.{fmt}"))
+        }
+        0x20 => ff(&format!("cvt.s.{fmt}")),
+        0x21 => ff(&format!("cvt.d.{fmt}")),
+        0x24 => ff(&format!("cvt.w.{fmt}")),
+        0x25 => ff(&format!("cvt.l.{fmt}")),
+        // c.cond.fmt fs, ft — a compare that sets the FP condition flag.
+        0x30..=0x3f => {
+            let cond = [
+                "f", "un", "eq", "ueq", "olt", "ult", "ole", "ule", "sf", "ngle", "seq", "ngl",
+                "lt", "nge", "le", "ngt",
+            ][(funct & 0xf) as usize];
+            insn(
+                address,
+                &format!("c.{cond}.{fmt}"),
+                vec![freg(fs), punct(","), freg(ft)],
+                Flow::Next,
+            )
+        }
+        _ => insn(
+            address,
+            &format!("cop1.{fmt}.0x{funct:x}"),
+            vec![],
+            Flow::Next,
+        ),
+    }
 }
 
 /// SPECIAL2 (opcode 0x1c): the MIPS32 `mul`/`madd`/`msub` family and `clz`/`clo`.
@@ -367,6 +501,33 @@ mod tests {
         assert_eq!(i.operands[0].text, "v0");
         // mthi a0 : SPECIAL funct=0x11, rs=a0(4) -> 0x00800011
         assert_eq!(be(0x0080_0011, 0).mnemonic, "mthi");
+    }
+
+    #[test]
+    fn cop1_floating_point() {
+        let ops = |w: u32| {
+            be(w, 0)
+                .operands
+                .iter()
+                .map(|t| t.text.clone())
+                .collect::<Vec<_>>()
+        };
+        // add.s f0, f2, f4
+        assert_eq!(be(0x4604_1000, 0).mnemonic, "add.s");
+        assert_eq!(ops(0x4604_1000), ["f0", ",", "f2", ",", "f4"]);
+        // mfc1 a0, f12 — move word from FPU to a GPR.
+        assert_eq!(be(0x4404_6000, 0).mnemonic, "mfc1");
+        assert_eq!(ops(0x4404_6000), ["a0", ",", "f12"]);
+        // lwc1 f0, 0x0(a0) — float load.
+        assert_eq!(be(0xc480_0000, 0).mnemonic, "lwc1");
+        assert_eq!(ops(0xc480_0000), ["f0", ",", "0x0", "(", "a0", ")"]);
+        // c.eq.d f2, f4 — compare setting the FP condition flag.
+        assert_eq!(be(0x4624_1032, 0).mnemonic, "c.eq.d");
+        assert_eq!(ops(0x4624_1032), ["f2", ",", "f4"]);
+        // bc1t +0x10 — branch on FP condition true (a conditional control-flow edge).
+        let bc = be(0x4501_0003, 0x1000);
+        assert_eq!(bc.mnemonic, "bc1t");
+        assert_eq!(bc.flow, Flow::CondJump(0x1010));
     }
 
     #[test]
