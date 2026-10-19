@@ -8,6 +8,12 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **MIPS decompilation**: the decompiler now lifts MIPS32 (big- and little-endian), so MIPS
+  functions become readable pseudocode. **Branch delay slots are handled correctly** — the
+  CFG keeps the delay-slot instruction in the branch's block so it runs on both paths (this
+  also completes the MIPS disassembly, which previously dropped the delay slot after an
+  unconditional `j`/`jr`). Float, COP and uncommon ops stay as inline `asm!`.
+
 - **RISC-V decompilation**: the decompiler now lifts RV64I + M (and the common compressed
   forms), so RISC-V functions become readable Rust-style pseudocode — not just disassembly.
   Floating-point, CSR and uncommon compressed instructions are kept as inline `asm!`.

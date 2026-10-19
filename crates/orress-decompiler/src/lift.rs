@@ -22,6 +22,9 @@ pub enum Convention {
     /// RISC-V: a0–a7, result in a0 (the IR models a0 as register 0). See riscv.rs for the
     /// x-register -> IR register numbering.
     Riscv,
+    /// MIPS o32: a0–a3, result in v0 (the IR models v0 as register 0). See mips.rs for the
+    /// register numbering.
+    Mips,
 }
 
 impl Convention {
@@ -32,6 +35,8 @@ impl Convention {
             Self::Aarch64 => &[0, 1, 2, 3, 4, 5, 6, 7],
             // a0..a7 map to IR registers 0..7 (see riscv.rs).
             Self::Riscv => &[0, 1, 2, 3, 4, 5, 6, 7],
+            // a0..a3 map to IR registers 1..4 (v0 is register 0, the result).
+            Self::Mips => &[1, 2, 3, 4],
         }
     }
 
@@ -46,6 +51,8 @@ impl Convention {
             ],
             // RISC-V caller-saved: ra (8) and t0..t6 (9..15) in riscv.rs numbering.
             Self::Riscv => &[8, 9, 10, 11, 12, 13, 14, 15],
+            // MIPS caller-saved in mips.rs numbering: v1(5), t0..t9(6..13,22,23), ra(24).
+            Self::Mips => &[5, 6, 7, 8, 9, 10, 11, 12, 13, 22, 23, 24],
         }
     }
 }

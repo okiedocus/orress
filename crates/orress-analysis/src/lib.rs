@@ -568,10 +568,27 @@ impl Program {
                     _ => {}
                 }
                 decoded.insert(addr, insn);
-                if flow.ends_block() && flow.falls_through() {
-                    leaders.insert(next);
-                }
-                if !flow.falls_through() {
+                if flow.ends_block() {
+                    // On a delay-slot ISA (MIPS) the instruction after a transfer runs before it;
+                    // decode that delay slot and keep it in this block, and treat the real
+                    // continuation as the instruction after it.
+                    let after = if self.isa.has_delay_slots() {
+                        match self.decode(next) {
+                            Some(ds) => {
+                                let end = ds.end();
+                                decoded.insert(next, ds);
+                                end
+                            }
+                            None => next,
+                        }
+                    } else {
+                        next
+                    };
+                    if flow.falls_through() {
+                        leaders.insert(after);
+                        addr = after;
+                        continue;
+                    }
                     break;
                 }
                 addr = next;
@@ -600,8 +617,20 @@ impl Program {
             while let Some(insn) = decoded.get(&addr) {
                 block.insns.push(addr);
                 block.end = insn.end();
-                let next = insn.end();
-                match insn.flow {
+                let mut next = insn.end();
+                let flow = insn.flow;
+                // MIPS delay slot: pull the instruction after a block-ending transfer into this
+                // block (it runs before the transfer takes effect), and advance the fall-through
+                // past it so the continuation is the instruction after the delay slot.
+                if self.isa.has_delay_slots()
+                    && flow.ends_block()
+                    && let Some(ds) = decoded.get(&next)
+                {
+                    block.insns.push(next);
+                    block.end = ds.end();
+                    next = ds.end();
+                }
+                match flow {
                     Flow::Jump(t) => {
                         if is_block(t) {
                             block.succs.push(Edge {

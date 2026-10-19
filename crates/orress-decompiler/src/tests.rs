@@ -89,6 +89,60 @@ fn riscv_program(code: &[u8]) -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("riscv")
 }
 
+/// A tiny big-endian MIPS32 program with one function `f` at BASE.
+fn mips_program(code: &[u8]) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "MIPS (32-bit)".into(),
+        bits: Some(32),
+        endian: orress_loaders::Endian::Big,
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("mips")
+}
+
+#[test]
+fn mips_lifts_add_through_delay_slot() {
+    // f(a, b): addu v0,a0,a1 ; jr ra ; nop(delay)  ->  returns a + b
+    // The `nop` is the jr's delay slot; the CFG must keep it in the block.
+    let code: &[u8] = &[
+        0x00, 0x85, 0x10, 0x21, // addu v0,a0,a1
+        0x03, 0xe0, 0x00, 0x08, // jr ra
+        0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+    ];
+    let p = mips_program(code);
+    let text = decompile(&p, BASE, Convention::Mips)
+        .expect("decompiles")
+        .text();
+    assert!(
+        text.contains("a1 + a2") || text.contains("a1 +"),
+        "sum recovered:\n{text}"
+    );
+}
+
 #[test]
 fn riscv_lifts_add_and_branch() {
     // f(a, b): add a0,a0,a1 ; ret  ->  returns a + b
