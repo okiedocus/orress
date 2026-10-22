@@ -9,6 +9,20 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// How the challenge's accepted answer is decided — the "protection seed" switch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Protection {
+    /// A fixed answer, the same for every player. Simplest, but a player who shares the answer
+    /// lets others skip the reversing (the platform still gives each player their own *flag*, but
+    /// the input to reach it is identical for everyone).
+    #[default]
+    Fixed,
+    /// Per-user ("protection seed"): the accepted answer is derived from each player's download
+    /// seed, so a shared answer is useless to anyone else. The template generates a *keygen-me*
+    /// skeleton that validates the serial for `challenge_kit::seed_name()` (this player's account).
+    Seeded,
+}
+
 /// Everything about a challenge except its source.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Meta {
@@ -22,6 +36,9 @@ pub struct Meta {
     pub hints: Vec<String>,
     pub writeup: String,
     pub bonus_points: u32,
+    /// Whether the generated check uses a fixed answer or a per-user (seeded) one.
+    #[serde(default)]
+    pub protection: Protection,
 }
 
 impl Default for Meta {
@@ -36,6 +53,7 @@ impl Default for Meta {
             hints: Vec::new(),
             writeup: String::new(),
             bonus_points: 0,
+            protection: Protection::Fixed,
         }
     }
 }
@@ -71,11 +89,53 @@ impl KitSource {
     }
 }
 
-/// The generated `main.rs` for a challenge, pre-filled from `meta`.
+/// The generated `main.rs` for a challenge, pre-filled from `meta`. The body depends on
+/// `meta.protection`: a fixed answer, or a per-user ("seeded") keygen-me skeleton.
 pub fn template(meta: &Meta) -> String {
     let title = rust_str(&meta.title);
     let brief = rust_str(&meta.brief);
     let label = rust_str(&meta.input_label);
+    // The protection note, any free helper functions, and the `check()` body differ by mode.
+    let (mode_note, free_fns, check_body) = match meta.protection {
+        Protection::Fixed => (
+            "The accepted answer here is fixed — the same for every player.",
+            String::new(),
+            r#"        // TODO: your logic. Return Verdict::Accept(..) when the input is correct.
+        if input.trim() == "open-sesame" {
+            Verdict::Accept("Correct!".into())
+        } else {
+            Verdict::Reject("Not quite — keep reversing.".into())
+        }"#
+            .to_string(),
+        ),
+        Protection::Seeded => (
+            "Protection seed ON — the accepted answer is per-user: it depends on this player's \
+             account name (challenge_kit::seed_name(), derived from their download seed), so a \
+             serial shared by one player is useless to anyone else. Change keygen() into your own \
+             puzzle; the player must reverse it and run it on THEIR account name.",
+            r#"/// The valid serial for an account name. This stub is a 32-bit FNV-1a hash in uppercase
+/// hex — replace it with your own keygen so players have to reverse-engineer it.
+fn keygen(name: &str) -> String {
+    let mut h: u32 = 2_166_136_261;
+    for b in name.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(16_777_619);
+    }
+    format!("{h:08X}")
+}
+
+"#
+            .to_string(),
+            r#"        // Per-user: validate the serial for THIS player's account name.
+        let account = challenge_kit::seed_name();
+        if input.trim().eq_ignore_ascii_case(&keygen(&account)) {
+            Verdict::Accept("Valid serial.".into())
+        } else {
+            Verdict::Reject(format!("Invalid serial. Your account is {account} — generate its serial."))
+        }"#
+            .to_string(),
+        ),
+    };
     format!(
         r#"// Hide the Windows console in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -85,10 +145,12 @@ pub fn template(meta: &Meta) -> String {
 //! Write your reverse-engineering puzzle below. The player types an input; your `check()` decides
 //! whether it is correct. On `Verdict::Accept` the platform reveals that player's personal flag —
 //! you never see or set the flag. Keep `id()` returning `challenge_kit::assigned_id()`.
+//!
+//! {mode_note}
 
 use challenge_kit::{{Challenge, Verdict}};
 
-struct MyChallenge;
+{free_fns}struct MyChallenge;
 
 impl Challenge for MyChallenge {{
     // The platform assigns the id at build time — leave this as-is.
@@ -98,12 +160,7 @@ impl Challenge for MyChallenge {{
     fn input_label(&self) -> &str {{ {label} }}
 
     fn check(&mut self, input: &str) -> Verdict {{
-        // TODO: your logic. Return Verdict::Accept(..) when the input is correct.
-        if input.trim() == "open-sesame" {{
-            Verdict::Accept("Correct!".into())
-        }} else {{
-            Verdict::Reject("Not quite — keep reversing.".into())
-        }}
+{check_body}
     }}
 }}
 
@@ -299,6 +356,27 @@ mod tests {
     }
 
     #[test]
+    fn protection_mode_selects_the_check_body() {
+        // Fixed (default) → a plain fixed-answer check, no seed usage.
+        let fixed = template(&Meta::default());
+        assert!(fixed.contains("open-sesame"));
+        assert!(!fixed.contains("seed_name"));
+        assert!(!fixed.contains("fn keygen"));
+
+        // Seeded → a per-user keygen-me skeleton using seed_name(), and no fixed answer.
+        let seeded = template(&Meta {
+            protection: Protection::Seeded,
+            ..Meta::default()
+        });
+        assert!(seeded.contains("challenge_kit::seed_name()"));
+        assert!(seeded.contains("fn keygen(name: &str)"));
+        assert!(!seeded.contains("open-sesame"));
+        // Still a valid challenge-kit challenge with the platform-assigned id.
+        assert!(seeded.contains("challenge_kit::assigned_id()"));
+        assert!(seeded.contains("impl Challenge for MyChallenge"));
+    }
+
+    #[test]
     fn cargo_toml_uses_the_chosen_kit_dependency() {
         let builtin = cargo_toml(KitSource::BuiltIn.dep_spec());
         assert!(builtin.contains("challenge-kit = {"));
@@ -330,6 +408,32 @@ mod tests {
         assert!(kit.contains("pub fn assigned_id()"));
         let src = std::fs::read_to_string(&main).unwrap();
         assert!(src.contains("challenge_kit::assigned_id()"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Scaffolds a *seeded* challenge with the vendored kit and actually compiles it, so the
+    /// vendored kit's seed API and the seeded template can never drift out of sync. Ignored by
+    /// default (it shells out to `cargo build`); run with `cargo test -p orress-challenge -- --ignored`.
+    #[test]
+    #[ignore = "invokes cargo build on a scaffolded project"]
+    fn seeded_scaffold_compiles_against_the_vendored_kit() {
+        let dir = std::env::temp_dir().join(format!("orress-cw-seed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let meta = Meta {
+            protection: Protection::Seeded,
+            ..Meta::default()
+        };
+        scaffold(&dir, &meta, &KitSource::BuiltIn).expect("scaffold");
+        let out = std::process::Command::new("cargo")
+            .args(["build", "--quiet"])
+            .current_dir(&dir)
+            .output()
+            .expect("run cargo build");
+        assert!(
+            out.status.success(),
+            "seeded project failed to build:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

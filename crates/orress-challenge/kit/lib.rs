@@ -34,10 +34,86 @@ pub trait Challenge {
     fn check(&mut self, input: &str) -> Verdict;
 }
 
-/// The challenge id. The platform assigns it at build time (through the `CHALLENGE_ID`
-/// environment variable); locally it is a fixed placeholder so the project builds and runs.
+/// The challenge id. The platform assigns it at build time (through the `CTF_CHALLENGE_ID`
+/// environment variable; `CHALLENGE_ID` is also accepted); locally it is a fixed placeholder so the
+/// project builds and runs.
 pub fn assigned_id() -> &'static str {
-    option_env!("CHALLENGE_ID").unwrap_or("local-dev")
+    option_env!("CTF_CHALLENGE_ID")
+        .or(option_env!("CHALLENGE_ID"))
+        .unwrap_or("local-dev")
+}
+
+// --- per-user seed (for "protection seed" / keygen-me challenges) ---------
+//
+// Mirrors the platform kit so a seeded challenge behaves locally as it will on the platform: the
+// seed is read from the `ORRESS_SEED` env var (hex) or a `seed.bin` next to the executable, with a
+// fixed "unseeded" fallback. The platform injects a real per-player `seed.bin` into each download.
+
+/// Where the resolved [`seed`] came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeedSource {
+    /// The `ORRESS_SEED` environment variable (hex) — handy for scripted testing.
+    Env,
+    /// A `seed.bin` next to the executable — the normal per-user download.
+    File,
+    /// No seed available: the fixed fallback (its flags are rejected by the site).
+    Unseeded,
+}
+
+/// The fallback used when no `ORRESS_SEED` / `seed.bin` is present.
+const UNSEEDED: &[u8] = b"UNSEEDED";
+
+fn resolved_seed() -> &'static (Vec<u8>, SeedSource) {
+    static SEED: std::sync::OnceLock<(Vec<u8>, SeedSource)> = std::sync::OnceLock::new();
+    SEED.get_or_init(|| {
+        if let Ok(h) = std::env::var("ORRESS_SEED") {
+            if let Some(b) = decode_hex(&h) {
+                if !b.is_empty() {
+                    return (b, SeedSource::Env);
+                }
+            }
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                if let Ok(b) = std::fs::read(dir.join("seed.bin")) {
+                    if !b.is_empty() {
+                        return (b, SeedSource::File);
+                    }
+                }
+            }
+        }
+        (UNSEEDED.to_vec(), SeedSource::Unseeded)
+    })
+}
+
+/// This download's per-user seed (resolved once per process).
+pub fn seed() -> Vec<u8> {
+    resolved_seed().0.clone()
+}
+
+/// Where [`seed`] came from.
+pub fn seed_source() -> SeedSource {
+    resolved_seed().1
+}
+
+/// A per-user "account name" for keygen-me challenges — `AGENT-` plus the first three seed bytes as
+/// uppercase hex. The platform derives it identically, so the serial a player computes for the name
+/// shown here is exactly the one the platform expects (and is useless to any other player).
+pub fn seed_name() -> String {
+    let s = seed();
+    let hx: String = s.iter().take(3).map(|b| format!("{b:02X}")).collect();
+    format!("AGENT-{hx}")
+}
+
+fn decode_hex(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim();
+    if s.is_empty() || s.len() % 2 != 0 || !s.is_ascii() {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }
 
 /// Runs the challenge as a simple console session for local testing: prints the brief, then

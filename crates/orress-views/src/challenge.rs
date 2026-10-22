@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use egui::Ui;
-use orress_challenge::{KitSource, Meta};
+use orress_challenge::{KitSource, Meta, Protection};
 use orress_ui::muted;
 
 use crate::RunConsole;
@@ -169,6 +169,24 @@ pub fn challenge_workbench(
 
             // 2. Source.
             ui.heading("2 · Write the logic");
+            ui.horizontal(|ui| {
+                ui.label("Answer:");
+                ui.radio_value(&mut view.meta.protection, Protection::Fixed, "Fixed")
+                    .on_hover_text(
+                        "One answer, the same for every player. Simplest — but a player who shares \
+                         the answer lets others skip the reversing.",
+                    );
+                ui.radio_value(
+                    &mut view.meta.protection,
+                    Protection::Seeded,
+                    "Per-user (protection seed)",
+                )
+                .on_hover_text(
+                    "The answer is derived from each player's download seed (a keygen-me over their \
+                     account name), so a shared answer is useless to anyone else. Generates a \
+                     keygen() skeleton for you to turn into your own puzzle.",
+                );
+            });
             ui.horizontal(|ui| {
                 ui.label("challenge-kit:");
                 ui.radio_value(&mut view.use_builtin_kit, true, "Built-in")
