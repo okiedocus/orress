@@ -14,9 +14,6 @@ ignore = [
     # rsa is only used by yara-x to *verify* Authenticode signatures with public keys, which the
     # attack does not affect. No fixed rsa release exists yet.
     { id = "RUSTSEC-2023-0071", reason = "public-key signature verification only (yara-x); not affected" },
-    # yara-x `Rules::deserialize` is unsound on untrusted bytes (fixed in 1.19, which needs an
-    # unpatched wasmtime). ORRESS never deserializes compiled rules — it compiles from source.
-    { id = "GHSA-2jx3-ff3v-j7jj", reason = "Rules::deserialize is never called by ORRESS" },
 ]
 
 [licenses]
