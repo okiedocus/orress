@@ -228,6 +228,93 @@ fn ppc_program(code: &[u8]) -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("ppc")
 }
 
+/// A tiny ARM32/Thumb program with one function `f` at BASE. `thumb` marks the code as Thumb via
+/// a mapping symbol, the way a real ARM ELF does.
+fn arm32_program(code: &[u8], thumb: bool) -> Program {
+    let mut file = vec![0u8; 0x200];
+    file.extend_from_slice(code);
+    file.resize(0x200 + 0x1000, 0);
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "ARM (32-bit)".into(),
+        bits: Some(32),
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![Section {
+            name: ".text".into(),
+            offset: 0x200,
+            file_size: 0x1000,
+            address: BASE,
+            virtual_size: 0x1000,
+            perms: Perms {
+                read: true,
+                write: false,
+                execute: true,
+            },
+            entropy: None,
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "f".into(),
+        }],
+        arm_modes: if thumb {
+            vec![(BASE, true)]
+        } else {
+            Vec::new()
+        },
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("arm32")
+}
+
+#[test]
+fn arm32_lifts_shift_and_add() {
+    // f(a): mov r1,#7 ; add r0,r1,r0,lsl #2 ; bx lr  ->  returns 7 + (a << 2).
+    let code = [
+        0x07, 0x10, 0xa0, 0xe3, // mov r1, #7
+        0x00, 0x01, 0x81, 0xe0, // add r0, r1, r0, lsl #2
+        0x1e, 0xff, 0x2f, 0xe1, // bx lr
+    ];
+    let p = arm32_program(&code, false);
+    let out = decompile(&p, BASE, Convention::SysV)
+        .expect("decompiles")
+        .text();
+    assert!(out.contains("a1 << 2"), "{out}");
+    assert!(out.contains('7'), "{out}");
+}
+
+#[test]
+fn thumb_lifts_shift_and_add() {
+    // The same function in Thumb: movs r1,#7 ; add.w r0,r1,r0,lsl #2 ; bx lr.
+    let code = [
+        0x07, 0x21, // movs r1, #7
+        0x01, 0xeb, 0x80, 0x00, // add.w r0, r1, r0, lsl #2
+        0x70, 0x47, // bx lr
+    ];
+    let p = arm32_program(&code, true);
+    assert_eq!(p.isa, orress_analysis::Isa::Thumb);
+    let out = decompile(&p, BASE, Convention::SysV)
+        .expect("decompiles")
+        .text();
+    assert!(out.contains("a1 << 2"), "{out}");
+}
+
+#[test]
+fn arm32_recovers_conditional() {
+    // f(a): cmp r0,#1 ; movlt r0,#0 ; bx lr  ->  returns if a < 1 { 0 } else { a }.
+    let code = [
+        0x01, 0x00, 0x50, 0xe3, // cmp r0, #1
+        0x00, 0x00, 0xa0, 0xb3, // movlt r0, #0
+        0x1e, 0xff, 0x2f, 0xe1, // bx lr
+    ];
+    let p = arm32_program(&code, false);
+    let out = decompile(&p, BASE, Convention::SysV)
+        .expect("decompiles")
+        .text();
+    assert!(out.contains("if") && out.contains("< 1"), "{out}");
+}
+
 #[test]
 fn ppc_lifts_add_and_return() {
     // f(a, b): add r3,r3,r4 ; blr  ->  returns a + b.

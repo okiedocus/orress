@@ -77,6 +77,8 @@ pub fn float_arg_regs(conv: Convention) -> &'static [u8] {
         // PowerPC passes FP arguments in f1–f13; the ppc lifter maps fN to Xmm(N-1), so these are
         // XMM 0–12 and the float return (f1) lands on Xmm(0).
         Convention::Ppc => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        // ARM32 VFP/NEON floats are not lifted yet (they stay `asm!`), so no float arg registers.
+        Convention::Arm => &[],
     }
 }
 

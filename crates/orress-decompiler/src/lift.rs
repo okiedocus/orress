@@ -31,6 +31,9 @@ pub enum Convention {
     /// PowerPC (SysV / PowerOpen): r3–r10 for integer arguments, f1–f13 for floats, result in r3
     /// (the IR models r3 as register 0, like RISC-V's a0). See ppc.rs for the numbering.
     Ppc,
+    /// ARM 32-bit (AAPCS): r0–r3 for arguments, result in r0 (the IR models r0 as register 0, like
+    /// rax). r4–r11 are callee-saved; r12 (ip) and r14 (lr) are caller-saved.
+    Arm,
 }
 
 impl Convention {
@@ -47,6 +50,8 @@ impl Convention {
             Self::Mips64 => &[1, 2, 3, 4, 6, 7, 8, 9],
             // r3..r10 map to IR registers 0..7 (r3 is register 0, the result).
             Self::Ppc => &[0, 1, 2, 3, 4, 5, 6, 7],
+            // r0..r3 map directly to IR registers 0..3 (r0 is register 0, the result).
+            Self::Arm => &[0, 1, 2, 3],
         }
     }
 
@@ -70,6 +75,9 @@ impl Convention {
             // PowerPC volatile registers besides the arguments r3..r10: r0 (IR 8), r11 (11),
             // r12 (12). See ppc.rs for the numbering.
             Self::Ppc => &[8, 11, 12],
+            // AAPCS caller-saved besides the result r0: the argument registers r1–r3 and the
+            // scratch registers r12 (ip) and r14 (lr).
+            Self::Arm => &[1, 2, 3, 12, 14],
         }
     }
 }

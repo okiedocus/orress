@@ -168,6 +168,16 @@ pub fn decode(bytes: &[u8], address: u64, thumb: bool) -> Option<Insn> {
         Opcode::BKPT | Opcode::UDF => Flow::Stop,
         _ => Flow::Next,
     };
+    // A predicated (non-`AL`) return or computed jump falls through when its condition is false —
+    // e.g. `bxlt lr` (an early-return guard). Treat it as fall-through so the rest of the function
+    // is still discovered; its conditional effect is recovered by the decompiler.
+    let flow = if ins.condition != ConditionCode::AL
+        && matches!(flow, Flow::Return | Flow::IndirectJump { .. })
+    {
+        Flow::Next
+    } else {
+        flow
+    };
 
     let mut data_refs = Vec::new();
     if let Some(addr) = literal_ref(&ins, address, thumb) {

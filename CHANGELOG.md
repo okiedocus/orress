@@ -8,6 +8,19 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **ARM32 + Thumb**: ORRESS now loads, disassembles and **decompiles** 32-bit ARM (AArch32)
+  binaries — in both the ARM and Thumb instruction states — so firmware, embedded/IoT, Cortex-M
+  (Thumb-only) and older Linux/ARM targets become readable. One hand-wired front end on
+  `yaxpeax-arm`'s `armv7` decoder (already in the tree for ARM64 — no new dependency) covers both
+  states; the analysis picks ARM vs Thumb per region from the ELF's `$a`/`$t` mapping symbols, so
+  mixed binaries disassemble correctly. Branch targets (ARM, Thumb 16-bit, and the 32-bit
+  BL/BLX/B.W J1/J2 forms) are decoded exactly. The decompiler recovers readable Rust-style
+  pseudocode: data-processing with the barrel shifter (`r0, lsl #2`), `cmp`/conditional branches
+  reconstructed into `if`/`while`, **conditional execution** (ARM predication and Thumb-2 IT
+  blocks) as `if`/early-returns, loads/stores incl. `[base, idx, lsl #n]` array indexing and
+  PC-relative literal pools folded to their constant, calls with recovered arguments, and the
+  AAPCS calling convention. VFP/NEON SIMD and coprocessor ops stay inline `asm!`; big-endian ARM
+  is a future addition.
 - **Support ORRESS on Ko-fi**: a donate/sponsor button (the official "Support me on Ko-fi"
   badge) now appears on the **About** window and the **Welcome** screen, with a matching
   **Help ▸ Support ORRESS on Ko-fi…** menu item. ORRESS stays free and open source; this just

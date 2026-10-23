@@ -14,6 +14,7 @@
 //! The output is pseudocode for reading, not code that compiles: memory the decompiler
 //! cannot type is shown as `read::<u32>(addr)` / `write::<u32>(addr, value)`.
 
+pub mod arm32;
 pub mod arm64;
 #[cfg(feature = "compile-check")]
 pub mod compile;
@@ -146,6 +147,12 @@ fn lift_function(
             param_counts: counts,
         }
         .lift(f)
+    } else if matches!(program.isa, Isa::Arm32 | Isa::Thumb) {
+        arm32::Arm32Lifter {
+            program,
+            param_counts: counts,
+        }
+        .lift(f)
     } else if matches!(program.isa, Isa::Riscv64 | Isa::Riscv32) {
         riscv::RiscvLifter {
             program,
@@ -198,6 +205,8 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
         Isa::X86
             | Isa::X64
             | Isa::Arm64
+            | Isa::Arm32
+            | Isa::Thumb
             | Isa::Riscv64
             | Isa::Riscv32
             | Isa::Mips32
@@ -213,6 +222,7 @@ fn run(program: &Program, addr: u64, conv: Convention) -> Result<Decompiled, Err
     // ARM64 and RISC-V use their own calling conventions regardless of the caller's x86 choice.
     let conv = match program.isa {
         Isa::Arm64 => Convention::Aarch64,
+        Isa::Arm32 | Isa::Thumb => Convention::Arm,
         Isa::Riscv64 | Isa::Riscv32 => Convention::Riscv,
         Isa::Mips32 | Isa::Mips32El => Convention::Mips,
         Isa::Mips64 | Isa::Mips64El => Convention::Mips64,
