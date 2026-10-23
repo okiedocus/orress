@@ -178,6 +178,12 @@ the *nightmare* course) can work end to end inside ORRESS.
   glossary, per-step goals, "do this" instructions and explained multiple-choice. Level 3 (dynamic
   analysis) is complete — the debugger, breakpoints and stepping, reading and changing a running
   program, patching, emulation and beating anti-debugging — and the course now spans 560 steps.
+- **Challenge Workbench — protection-seed option**: the builder can now scaffold a per-user
+  (keygen-me) challenge instead of a fixed-answer one. A Protection toggle in the panel picks the
+  mode; the seeded template validates the serial against `challenge_kit::seed_name()` and shows the
+  per-user account in `render_extra`, and the vendored offline kit is widened with `seed()` /
+  `seed_source()` / `seed_name()` (and `CTF_CHALLENGE_ID` reconciled) so seeded scaffolds build and
+  test offline. This defeats answer-sharing — every player must recover a different serial.
 
 ### Changed
 
