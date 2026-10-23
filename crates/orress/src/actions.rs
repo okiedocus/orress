@@ -65,6 +65,13 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          best-effort — declarations the model cannot represent are skipped.",
     )
     .register(
+        "types::ImportDwarf",
+        "Import Debug Info (DWARF)…",
+        "Read types and function prototypes from DWARF debug info — the open binary's own \
+         `.debug_*` sections, or a separate debug file — into the catalog and pin the \
+         prototypes to the matching functions.",
+    )
+    .register(
         "annotations::Import",
         "Import Names/Comments…",
         "Bring names and comments into the open binary from a file — the ORRESS JSON export, or \

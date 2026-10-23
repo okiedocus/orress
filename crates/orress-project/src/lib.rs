@@ -330,6 +330,79 @@ impl Document {
         Ok(())
     }
 
+    /// Defines many user types at once, pre-registering their names (and the names they
+    /// reference) so forward references and pointer cycles — self-referential structs, linked
+    /// lists, mutually-pointing types — resolve regardless of the order the types arrive in.
+    /// Returns `(added, skipped)`; a type that still fails validation is skipped. Opaque stubs
+    /// left for names that never gained a real definition are dropped unless another defined
+    /// type still points at them (those represent genuinely incomplete/opaque types).
+    pub fn define_types(&mut self, types: Vec<UserType>) -> (usize, usize) {
+        use std::collections::BTreeSet;
+
+        // Every name that must exist for the batch to validate: each type's own name plus the
+        // named types its fields/targets reference.
+        let mut wanted: BTreeSet<String> = BTreeSet::new();
+        for ty in &types {
+            wanted.insert(ty.name().to_owned());
+            collect_named_refs(ty, &mut wanted);
+        }
+        // Pre-register an opaque stub for each wanted name not already known, so `Named`
+        // references (including ones behind pointers) resolve during the real pass.
+        let mut placeheld: Vec<String> = Vec::new();
+        for name in &wanted {
+            if !self.annotations.types.contains_key(name) {
+                let stub = UserType::Struct {
+                    name: name.clone(),
+                    fields: vec![FieldDef {
+                        name: "_opaque".to_owned(),
+                        ty: TypeRef::Prim(Prim::U8),
+                        count: 1,
+                    }],
+                };
+                if self.type_catalog().validate(&stub).is_ok() {
+                    self.annotations.types.insert(name.clone(), stub);
+                    placeheld.push(name.clone());
+                }
+            }
+        }
+
+        // Real definitions: all names now exist, so references validate. First def of a name wins.
+        let mut added = 0;
+        let mut skipped = 0;
+        let mut defined: BTreeSet<String> = BTreeSet::new();
+        for ty in types {
+            let name = ty.name().to_owned();
+            if defined.contains(&name) {
+                continue;
+            }
+            match self.type_catalog().validate(&ty) {
+                Ok(()) => {
+                    self.annotations.types.insert(name.clone(), ty);
+                    defined.insert(name);
+                    added += 1;
+                }
+                Err(_) => skipped += 1,
+            }
+        }
+
+        // Drop leftover opaque stubs that never became a real type and that nothing references.
+        for name in placeheld {
+            if !defined.contains(&name) {
+                let referenced = self
+                    .annotations
+                    .types
+                    .values()
+                    .any(|t| type_mentions(t, &name));
+                if !referenced {
+                    self.annotations.types.remove(&name);
+                }
+            }
+        }
+
+        self.save_annotations();
+        (added, skipped)
+    }
+
     /// Removes a user type by name, and any data applications that referenced it.
     pub fn remove_type(&mut self, name: &str) {
         if self.annotations.types.remove(name).is_some() {
@@ -635,6 +708,54 @@ fn read(path: &Path) -> Result<Bytes, String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Calls `f` for each user type named by a type reference (following pointers).
+fn each_named(tr: &TypeRef, f: &mut impl FnMut(&str)) {
+    match tr {
+        TypeRef::Prim(_) => {}
+        TypeRef::Pointer(inner) => each_named(inner, f),
+        TypeRef::Named(n) => f(n),
+    }
+}
+
+/// Inserts every user-type name a type's fields or target reference into `out`.
+fn collect_named_refs(ty: &UserType, out: &mut std::collections::BTreeSet<String>) {
+    match ty {
+        UserType::Struct { fields, .. } | UserType::Union { fields, .. } => {
+            for fd in fields {
+                each_named(&fd.ty, &mut |n| {
+                    out.insert(n.to_owned());
+                });
+            }
+        }
+        UserType::Typedef { target, .. } => each_named(target, &mut |n| {
+            out.insert(n.to_owned());
+        }),
+        UserType::Enum { .. } => {}
+    }
+}
+
+/// Whether a type's fields or target reference the named type.
+fn type_mentions(ty: &UserType, name: &str) -> bool {
+    let mut hit = false;
+    let mut note = |tr: &TypeRef| {
+        each_named(tr, &mut |n| {
+            if n == name {
+                hit = true;
+            }
+        })
+    };
+    match ty {
+        UserType::Struct { fields, .. } | UserType::Union { fields, .. } => {
+            for fd in fields {
+                note(&fd.ty);
+            }
+        }
+        UserType::Typedef { target, .. } => note(target),
+        UserType::Enum { .. } => {}
+    }
+    hit
+}
+
 /// All open documents.
 pub struct DocStore {
     docs: Vec<Document>,
@@ -748,6 +869,54 @@ mod tests {
         store.active = Some(path.clone());
         store.retain(|_| false);
         assert!(store.active.is_none());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn define_types_resolves_forward_refs_and_cycles() {
+        let path = std::env::temp_dir().join(format!("orress-deftypes-{}.bin", std::process::id()));
+        std::fs::write(&path, vec![0u8; 64]).unwrap();
+        let mut store = DocStore::new(|| {}, None);
+        let doc = store.open(&path);
+        wait_for(doc);
+
+        // `Node` points at itself; `List` points at `Node` — and arrives *before* `Node`, which
+        // a naive one-at-a-time define would reject.
+        let ptr_node = || TypeRef::Pointer(Box::new(TypeRef::Named("Node".into())));
+        let list = UserType::Struct {
+            name: "List".into(),
+            fields: vec![FieldDef {
+                name: "head".into(),
+                ty: ptr_node(),
+                count: 1,
+            }],
+        };
+        let node = UserType::Struct {
+            name: "Node".into(),
+            fields: vec![
+                FieldDef {
+                    name: "val".into(),
+                    ty: TypeRef::Prim(Prim::I32),
+                    count: 1,
+                },
+                FieldDef {
+                    name: "next".into(),
+                    ty: ptr_node(),
+                    count: 1,
+                },
+            ],
+        };
+
+        let (added, skipped) = doc.define_types(vec![list, node]);
+        assert_eq!((added, skipped), (2, 0), "both types should define");
+        assert!(doc.annotations.types.contains_key("Node"));
+        assert!(doc.annotations.types.contains_key("List"));
+        // The real definition replaced the opaque stub (no `_opaque` filler left behind).
+        let UserType::Struct { fields, .. } = &doc.annotations.types["Node"] else {
+            panic!("Node should be a struct");
+        };
+        assert!(fields.iter().any(|f| f.name == "next"));
+        assert!(fields.iter().all(|f| f.name != "_opaque"));
         std::fs::remove_file(path).ok();
     }
 

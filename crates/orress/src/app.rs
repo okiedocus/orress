@@ -468,15 +468,13 @@ impl OrressApp {
             .map_err(|e| e.to_string())
             .and_then(|text| orress_project::parse_header(&text));
         match parsed {
-            Ok((types, skipped)) => {
-                let mut added = 0;
-                if let Some(doc) = self.docs.active_mut() {
-                    for ty in types {
-                        if doc.define_type(ty).is_ok() {
-                            added += 1;
-                        }
-                    }
-                }
+            Ok((types, parse_skipped)) => {
+                let (added, def_skipped) = self
+                    .docs
+                    .active_mut()
+                    .map(|doc| doc.define_types(types))
+                    .unwrap_or((0, 0));
+                let skipped = parse_skipped + def_skipped;
                 let note = if skipped > 0 {
                     format!("Imported {added} type(s); skipped {skipped} declaration(s)")
                 } else {
@@ -486,6 +484,93 @@ impl OrressApp {
             }
             Err(e) => self.notify(ctx, format!("Could not import header: {e}"), true),
         }
+    }
+
+    /// Imports types and function prototypes from DWARF debug info — the open binary's own
+    /// `.debug_*` sections when it has them, otherwise a separate debug file the user picks.
+    /// Types go into the catalog; each prototype is pinned to the function at its entry address.
+    fn import_dwarf(&mut self, ctx: &Context) {
+        if self.docs.active().is_none() {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        }
+
+        // Prefer the open binary's own DWARF; fall back to a picked debug file.
+        let own = self
+            .docs
+            .active()
+            .and_then(|d| d.bytes().map(|b| b.as_ref().clone()))
+            .filter(|b| orress_dwarf::has_debug_info(b));
+        let bytes = match own {
+            Some(b) => b,
+            None => {
+                let Some(path) = rfd::FileDialog::new()
+                    .set_title("Import DWARF debug info (the open binary has none embedded)")
+                    .pick_file()
+                else {
+                    return;
+                };
+                match std::fs::read(&path) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        self.notify(ctx, format!("Could not read file: {e}"), true);
+                        return;
+                    }
+                }
+            }
+        };
+
+        let imported = match orress_dwarf::import(&bytes) {
+            Ok(i) => i,
+            Err(e) => {
+                self.notify(ctx, format!("Could not read DWARF: {e}"), true);
+                return;
+            }
+        };
+        if imported.types.is_empty() && imported.protos.is_empty() {
+            self.notify(ctx, "No DWARF debug info found.", true);
+            return;
+        }
+
+        // Function entry addresses, to pin each prototype only where a function actually is.
+        let entries: std::collections::HashSet<u64> = self
+            .docs
+            .active()
+            .and_then(|d| d.program())
+            .map(|p| p.functions.keys().copied().collect())
+            .unwrap_or_default();
+
+        let total_protos = imported.protos.len();
+        let orress_dwarf::Imported {
+            types,
+            protos,
+            skipped,
+        } = imported;
+
+        let applied = protos.iter().filter(|(a, _)| entries.contains(a)).count();
+        let (added, def_skipped) = self
+            .docs
+            .active_mut()
+            .map(|doc| {
+                let counts = doc.define_types(types);
+                for (addr, proto) in protos {
+                    if entries.contains(&addr) {
+                        doc.set_prototype(addr, proto);
+                    }
+                }
+                counts
+            })
+            .unwrap_or((0, 0));
+
+        let skipped_total = skipped + def_skipped;
+        let mut note = format!("Imported {added} type(s) and {applied} prototype(s)");
+        if applied < total_protos {
+            note.push_str(&format!(" (of {total_protos} in the debug info)"));
+        }
+        if skipped_total > 0 {
+            note.push_str(&format!("; skipped {skipped_total} declaration(s)"));
+        }
+        self.notify(ctx, note, false);
     }
 
     fn import_annotations(&mut self, ctx: &Context) {
@@ -902,6 +987,7 @@ impl OrressApp {
             "analysis::ApplySignatures" => self.apply_signatures(ctx),
             "analysis::GenerateSignatures" => self.generate_signatures(ctx),
             "types::ImportHeader" => self.import_header(ctx),
+            "types::ImportDwarf" => self.import_dwarf(ctx),
             "annotations::Import" => self.import_annotations(ctx),
             "annotations::Export" => self.export_annotations(ctx),
             "hex::GoTo" => self.hex_command(ctx, ViewCommand::GoTo),
@@ -1285,6 +1371,7 @@ impl OrressApp {
                     self.menu_entry(ui, "analysis::ApplySignatures", &mut clicked);
                     self.menu_entry(ui, "analysis::GenerateSignatures", &mut clicked);
                     self.menu_entry(ui, "types::ImportHeader", &mut clicked);
+                    self.menu_entry(ui, "types::ImportDwarf", &mut clicked);
                     self.menu_entry(ui, "annotations::Import", &mut clicked);
                     self.menu_entry(ui, "annotations::Export", &mut clicked);
                     ui.separator();

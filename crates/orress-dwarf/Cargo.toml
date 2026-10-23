@@ -1,0 +1,22 @@
+[package]
+name = "orress-dwarf"
+description = "Import DWARF debug info (structs/unions/enums/typedefs + function prototypes) into the type catalog — pure Rust, no C"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-project.workspace = true
+object.workspace = true
+gimli.workspace = true
+
+[dev-dependencies]
+# `write` synthesizes deterministic DWARF in tests, so they need no C compiler.
+gimli = { workspace = true, features = ["read", "std", "write"] }

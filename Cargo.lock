@@ -4155,6 +4155,7 @@ dependencies = [
  "egui",
  "orress-academy",
  "orress-actions",
+ "orress-dwarf",
  "orress-ext",
  "orress-lsp",
  "orress-project",
@@ -4346,6 +4347,15 @@ dependencies = [
 [[package]]
 name = "orress-dotnet"
 version = "1.2.0"
+
+[[package]]
+name = "orress-dwarf"
+version = "1.2.0"
+dependencies = [
+ "gimli 0.32.3",
+ "object 0.40.0",
+ "orress-project",
+]
 
 [[package]]
 name = "orress-editor"

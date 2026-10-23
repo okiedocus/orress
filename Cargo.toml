@@ -62,6 +62,7 @@ orress-relay = { path = "crates/orress-relay" }
 orress-diff = { path = "crates/orress-diff" }
 orress-vm = { path = "crates/orress-vm" }
 orress-script = { path = "crates/orress-script" }
+orress-dwarf = { path = "crates/orress-dwarf" }
 
 # UI
 eframe = { version = "0.36", features = ["persistence"] }
@@ -80,6 +81,7 @@ memchr = "2"
 regex = "1"
 rhai = "1.26"
 object = { version = "0.40", default-features = false, features = ["read", "std", "write"] }
+gimli = { version = "0.32", default-features = false, features = ["read", "std"] }
 windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_Kernel", "Win32_Security"] }
 sha1 = "0.11"
 sha2 = "0.11"

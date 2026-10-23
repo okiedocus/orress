@@ -68,6 +68,18 @@ All notable changes to ORRESS are documented here. The format follows
   preprocessor directives, `__attribute__`/`__declspec`, `const`/`volatile` qualifiers and
   declarations the model cannot represent (function prototypes, bitfields) are stripped or
   skipped. Reuses the pure-Rust C parser; no new dependency.
+- **Import DWARF debug info**: **Tools ▸ Import Debug Info (DWARF)…** reads types **and**
+  function prototypes from the debug info in an ELF or Mach-O — the open binary's own
+  `.debug_*` sections when it has them, otherwise a separate debug file you pick. Structs,
+  unions, enums and typedefs land in the type catalog (with `_padN` filler synthesised where
+  DWARF's member offsets need it, so recovered layouts keep their real size), and each
+  `DW_TAG_subprogram` becomes a function prototype pinned to the matching function by its
+  entry address — so a function the debug info covers decompiles with real parameter names
+  and types instead of recovered `arg0`/`field_N`. Forward references and pointer cycles
+  (self-referential structs, linked lists) resolve regardless of declaration order; bitfields
+  and packed/overlapping layouts the model cannot represent are skipped and counted. New
+  pure-Rust `orress-dwarf` crate (`gimli` reader, already in the tree); C-header import now
+  shares the same cycle-aware catalog loader.
 - **Function signatures (FLIRT-style)**: identify known library functions (libc, the
   Rust/MSVC runtime, …) in a stripped binary by matching the leading bytes of each
   function, with relocatable call/jump operands masked so a function matches wherever it is
