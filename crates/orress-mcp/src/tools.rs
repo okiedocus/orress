@@ -192,6 +192,50 @@ pub fn detect_vm(path: &str) -> Result<String, String> {
     Ok(cap(out))
 }
 
+/// Concolically devirtualizes each detected VM: recovers the key it checks for and the per-byte
+/// logic the virtualized check performs, by executing the real bytecode symbolically.
+pub fn solve_vm(path: &str) -> Result<String, String> {
+    let program = analyze_program(path)?;
+    let reports = orress_vm::scan(&program);
+    if reports.is_empty() {
+        return Ok(
+            "No VM-based obfuscation detected (no interpreter dispatch loop to solve).".into(),
+        );
+    }
+    let mut out = String::new();
+    for r in &reports {
+        let _ = writeln!(
+            out,
+            "VM at {:#x} (dispatcher {:#x}, {} handlers):",
+            r.entry, r.dispatcher, r.handlers
+        );
+        match orress_vm::solve(&program, r) {
+            Some(sol) => {
+                let status = if sol.complete { "verified" } else { "partial" };
+                let _ = writeln!(
+                    out,
+                    "  recovered key ({status}, {} constraints): {:?}",
+                    sol.constraints,
+                    String::from_utf8_lossy(&sol.key)
+                );
+                if !sol.checks.is_empty() {
+                    let _ = writeln!(out, "  devirtualized logic (lifted by execution — exact):");
+                    for c in &sol.checks {
+                        let _ = writeln!(out, "    {c}");
+                    }
+                }
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "  could not solve (no recognisable key-check verdict, or no input length yielded a solution)."
+                );
+            }
+        }
+    }
+    Ok(cap(out))
+}
+
 /// Auto-detects a managed/bytecode format and disassembles it.
 pub fn disassemble(path: &str) -> Result<String, String> {
     let data = read(path)?;

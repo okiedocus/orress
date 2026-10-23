@@ -29,6 +29,7 @@ fn tools_list_advertises_the_tools() {
         "archive_list",
         "binary_diff",
         "detect_vm",
+        "solve_vm",
     ] {
         assert!(names.contains(&want), "missing tool {want}");
     }
@@ -75,6 +76,23 @@ fn tool_call_deobfuscates_a_js_file() {
     );
     assert_ne!(r["result"]["isError"], json!(true));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tool_call_solve_vm_recovers_the_key() {
+    // crackme05 is a stack-VM key checker; devirtualizing it recovers "vm_0wned".
+    let path = format!(
+        "{}/../../academy/crackmes/bin/crackme05.exe",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let r = call(
+        "tools/call",
+        json!({ "name": "solve_vm", "arguments": { "path": path } }),
+    );
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("recovered key"), "{text}");
+    assert!(text.contains("vm_0wned"), "{text}");
+    assert_ne!(r["result"]["isError"], json!(true));
 }
 
 #[test]

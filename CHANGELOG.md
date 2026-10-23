@@ -8,6 +8,10 @@ All notable changes to ORRESS are documented here. The format follows
 
 ### Added
 
+- **`solve_vm` MCP tool**: devirtualizes a detected VM over MCP — concolically executes the real
+  bytecode to recover the key it checks for and the exact per-byte logic (e.g.
+  `rol(in[0] ^ 0x3b, 1) == 0x9a`). Brings the devirtualization already in the CLI (`vm`) and the
+  Triage tab to the AI-assisted/MCP workflow, alongside the existing `detect_vm`.
 - **ARM32 + Thumb**: ORRESS now loads, disassembles and **decompiles** 32-bit ARM (AArch32)
   binaries — in both the ARM and Thumb instruction states — so firmware, embedded/IoT, Cortex-M
   (Thumb-only) and older Linux/ARM targets become readable. One hand-wired front end on

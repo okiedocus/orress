@@ -102,6 +102,7 @@ fn run_tool(name: &str, args: &Value) -> Result<String, String> {
         }
         "disassemble" => tools::disassemble(path),
         "detect_vm" => tools::detect_vm(path),
+        "solve_vm" => tools::solve_vm(path),
         "deobfuscate_js" => tools::deobfuscate_js(path),
         "archive_list" => tools::archive_list(path),
         other => Err(format!("unknown tool: {other}")),
@@ -127,6 +128,7 @@ fn tool_schemas() -> Value {
         }},
         { "name": "disassemble", "description": "Auto-detects and disassembles a managed/bytecode file: WebAssembly (WAT), Python .pyc, Java .class, .NET (IL) or Android .dex.", "inputSchema": path_arg },
         { "name": "detect_vm", "description": "Flags functions that look like a VM interpreter (bytecode dispatch loop) — the signature of VM-based obfuscation (VMProtect/Themida/custom CTF VMs).", "inputSchema": path_arg },
+        { "name": "solve_vm", "description": "Devirtualizes a detected VM: concolically executes the real bytecode to recover the key it checks for and the exact per-byte logic (e.g. `rol(in[0] ^ 0x3b, 1) == 0x9a`). Returns the recovered key and the lifted checks.", "inputSchema": path_arg },
         { "name": "deobfuscate_js", "description": "Deobfuscates JavaScript (escapes, fromCharCode, atob, string arrays), beautifies it and lists its strings.", "inputSchema": path_arg },
         { "name": "archive_list", "description": "Lists the entries of a ZIP/JAR/APK and a JAR's Main-Class.", "inputSchema": path_arg },
         { "name": "binary_diff", "description": "BinDiff-style comparison of two native binaries: identical / changed / added / removed functions (patch diffing, malware-variant comparison).", "inputSchema": {
