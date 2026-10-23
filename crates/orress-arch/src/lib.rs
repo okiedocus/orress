@@ -5,6 +5,7 @@
 //! refers to (needed for cross-references). [`explain`] has plain-language
 //! explanations of mnemonics and registers for Explain Mode.
 
+mod arm32;
 mod arm64;
 pub mod explain;
 mod mips;
@@ -19,6 +20,12 @@ pub enum Isa {
     X86,
     X64,
     Arm64,
+    /// ARM 32-bit (AArch32), ARM instruction state, little-endian.
+    Arm32,
+    /// ARM 32-bit (AArch32), Thumb instruction state — 16-/32-bit encodings. Cortex-M firmware is
+    /// Thumb-only, and modern ARM userspace is largely Thumb-2. Decoded by the same `armv7`
+    /// decoder as [`Isa::Arm32`], differing only in how bytes are read.
+    Thumb,
     /// RISC-V 64-bit (RV64I + M; compressed instructions are length-aware).
     Riscv64,
     /// RISC-V 32-bit (RV32I + M + C; common in embedded/firmware).
@@ -47,6 +54,9 @@ impl Isa {
             "x86 (32-bit)" => Some(Self::X86),
             "x86-64" | "x86-64 (x32 ABI)" => Some(Self::X64),
             "ARM64 (AArch64)" => Some(Self::Arm64),
+            // ARM vs Thumb is refined per-region by the analysis from mapping symbols and the
+            // entry-point low bit; the base variant here is the ARM instruction state.
+            "ARM (32-bit)" => Some(Self::Arm32),
             "RISC-V (64-bit)" => Some(Self::Riscv64),
             "RISC-V (32-bit)" => Some(Self::Riscv32),
             "MIPS (32-bit)" => Some(if little { Self::Mips32El } else { Self::Mips32 }),
@@ -62,6 +72,8 @@ impl Isa {
             Self::X86 => "x86",
             Self::X64 => "x86-64",
             Self::Arm64 => "ARM64",
+            Self::Arm32 => "ARM (32-bit)",
+            Self::Thumb => "ARM Thumb",
             Self::Riscv64 => "RISC-V (64-bit)",
             Self::Riscv32 => "RISC-V (32-bit)",
             Self::Mips32 | Self::Mips32El => "MIPS (32-bit)",
@@ -76,6 +88,8 @@ impl Isa {
         match self {
             Self::X86 | Self::X64 => 15,
             Self::Arm64
+            | Self::Arm32
+            | Self::Thumb
             | Self::Riscv64
             | Self::Riscv32
             | Self::Mips32
@@ -90,7 +104,13 @@ impl Isa {
 
     pub fn pointer_size(self) -> u64 {
         match self {
-            Self::X86 | Self::Riscv32 | Self::Mips32 | Self::Mips32El | Self::Ppc32 => 4,
+            Self::X86
+            | Self::Arm32
+            | Self::Thumb
+            | Self::Riscv32
+            | Self::Mips32
+            | Self::Mips32El
+            | Self::Ppc32 => 4,
             Self::X64
             | Self::Arm64
             | Self::Riscv64
@@ -225,6 +245,8 @@ pub fn decode(isa: Isa, bytes: &[u8], address: u64) -> Option<Insn> {
         Isa::X86 => x86::decode(32, bytes, address),
         Isa::X64 => x86::decode(64, bytes, address),
         Isa::Arm64 => arm64::decode(bytes, address),
+        Isa::Arm32 => arm32::decode(bytes, address, false),
+        Isa::Thumb => arm32::decode(bytes, address, true),
         Isa::Riscv64 => riscv::decode(bytes, address, true),
         Isa::Riscv32 => riscv::decode(bytes, address, false),
         Isa::Mips32 => mips::decode(bytes, address, true, false),
@@ -278,6 +300,8 @@ pub fn reg_info(isa: Isa, bytes: &[u8], address: u64) -> Option<RegInfo> {
         Isa::X86 => x86::reg_info(32, bytes, address),
         Isa::X64 => x86::reg_info(64, bytes, address),
         Isa::Arm64
+        | Isa::Arm32
+        | Isa::Thumb
         | Isa::Riscv64
         | Isa::Riscv32
         | Isa::Mips32

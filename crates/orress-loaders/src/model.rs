@@ -259,6 +259,10 @@ pub struct BinaryInfo {
     pub import_slots: Vec<NamedAddress>,
     /// Named functions from symbol tables, sorted by address.
     pub function_symbols: Vec<NamedAddress>,
+    /// ARM mapping symbols — `(address, is_thumb)` at each `$a`/`$t` transition, sorted by
+    /// address. Lets the analysis decode each region in the right instruction state (ARM
+    /// binaries interleave ARM and Thumb). Empty for non-ARM binaries.
+    pub arm_modes: Vec<(u64, bool)>,
     /// Function start addresses from exception tables (x64 PE .pdata).
     pub function_starts: Vec<u64>,
     pub symbol_count: usize,
@@ -306,6 +310,19 @@ impl BinaryInfo {
 
     pub fn section_at_offset(&self, offset: u64) -> Option<&Section> {
         self.sections.iter().find(|s| s.contains_offset(offset))
+    }
+
+    /// Whether the code at `address` is Thumb, per the ARM mapping symbols (the last `$a`/`$t`
+    /// at or before it). `None` when there are no mapping symbols covering it.
+    pub fn arm_thumb_at(&self, address: u64) -> Option<bool> {
+        if self.arm_modes.is_empty() {
+            return None;
+        }
+        match self.arm_modes.binary_search_by_key(&address, |&(a, _)| a) {
+            Ok(i) => Some(self.arm_modes[i].1),
+            Err(0) => None,
+            Err(i) => Some(self.arm_modes[i - 1].1),
+        }
     }
 
     pub fn entry_offset(&self) -> Option<u64> {

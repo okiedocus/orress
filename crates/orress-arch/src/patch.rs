@@ -21,6 +21,13 @@ pub fn try_nop(isa: Isa, len: usize) -> Option<Vec<u8>> {
         Isa::Arm64 => len
             .is_multiple_of(4)
             .then(|| 0xd503_201fu32.to_le_bytes().repeat(len / 4)),
+        // ARM NOP is e320f000 (4 bytes); Thumb NOP is bf00 (2 bytes).
+        Isa::Arm32 => len
+            .is_multiple_of(4)
+            .then(|| 0xe320_f000u32.to_le_bytes().repeat(len / 4)),
+        Isa::Thumb => len
+            .is_multiple_of(2)
+            .then(|| 0xbf00u16.to_le_bytes().repeat(len / 2)),
         // RISC-V base instructions are 4 bytes; NOP is `addi x0,x0,0` = 0x00000013.
         Isa::Riscv64 | Isa::Riscv32 => len
             .is_multiple_of(4)
@@ -90,8 +97,10 @@ pub fn invert(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             out[..4].copy_from_slice(&new.to_le_bytes());
         }
-        // Branch patching for RISC-V/MIPS/PowerPC is not implemented yet.
-        Isa::Riscv64
+        // Branch patching for ARM32/RISC-V/MIPS/PowerPC is not implemented yet.
+        Isa::Arm32
+        | Isa::Thumb
+        | Isa::Riscv64
         | Isa::Riscv32
         | Isa::Mips32
         | Isa::Mips32El
@@ -133,7 +142,9 @@ pub fn force(isa: Isa, bytes: &[u8]) -> Option<Vec<u8>> {
             };
             Some(new.to_le_bytes().to_vec())
         }
-        Isa::Riscv64
+        Isa::Arm32
+        | Isa::Thumb
+        | Isa::Riscv64
         | Isa::Riscv32
         | Isa::Mips32
         | Isa::Mips32El

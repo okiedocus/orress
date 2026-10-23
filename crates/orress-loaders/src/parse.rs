@@ -144,6 +144,14 @@ pub fn parse(data: &[u8]) -> BinaryInfo {
     }
 
     info.function_symbols = code_hints::function_symbols(&file);
+    if file.architecture() == object::Architecture::Arm {
+        info.arm_modes = code_hints::arm_mapping_symbols(&file);
+        // A Thumb function's symbol carries the Thumb marker in bit 0; the code sits at the even
+        // address, so clear it to match instruction addresses.
+        for f in &mut info.function_symbols {
+            f.address &= !1;
+        }
+    }
     match &file {
         object::File::Pe32(pe) => {
             info.import_slots = code_hints::pe_import_slots(pe, info.image_base);

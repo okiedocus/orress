@@ -129,6 +129,9 @@ pub struct Name {
 /// The analyzed program.
 pub struct Program {
     pub isa: Isa,
+    /// ARM `$a`/`$t` mapping symbols (`(address, is_thumb)`, sorted) — empty for non-ARM. Lets
+    /// [`Program::isa_at`] decode each region in its own instruction state.
+    arm_modes: Vec<(u64, bool)>,
     pub memory: Memory,
     pub functions: BTreeMap<u64, Function>,
     /// Every decoded instruction: address -> length.
@@ -155,10 +158,24 @@ impl Program {
     /// Analyzes the code of a triaged binary. Returns `None` for architectures ORRESS
     /// cannot disassemble yet.
     pub fn analyze(info: &BinaryInfo, data: Arc<Vec<u8>>, strings: &[FoundString]) -> Option<Self> {
-        let isa = Isa::from_arch_name(&info.arch, info.endian == orress_bytes::Endian::Little)?;
+        let mut isa = Isa::from_arch_name(&info.arch, info.endian == orress_bytes::Endian::Little)?;
+        // ARM binaries can be Thumb. The base instruction state (the fallback for addresses no
+        // mapping symbol covers) comes from the entry point: its low bit is the classic Thumb
+        // marker, and the mapping symbol at its real address is authoritative.
+        if isa == Isa::Arm32 {
+            let thumb = info.entry.is_some_and(|e| e & 1 == 1)
+                || info
+                    .entry
+                    .and_then(|e| info.arm_thumb_at(e & !1))
+                    .unwrap_or(false);
+            if thumb {
+                isa = Isa::Thumb;
+            }
+        }
         let memory = Memory::new(info, data);
         let mut p = Self {
             isa,
+            arm_modes: info.arm_modes.clone(),
             memory,
             functions: BTreeMap::new(),
             insns: BTreeMap::new(),
@@ -184,6 +201,10 @@ impl Program {
         seeds.extend(info.function_symbols.iter().map(|s| s.address));
         seeds.extend(info.exports.iter().map(|e| e.address).filter(|&a| a != 0));
         seeds.extend(info.function_starts.iter().copied());
+        // ARM/Thumb function addresses carry the Thumb state in bit 0; the real code is even.
+        if matches!(isa, Isa::Arm32 | Isa::Thumb) {
+            seeds.iter_mut().for_each(|a| *a &= !1);
+        }
         let known_entries: HashSet<u64> = seeds.iter().copied().collect();
 
         p.explore(seeds.clone(), &known_entries, &imports);
@@ -768,10 +789,36 @@ impl Program {
         }
     }
 
-    /// Decodes the instruction at `addr` from the file's bytes.
+    /// The instruction state to decode `addr` in. For ARM this is the mode (`Arm32`/`Thumb`) the
+    /// mapping symbols assign to the region; for every other ISA it is just `self.isa`.
+    pub fn isa_at(&self, addr: u64) -> Isa {
+        match self.isa {
+            Isa::Arm32 | Isa::Thumb => match self.arm_mode_at(addr) {
+                Some(true) => Isa::Thumb,
+                Some(false) => Isa::Arm32,
+                None => self.isa,
+            },
+            other => other,
+        }
+    }
+
+    /// Whether `addr` is Thumb per the mapping symbols (the last `$a`/`$t` at or before it).
+    fn arm_mode_at(&self, addr: u64) -> Option<bool> {
+        if self.arm_modes.is_empty() {
+            return None;
+        }
+        match self.arm_modes.binary_search_by_key(&addr, |&(a, _)| a) {
+            Ok(i) => Some(self.arm_modes[i].1),
+            Err(0) => None,
+            Err(i) => Some(self.arm_modes[i - 1].1),
+        }
+    }
+
+    /// Decodes the instruction at `addr` from the file's bytes, in the right instruction state.
     pub fn decode(&self, addr: u64) -> Option<Insn> {
-        let bytes = self.memory.read(addr, self.isa.max_len())?;
-        orress_arch::decode(self.isa, bytes, addr)
+        let isa = self.isa_at(addr);
+        let bytes = self.memory.read(addr, isa.max_len())?;
+        orress_arch::decode(isa, bytes, addr)
     }
 
     pub fn name(&self, addr: u64) -> Option<&Name> {

@@ -173,6 +173,31 @@ pub fn function_symbols(file: &object::File<'_>) -> Vec<NamedAddress> {
     out
 }
 
+/// ARM mapping symbols: `$a` (ARM code), `$t` (Thumb code) and their numbered variants (`$a.0`).
+/// Returns `(address, is_thumb)` at each ARM/Thumb transition, sorted by address — the analysis
+/// uses this to decode each region in the right instruction state. `$d` (data/literal pools) is
+/// ignored: those sit past a block terminator, so the CFG walk never decodes them.
+pub fn arm_mapping_symbols(file: &object::File<'_>) -> Vec<(u64, bool)> {
+    let mut out: Vec<(u64, bool)> = file
+        .symbols()
+        .chain(file.dynamic_symbols())
+        .filter_map(|s| {
+            let name = s.name().ok()?;
+            let thumb = match name {
+                "$t" => true,
+                "$a" => false,
+                _ if name.starts_with("$t.") => true,
+                _ if name.starts_with("$a.") => false,
+                _ => return None,
+            };
+            Some((s.address(), thumb))
+        })
+        .collect();
+    out.sort_by_key(|&(a, _)| a);
+    out.dedup_by_key(|&mut (a, _)| a);
+    out
+}
+
 /// x64 PE: every non-leaf function has a RUNTIME_FUNCTION entry in the exception
 /// directory (.pdata), so this lists function starts even in stripped binaries.
 pub fn pe_pdata_starts(
