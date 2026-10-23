@@ -479,6 +479,12 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
         "Version and license information.",
     )
     .register(
+        "help::SupportKofi",
+        "Support ORRESS on Ko-fi…",
+        "Open the project's Ko-fi page in your browser — ORRESS is free and open source; \
+         donations and sponsorships keep it moving.",
+    )
+    .register(
         "debug::Continue",
         "Debug: Continue",
         "Let the stopped program run on until it hits the next breakpoint or ends. Shortcut: F5          in the Debugger or Debug panel.",

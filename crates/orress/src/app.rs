@@ -13,6 +13,8 @@ use crate::actions;
 
 const WORKSPACE_KEY: &str = "orress.workspace";
 const TOAST_SECONDS: f64 = 6.0;
+/// The project's Ko-fi page, opened from the About window, the Welcome screen and the Help menu.
+const KOFI_URL: &str = "https://ko-fi.com/okiedocus";
 
 struct Toast {
     text: String,
@@ -235,6 +237,20 @@ impl OrressApp {
                 .load_texture("orress-logo", image, egui::TextureOptions::LINEAR);
             cc.egui_ctx
                 .data_mut(|d| d.insert_temp(egui::Id::new("orress::logo"), tex));
+        }
+        // The official "Support me on Ko-fi" badge, shown on the About and Welcome screens.
+        if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!(
+            "../../../assets/support_me_on_kofi_badge_dark.png"
+        )) {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [icon.width as usize, icon.height as usize],
+                &icon.rgba,
+            );
+            let tex = cc
+                .egui_ctx
+                .load_texture("orress-kofi", image, egui::TextureOptions::LINEAR);
+            cc.egui_ctx
+                .data_mut(|d| d.insert_temp(egui::Id::new("orress::kofi_badge"), tex));
         }
         for file in cli_files {
             app.open_file(file);
@@ -1126,6 +1142,7 @@ impl OrressApp {
             "help::Keybindings" => self.workspace.open(TabKind::Keybindings),
             "help::OpenConfigFolder" => self.open_config_folder(ctx),
             "help::About" => self.show_about = true,
+            "help::SupportKofi" => ctx.open_url(egui::OpenUrl::new_tab(KOFI_URL)),
             "app::Quit" => self.request_quit(ctx),
             "debug::Continue" => self.debug_command(ctx, orress_views::DebugAction::Continue),
             "debug::StepOver" => self.debug_command(ctx, orress_views::DebugAction::StepOver),
@@ -1437,6 +1454,8 @@ impl OrressApp {
                     self.menu_entry(ui, "help::Welcome", &mut clicked);
                     self.menu_entry(ui, "help::OpenConfigFolder", &mut clicked);
                     self.menu_entry(ui, "help::About", &mut clicked);
+                    ui.separator();
+                    self.menu_entry(ui, "help::SupportKofi", &mut clicked);
                 });
             });
         });
@@ -1577,7 +1596,51 @@ impl OrressApp {
                         RichText::new(format!("Config: {}", paths.config_dir.display())).weak(),
                     );
                 }
+
+                ui.add_space(14.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(
+                            "ORRESS is free and open source. If it helps you, you can support \
+                             its development:",
+                        )
+                        .weak(),
+                    );
+                    ui.add_space(10.0);
+                    Self::kofi_badge(ui, 232.0);
+                });
             });
+    }
+
+    /// Draws the official "Support me on Ko-fi" badge as a borderless image button (or a text
+    /// fallback before the texture is ready), and opens the Ko-fi page when it is clicked.
+    fn kofi_badge(ui: &mut egui::Ui, width: f32) {
+        let clicked = if let Some(tex) = ui
+            .ctx()
+            .data(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("orress::kofi_badge")))
+        {
+            let [tw, th] = tex.size();
+            let height = width * th as f32 / tw.max(1) as f32;
+            ui.add(
+                egui::Image::new(egui::load::SizedTexture::new(
+                    tex.id(),
+                    egui::vec2(width, height),
+                ))
+                .sense(egui::Sense::click()),
+            )
+            .on_hover_text("ko-fi.com/okiedocus")
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        } else {
+            ui.button("\u{2615}  Support ORRESS on Ko-fi")
+                .on_hover_text("ko-fi.com/okiedocus")
+                .clicked()
+        };
+        if clicked {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+        }
     }
 
     fn toasts_ui(&mut self, ctx: &Context) {
