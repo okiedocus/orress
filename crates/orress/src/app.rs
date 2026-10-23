@@ -527,8 +527,55 @@ impl OrressApp {
                 return;
             }
         };
+        self.apply_imported(ctx, imported, "DWARF debug info");
+    }
+
+    /// Imports types and function prototypes from a Windows `.pdb` the user picks. The open
+    /// binary (the PE the PDB belongs to) supplies the image base and pointer width, so the
+    /// PDB's procedure RVAs become the load addresses the catalog pins prototypes by.
+    fn import_pdb(&mut self, ctx: &Context) {
+        let Some((image_base, ptr_width)) =
+            self.docs.active().and_then(|d| d.analysis()).map(|a| {
+                let pw = a.info.bits.map(|b| u64::from(b) / 8).unwrap_or(8).max(1);
+                (a.info.image_base, pw)
+            })
+        else {
+            self.notify(ctx, "Open the binary the PDB belongs to first.", true);
+            return;
+        };
+
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("PDB", &["pdb"])
+            .set_title("Import a Windows PDB")
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.notify(ctx, format!("Could not read file: {e}"), true);
+                return;
+            }
+        };
+
+        match orress_pdb::import(&bytes, image_base, ptr_width) {
+            Ok(imported) => self.apply_imported(ctx, imported, "PDB"),
+            Err(e) => self.notify(ctx, e, true),
+        }
+    }
+
+    /// Applies an imported type/prototype set ([`orress_project::Imported`], from DWARF or PDB)
+    /// to the active document: types go through [the cycle-aware catalog loader], and each
+    /// prototype is pinned only where a function entry actually exists. `source` names the
+    /// origin for the status notice.
+    fn apply_imported(&mut self, ctx: &Context, imported: orress_project::Imported, source: &str) {
         if imported.types.is_empty() && imported.protos.is_empty() {
-            self.notify(ctx, "No DWARF debug info found.", true);
+            self.notify(
+                ctx,
+                format!("No types or functions found in the {source}."),
+                true,
+            );
             return;
         }
 
@@ -541,7 +588,7 @@ impl OrressApp {
             .unwrap_or_default();
 
         let total_protos = imported.protos.len();
-        let orress_dwarf::Imported {
+        let orress_project::Imported {
             types,
             protos,
             skipped,
@@ -565,7 +612,7 @@ impl OrressApp {
         let skipped_total = skipped + def_skipped;
         let mut note = format!("Imported {added} type(s) and {applied} prototype(s)");
         if applied < total_protos {
-            note.push_str(&format!(" (of {total_protos} in the debug info)"));
+            note.push_str(&format!(" (of {total_protos} in the {source})"));
         }
         if skipped_total > 0 {
             note.push_str(&format!("; skipped {skipped_total} declaration(s)"));
@@ -988,6 +1035,7 @@ impl OrressApp {
             "analysis::GenerateSignatures" => self.generate_signatures(ctx),
             "types::ImportHeader" => self.import_header(ctx),
             "types::ImportDwarf" => self.import_dwarf(ctx),
+            "types::ImportPdb" => self.import_pdb(ctx),
             "annotations::Import" => self.import_annotations(ctx),
             "annotations::Export" => self.export_annotations(ctx),
             "hex::GoTo" => self.hex_command(ctx, ViewCommand::GoTo),
@@ -1372,6 +1420,7 @@ impl OrressApp {
                     self.menu_entry(ui, "analysis::GenerateSignatures", &mut clicked);
                     self.menu_entry(ui, "types::ImportHeader", &mut clicked);
                     self.menu_entry(ui, "types::ImportDwarf", &mut clicked);
+                    self.menu_entry(ui, "types::ImportPdb", &mut clicked);
                     self.menu_entry(ui, "annotations::Import", &mut clicked);
                     self.menu_entry(ui, "annotations::Export", &mut clicked);
                     ui.separator();

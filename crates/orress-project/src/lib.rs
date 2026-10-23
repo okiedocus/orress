@@ -21,6 +21,29 @@ use orress_bytes::strings::FoundString;
 use orress_loaders::BinaryInfo;
 pub use types::{FieldDef, FuncProto, LaidField, Prim, TypeCatalog, TypeRef, UserType, references};
 
+/// The result of importing debug info (DWARF, PDB, …) from a binary: the shared contract the
+/// format-specific importer crates produce and [`Document::define_types`] / [`Document::set_prototype`]
+/// consume. Keeping it here lets every importer speak one vocabulary.
+#[derive(Debug, Default, Clone)]
+pub struct Imported {
+    /// Recovered types, de-duplicated by name (first definition wins).
+    pub types: Vec<UserType>,
+    /// Function prototypes keyed by entry address.
+    pub protos: Vec<(u64, FuncProto)>,
+    /// How many declarations were skipped as unrepresentable (bitfields, packed layouts, …).
+    pub skipped: usize,
+}
+
+/// Whether a debug-info name is usable as a catalog identifier. The catalog forbids spaces and
+/// most punctuation (see [`validate_name`]), so names like `unsigned int` or `std::vector<T, A>`
+/// are rejected. Shared by the importer crates so they agree on what a nameable type is.
+pub fn is_catalog_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && validate_name(name).is_ok()
+}
+
 /// Navigation history depth.
 const MAX_HISTORY: usize = 200;
 

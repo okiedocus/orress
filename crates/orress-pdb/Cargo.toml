@@ -1,0 +1,17 @@
+[package]
+name = "orress-pdb"
+description = "Import Windows PDB debug info (structs/unions/enums + function prototypes) into the type catalog — pure Rust, no C"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orress-project.workspace = true
+pdb.workspace = true

@@ -21,21 +21,12 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use object::{Object, ObjectSection};
-use orress_project::{FieldDef, FuncProto, Prim, TypeRef, UserType};
+use orress_project::{FieldDef, FuncProto, Prim, TypeRef, UserType, is_catalog_name};
+
+pub use orress_project::Imported;
 
 #[cfg(test)]
 mod tests;
-
-/// The result of importing one binary's DWARF.
-#[derive(Debug, Default, Clone)]
-pub struct Imported {
-    /// Recovered types, in DIE order, de-duplicated by name (first definition wins).
-    pub types: Vec<UserType>,
-    /// Function prototypes keyed by entry address (`DW_AT_low_pc`).
-    pub protos: Vec<(u64, FuncProto)>,
-    /// How many declarations were skipped as unrepresentable (bitfields, packed structs, …).
-    pub skipped: usize,
-}
 
 /// Whether `bytes` is an object file that carries DWARF type/debug info.
 pub fn has_debug_info(bytes: &[u8]) -> bool {
@@ -609,15 +600,4 @@ fn uint_prim(size: u64) -> Option<Prim> {
         8 => Prim::U64,
         _ => return None,
     })
-}
-
-/// Whether a DWARF name is usable as a catalog identifier (the catalog forbids spaces and most
-/// punctuation, so names like `unsigned int` or `std::vector<T, A>` are rejected).
-fn is_catalog_name(name: &str) -> bool {
-    let name = name.trim();
-    !name.is_empty()
-        && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
-        && name
-            .chars()
-            .all(|c| c.is_alphanumeric() || "_@$.:?<>~".contains(c))
 }

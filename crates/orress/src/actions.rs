@@ -72,6 +72,13 @@ pub fn registry(themes: &[Theme]) -> ActionRegistry {
          prototypes to the matching functions.",
     )
     .register(
+        "types::ImportPdb",
+        "Import Debug Info (PDB)…",
+        "Read types and function prototypes from a Windows `.pdb` into the catalog and pin the \
+         prototypes to the matching functions (open the PE the PDB belongs to first, for its \
+         image base).",
+    )
+    .register(
         "annotations::Import",
         "Import Names/Comments…",
         "Bring names and comments into the open binary from a file — the ORRESS JSON export, or \

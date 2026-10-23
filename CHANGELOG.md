@@ -80,6 +80,14 @@ All notable changes to ORRESS are documented here. The format follows
   and packed/overlapping layouts the model cannot represent are skipped and counted. New
   pure-Rust `orress-dwarf` crate (`gimli` reader, already in the tree); C-header import now
   shares the same cycle-aware catalog loader.
+- **Import Windows PDB**: **Tools ▸ Import Debug Info (PDB)…** does the same for a Microsoft
+  `.pdb` — the companion debug file for a PE. Open the PE first (it supplies the image base, so
+  the PDB's procedure RVAs become the load addresses prototypes pin to), then pick the `.pdb`:
+  its structs, unions and enums land in the catalog (with the same `_padN` layout fidelity, and
+  forward-declared member types sized from their real definitions), and its procedures become
+  prototypes keyed by address (return type and parameter *types*, with positional names). New
+  pure-Rust `orress-pdb` crate (the `pdb` crate reader). DWARF and PDB now share one importer
+  contract. Typedefs and real PDB parameter names are future extensions.
 - **Function signatures (FLIRT-style)**: identify known library functions (libc, the
   Rust/MSVC runtime, …) in a stripped binary by matching the leading bytes of each
   function, with relocatable call/jump operands masked so a function matches wherever it is

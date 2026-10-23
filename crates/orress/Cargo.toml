@@ -32,6 +32,7 @@ orress-academy.workspace = true
 orress-actions.workspace = true
 orress-project.workspace = true
 orress-dwarf.workspace = true
+orress-pdb.workspace = true
 orress-sig.workspace = true
 orress-views.workspace = true
 orress-lsp.workspace = true
