@@ -14,7 +14,7 @@ use crate::actions;
 const WORKSPACE_KEY: &str = "orress.workspace";
 const TOAST_SECONDS: f64 = 6.0;
 /// The project's Ko-fi page, opened from the About window, the Welcome screen and the Help menu.
-const KOFI_URL: &str = "https://ko-fi.com/okiedocus";
+const KOFI_URL: &str = "https://ko-fi.com/okiedocus/tip";
 
 struct Toast {
     text: String,
@@ -238,19 +238,30 @@ impl OrressApp {
             cc.egui_ctx
                 .data_mut(|d| d.insert_temp(egui::Id::new("orress::logo"), tex));
         }
-        // The official "Support me on Ko-fi" badge, shown on the About and Welcome screens.
-        if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!(
-            "../../../assets/support_me_on_kofi_badge_dark.png"
-        )) {
-            let image = egui::ColorImage::from_rgba_unmultiplied(
-                [icon.width as usize, icon.height as usize],
-                &icon.rgba,
-            );
-            let tex = cc
-                .egui_ctx
-                .load_texture("orress-kofi", image, egui::TextureOptions::LINEAR);
-            cc.egui_ctx
-                .data_mut(|d| d.insert_temp(egui::Id::new("orress::kofi_badge"), tex));
+        // The official Ko-fi artwork: the rounded badge for the About window, and the slim pill
+        // for the always-visible footer of the left project dock. Stashed as textures the way
+        // the logo is, so any view can show them.
+        for (key, bytes) in [
+            (
+                "orress::kofi_badge",
+                &include_bytes!("../../../assets/support_me_on_kofi_badge_dark.png")[..],
+            ),
+            (
+                "orress::kofi_pill",
+                &include_bytes!("../../../assets/support_me_on_kofi_dark.png")[..],
+            ),
+        ] {
+            if let Ok(icon) = eframe::icon_data::from_png_bytes(bytes) {
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [icon.width as usize, icon.height as usize],
+                    &icon.rgba,
+                );
+                let tex = cc
+                    .egui_ctx
+                    .load_texture(key, image, egui::TextureOptions::LINEAR);
+                cc.egui_ctx
+                    .data_mut(|d| d.insert_temp(egui::Id::new(key), tex));
+            }
         }
         for file in cli_files {
             app.open_file(file);
@@ -1630,12 +1641,12 @@ impl OrressApp {
                 ))
                 .sense(egui::Sense::click()),
             )
-            .on_hover_text("ko-fi.com/okiedocus")
+            .on_hover_text("ko-fi.com/okiedocus/tip")
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         } else {
             ui.button("\u{2615}  Support ORRESS on Ko-fi")
-                .on_hover_text("ko-fi.com/okiedocus")
+                .on_hover_text("ko-fi.com/okiedocus/tip")
                 .clicked()
         };
         if clicked {

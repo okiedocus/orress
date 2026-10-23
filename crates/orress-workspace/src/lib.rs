@@ -860,6 +860,9 @@ impl Workspace {
             .default_size(240.0)
             .min_size(140.0)
             .show_collapsible(ui, &mut self.left_open, |ui| {
+                // A slim Ko-fi button pinned to the dock's foot — reserve it first so the dock
+                // tabs fill the space above it.
+                kofi_dock_footer(ui);
                 dock_area(ui, Slot::Left, &mut self.left);
             });
         egui::Panel::right("orress::right_dock")
@@ -892,6 +895,40 @@ impl Workspace {
             viewer.env.docs.active = Some(path);
         }
     }
+}
+
+/// A slim "Support me on Ko-fi" pill pinned to the bottom of the left project dock, centered —
+/// always visible (unlike the Welcome tab), unobtrusive, and opening the Ko-fi page when
+/// clicked. Silent until its texture (loaded at startup) is ready.
+fn kofi_dock_footer(ui: &mut Ui) {
+    let Some(tex) = ui
+        .ctx()
+        .data(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("orress::kofi_pill")))
+    else {
+        return;
+    };
+    egui::Panel::bottom("orress::kofi_footer")
+        .resizable(false)
+        .show(ui, |ui| {
+            ui.add_space(8.0);
+            ui.vertical_centered(|ui| {
+                let [tw, th] = tex.size();
+                let w = (ui.available_width() - 12.0).clamp(90.0, 220.0);
+                let h = w * th as f32 / tw.max(1) as f32;
+                let resp = ui
+                    .add(
+                        egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(w, h)))
+                            .sense(egui::Sense::click()),
+                    )
+                    .on_hover_text("ko-fi.com/okiedocus/tip")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if resp.clicked() {
+                    ui.ctx()
+                        .open_url(egui::OpenUrl::new_tab("https://ko-fi.com/okiedocus/tip"));
+                }
+            });
+            ui.add_space(8.0);
+        });
 }
 
 /// The focused leaf, falling back to the main surface's last focused node: a fresh

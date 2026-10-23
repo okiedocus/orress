@@ -11,7 +11,7 @@ All notable changes to ORRESS are documented here. The format follows
 - **Support ORRESS on Ko-fi**: a donate/sponsor button (the official "Support me on Ko-fi"
   badge) now appears on the **About** window and the **Welcome** screen, with a matching
   **Help ▸ Support ORRESS on Ko-fi…** menu item. ORRESS stays free and open source; this just
-  opens `ko-fi.com/okiedocus` in your browser for anyone who wants to chip in.
+  opens `ko-fi.com/okiedocus/tip` in your browser for anyone who wants to chip in.
 - **MIPS decompilation**: the decompiler now lifts MIPS32 (big- and little-endian), so MIPS
   functions become readable pseudocode. **Branch delay slots are handled correctly** — the
   CFG keeps the delay-slot instruction in the branch's block so it runs on both paths (this

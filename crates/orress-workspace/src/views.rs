@@ -266,34 +266,6 @@ fn with_context(label: String, ctx: KeyContext) -> String {
     }
 }
 
-/// The clickable "Support me on Ko-fi" badge (or a text fallback before its texture is loaded),
-/// emitting the Ko-fi action so the app opens the page.
-fn kofi_support(ui: &mut Ui, env: &mut TabEnv<'_>) {
-    let clicked = if let Some(tex) = ui
-        .ctx()
-        .data(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("orress::kofi_badge")))
-    {
-        let [tw, th] = tex.size();
-        let width = 188.0;
-        let height = width * th as f32 / tw.max(1) as f32;
-        ui.add(
-            egui::Image::new(egui::load::SizedTexture::new(
-                tex.id(),
-                egui::vec2(width, height),
-            ))
-            .sense(egui::Sense::click()),
-        )
-        .on_hover_text("ko-fi.com/okiedocus")
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-    } else {
-        ui.button("\u{2615}  Support ORRESS on Ko-fi").clicked()
-    };
-    if clicked {
-        env.emitted.push(ActionId::from("help::SupportKofi"));
-    }
-}
-
 /// A button that emits an action, with its shortcut and explanation.
 fn action_button(ui: &mut Ui, env: &mut TabEnv<'_>, action: &str, label: &str) {
     let id = ActionId::from(action);
@@ -369,14 +341,6 @@ fn welcome(ui: &mut Ui, env: &mut TabEnv<'_>) {
                         env.open_requests.push(path.clone());
                     }
                 }
-
-                ui.add_space(16.0);
-                ui.label(RichText::new("Support ORRESS").strong().size(16.0));
-                ui.label(muted(
-                    "ORRESS is free and open source. A coffee keeps it brewing.",
-                ));
-                ui.add_space(6.0);
-                kofi_support(ui, env);
 
                 let ui = &mut cols[1];
                 ui.label(
