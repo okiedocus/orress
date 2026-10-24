@@ -16,6 +16,7 @@
 pub mod cc;
 mod exec;
 pub mod expr;
+mod smt;
 mod solve;
 
 pub use exec::{SymError, SymExec};
@@ -50,7 +51,7 @@ pub fn solve_check(
     let mut sx = SymExec::new(mem, input_base, input_len, target, avoid);
     sx.set_hooks(hooks);
     sx.run_check(func, args, abi)?;
-    let result = solve::solve(&sx.constraints, input_len as usize);
+    let result = solve::solve_with_fallback(&sx.constraints, input_len as usize);
     let smt2 = expr::to_smt2(&sx.constraints, input_len);
     let checks = sx
         .constraints
@@ -87,7 +88,7 @@ pub fn solve_check_explore(
     let mut sx = SymExec::new(mem, input_base, input_len, target, avoid);
     sx.set_hooks(hooks);
     let win = sx.run_explore(func, args, abi, max_states, max_steps)?;
-    let result = solve::solve(&win.constraints, input_len as usize);
+    let result = solve::solve_with_fallback(&win.constraints, input_len as usize);
     let smt2 = expr::to_smt2(&win.constraints, input_len);
     let checks = win
         .constraints
@@ -122,7 +123,7 @@ pub fn solve_check_return(
     sx.set_hooks(hooks);
     sx.run_check(func, args, abi)?;
     sx.constrain_return_nonzero();
-    let result = solve::solve(&sx.constraints, input_len as usize);
+    let result = solve::solve_with_fallback(&sx.constraints, input_len as usize);
     let smt2 = expr::to_smt2(&sx.constraints, input_len);
     let checks = sx
         .constraints

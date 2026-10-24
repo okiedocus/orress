@@ -20,6 +20,28 @@ pub struct SolveResult {
     pub message: String,
 }
 
+/// [`solve`], then — if it came up short — the external z3 fallback. z3's model is *verified*
+/// against the real constraints before it is trusted, so an assertion z3 saw in simplified form
+/// (or not at all, if it was too deep for the SMT export) can never turn into a false solve. A
+/// no-op beyond the built-in result when z3 isn't installed.
+pub fn solve_with_fallback(constraints: &[Expr], n: usize) -> SolveResult {
+    let built_in = solve(constraints, n);
+    if built_in.complete {
+        return built_in;
+    }
+    if let Some(model) = crate::smt::solve_z3(constraints, n as u32)
+        && model.len() == n
+        && constraints.iter().all(|c| c.eval(&model) != 0)
+    {
+        return SolveResult {
+            input: model,
+            complete: true,
+            message: "solved by z3".into(),
+        };
+    }
+    built_in
+}
+
 /// Finds an `n`-byte input satisfying every constraint, by solving each connected group of
 /// bytes with bounded brute-force.
 pub fn solve(constraints: &[Expr], n: usize) -> SolveResult {

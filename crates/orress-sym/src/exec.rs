@@ -431,8 +431,10 @@ impl SymExec {
         while let Some(mut st) = frontier.pop() {
             loop {
                 if st.rip == st.target {
-                    // Reached the goal: is this path's accumulated condition satisfiable?
-                    if crate::solve::solve(&st.constraints, input_len).complete {
+                    // Reached the goal: is this path's accumulated condition satisfiable? (Built-in
+                    // solver, then the z3 fallback — so a checksum the built-in can't crack but z3
+                    // can still counts as a solved path.)
+                    if crate::solve::solve_with_fallback(&st.constraints, input_len).complete {
                         return Some(st);
                     }
                     break; // unsatisfiable path condition — drop it
