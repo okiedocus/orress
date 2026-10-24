@@ -14,6 +14,22 @@ mod store;
 pub mod vbox;
 mod vm;
 
+/// Cap *this* process's committed memory (Windows Job Object), best-effort — returns false if the
+/// OS refuses or off Windows. Protects the analyzer itself: a malicious sample it only *parses*
+/// (never runs) can still provoke a giant allocation from a bogus header, and this makes that fail
+/// in-process and abort this process instead of exhausting host RAM.
+pub fn limit_self_memory(bytes: usize) -> bool {
+    #[cfg(windows)]
+    {
+        job::limit_current_process_memory(bytes)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = bytes;
+        false
+    }
+}
+
 pub use etw::{ActivityEvent, Category, Monitor};
 pub use fakenet::{Config as FakeNetConfig, FakeNet, NetEvent, NetKind};
 pub use guard::{Decision, Policy, guard};

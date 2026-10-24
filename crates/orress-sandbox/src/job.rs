@@ -12,17 +12,30 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_JOB_MEMORY,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
-use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+};
 use windows::core::PCWSTR;
 
 /// `CREATE_SUSPENDED`, for `CommandExt::creation_flags`.
 pub const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
-/// An anonymous job object that kills every process in it when terminated or closed.
+/// Total committed memory the whole job may use (1 GiB). A sample's "memory bomb" that tries to
+/// exhaust host RAM hits this cap and fails its own allocations instead of OOM-ing the machine.
+/// Crackmes need a tiny fraction of this; raise it if a legitimate heavy sample needs more.
+const JOB_MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
+/// Most processes allowed alive in the job at once. The sample plus a little headroom — enough for
+/// a normal helper child, far below a "process explosion" fork bomb (which tries to spawn
+/// thousands), so the bomb's extra `CreateProcess` calls simply fail.
+const JOB_ACTIVE_PROCESS_LIMIT: u32 = 32;
+
+/// An anonymous job object that caps a sample's whole process tree (memory, process count) and
+/// kills every process in it when terminated or closed.
 pub struct Job(HANDLE);
 
 // The handle is a plain kernel object handle; using it from another thread is fine.
@@ -35,7 +48,15 @@ impl Job {
         let h = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.ok()?;
         let job = Job(h);
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // Kill the whole tree when the job is closed; cap total memory and live process count so a
+        // sample cannot OOM the host or fork-bomb it; and kill (not WER-popup) a process that
+        // faults, so an unattended batch never stalls on a crash dialog.
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_JOB_MEMORY
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        info.JobMemoryLimit = JOB_MEMORY_LIMIT;
+        info.BasicLimitInformation.ActiveProcessLimit = JOB_ACTIVE_PROCESS_LIMIT;
         // SAFETY: `info` is a correctly sized, initialized extended-limit struct for this
         // information class, and outlives the call.
         unsafe {
@@ -73,6 +94,53 @@ impl Drop for Job {
         unsafe {
             let _ = CloseHandle(self.0);
         }
+    }
+}
+
+/// Cap the *current* process's committed memory via a Job Object, best-effort (returns false if
+/// the OS refuses). A runaway allocation — e.g. a malicious sample's static analysis provoking a
+/// giant allocation from a bogus PE header — then fails in-process and aborts *this* process
+/// instead of exhausting host RAM. This complements the per-sample caps on launched children:
+/// it protects the analyzer itself, which never executes the sample but still parses it.
+///
+/// The job carries only a memory limit (plus die-on-unhandled-exception); it is deliberately
+/// **not** `KILL_ON_JOB_CLOSE` and has **no** active-process limit, since the analyzer legitimately
+/// spawns children (the sandbox launcher, tool servers). The handle is leaked on success so the
+/// limit lasts the whole process lifetime; the OS reclaims the job when the process exits.
+pub fn limit_current_process_memory(bytes: usize) -> bool {
+    // SAFETY: default security, no name; the handle is owned here until it is closed or leaked.
+    let Ok(h) = (unsafe { CreateJobObjectW(None, PCWSTR::null()) }) else {
+        return false;
+    };
+    let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    info.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+    info.JobMemoryLimit = bytes;
+    // SAFETY: `info` is a correctly sized, initialized extended-limit struct for this information
+    // class, and outlives the call.
+    let set = unsafe {
+        SetInformationJobObject(
+            h,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    }
+    .is_ok();
+    // SAFETY: GetCurrentProcess returns the current-process pseudo-handle; assign ourselves to the
+    // job just configured. Only attempt if the limit was set.
+    let assigned = set && unsafe { AssignProcessToJobObject(h, GetCurrentProcess()) }.is_ok();
+    if assigned {
+        // Keep the cap for the whole process: never close this handle (the job stays while this
+        // process is a member, so the limit holds; closing it is unnecessary and we avoid any race).
+        std::mem::forget(Job(h));
+        true
+    } else {
+        // SAFETY: closing the handle we own, exactly once; nothing is assigned to the job.
+        unsafe {
+            let _ = CloseHandle(h);
+        }
+        false
     }
 }
 
