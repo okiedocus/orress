@@ -118,23 +118,32 @@ pub enum Stub {
 pub fn stub_for(name: &str) -> Stub {
     match name.trim_start_matches('_') {
         "strlen" => Stub::Strlen,
-        "strcmp" => Stub::Strcmp,
-        "strncmp" => Stub::Strncmp,
+        // Byte-string comparisons. Case-insensitive and Windows-named variants map to the same
+        // stubs: the compare-hook only needs their operands recorded (the exact case-folding of the
+        // return value doesn't affect which value the input was checked against).
+        "strcmp" | "strcasecmp" | "stricmp" | "strcmpi" | "lstrcmp" | "lstrcmpA" | "lstrcmpiA" => {
+            Stub::Strcmp
+        }
+        "strncmp" | "strncasecmp" | "strnicmp" => Stub::Strncmp,
         "memcmp" | "bcmp" => Stub::Memcmp,
         "memcpy" | "memmove" => Stub::Memcpy,
         "memset" => Stub::Memset,
         "strcpy" => Stub::Strcpy,
-        "atoi" | "strtol" => Stub::Atoi,
+        "atoi" | "strtol" | "strtoul" => Stub::Atoi,
         "malloc" | "calloc" => Stub::Malloc,
-        // Input readers: mark the destination buffer as symbolic input. Buffer-pointer argument
-        // index differs per function (and `scanf`'s is its first variadic target, one %s assumed).
+        // Input readers: mark the destination buffer as symbolic input (and, under the compare-hook,
+        // write the seed into it). Buffer-pointer argument index differs per function.
         "gets" | "gets_s" | "fgets" => Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer },
         "scanf" | "isoc99_scanf" | "scanf_s" => {
             Stub::ReadInput { buf_arg: 1, ret: InputReturn::Count(1) }
         }
+        // fscanf(FILE*, fmt, dst): the first %s target is the third argument.
+        "fscanf" | "isoc99_fscanf" => Stub::ReadInput { buf_arg: 2, ret: InputReturn::Count(1) },
         "read" => Stub::ReadInput { buf_arg: 1, ret: InputReturn::Len },
         "fread" => Stub::ReadInput { buf_arg: 0, ret: InputReturn::Len },
         "ReadConsoleA" | "ReadConsoleW" => Stub::ReadInput { buf_arg: 1, ret: InputReturn::Count(1) },
+        // ReadFile(handle, buf, n, &read, ov): the destination buffer is the second argument.
+        "ReadFile" => Stub::ReadInput { buf_arg: 1, ret: InputReturn::Count(1) },
         _ => Stub::Return(0),
     }
 }

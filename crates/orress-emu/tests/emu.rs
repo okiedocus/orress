@@ -495,6 +495,19 @@ fn stub_for_maps_libc_names() {
     assert_eq!(orress_emu::stub_for("_strcmp"), Stub::Strcmp);
     assert_eq!(orress_emu::stub_for("memmove"), Stub::Memcpy);
     assert_eq!(orress_emu::stub_for("puts"), Stub::Return(0));
+    // Case-insensitive / Windows compare variants record their operands like strcmp/strncmp.
+    assert_eq!(orress_emu::stub_for("_stricmp"), Stub::Strcmp);
+    assert_eq!(orress_emu::stub_for("lstrcmpA"), Stub::Strcmp);
+    assert_eq!(orress_emu::stub_for("strncasecmp"), Stub::Strncmp);
+    // More input readers seed their destination buffer.
+    assert_eq!(
+        orress_emu::stub_for("ReadFile"),
+        Stub::ReadInput { buf_arg: 1, ret: orress_emu::InputReturn::Count(1) }
+    );
+    assert_eq!(
+        orress_emu::stub_for("__isoc99_fscanf"),
+        Stub::ReadInput { buf_arg: 2, ret: orress_emu::InputReturn::Count(1) }
+    );
 }
 
 /// SSE2: a 16-byte slice comparison, exactly the shape Rust emits for `a == b` on `[u8; 16]`
