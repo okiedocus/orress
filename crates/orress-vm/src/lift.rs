@@ -243,13 +243,32 @@ pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<Vm
             }
         }
     }
-    if best.is_some() {
-        return best;
-    }
+    best
+}
 
-    // Fallback: the greedy single-path return solver can't discover a path that must loop N times
-    // on a symbolic condition (an input-length scan, a validation loop). Re-try with the path
-    // explorer, which forks the loop. Handles checks that read input internally (gets/scanf) too.
+/// Path-exploring return-model solve of `func_entry` — the expensive counterpart to
+/// [`solve_function`]. It forks symbolic branches, so it can crack a check whose accepting path
+/// must loop N times on a symbolic condition (an input-length scan, a validation loop) or that
+/// reads its input internally (gets/scanf) — which the greedy single-path [`solve_function`]
+/// cannot. Kept separate (not a fallback inside `solve_function`) because exploration is ~an order
+/// of magnitude slower; a bulk static pass uses `solve_function`, and only a deep/targeted pass
+/// opts into this.
+pub fn solve_function_explore(program: &Program, func_entry: u64, abi: Abi) -> Option<VmSolution> {
+    abi_for(program)?;
+    let func = program
+        .functions
+        .get(&func_entry)
+        .or_else(|| program.function_containing(func_entry))?;
+    let avoid: Vec<u64> = func
+        .blocks
+        .iter()
+        .filter(|b| verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start))
+        .map(|b| b.start)
+        .collect();
+    let input_base = input_placement(program);
+    let base_mem = emu_image(program);
+    let hooks = import_hooks(program);
+
     for input_len in 1..=MAX_LEN {
         let mut mem = base_mem.clone();
         mem.map_zeroed(input_base, u64::from(input_len) + 16);
