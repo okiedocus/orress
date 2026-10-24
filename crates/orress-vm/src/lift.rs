@@ -543,6 +543,71 @@ fn decode_block(program: &Program, b: &Block) -> Vec<iced_x86::Instruction> {
 /// overhang) would otherwise be unmapped — and guest writes to unmapped memory fault.
 const BSS_SLACK: u64 = 0x8000;
 
+/// What the **compare-hook** recovered from one emulated run: the input we seeded and the values the
+/// check compared that input against. See [`recover_by_compare`].
+#[derive(Debug, Clone)]
+pub struct CompareRecovery {
+    /// The concrete input seeded into every read (the "name" for a keygen; the probe for a password
+    /// check). All reads get the same bytes, so a keygen's serial = f(seed) is computed concretely.
+    pub seed: Vec<u8>,
+    /// Printable values the check compared the input against — the recovered key/serial candidates
+    /// (deduped, excluding the seed itself). For a password check this is the password; for a keygen
+    /// it is `f(seed)`, to be paired with `name = seed`.
+    pub keys: Vec<Vec<u8>>,
+}
+
+/// Seeds used by [`recover_by_compare`], a few lengths so a length-gate before the compare doesn't
+/// hide the oracle. Printable so a recovered-vs-seed comparison stays meaningful.
+const COMPARE_SEEDS: [&[u8]; 3] = [b"AAAAAAAAAAAAAAAA", b"AAAAAAAA", b"AAAA"];
+/// Step budget per compare-hook run — keygen check routines are small; this bounds runaway loops.
+const COMPARE_BUDGET: u64 = 2_000_000;
+
+/// Recover a key/serial by the **compare-hook**: seed a known input, emulate `func_entry` forward
+/// with [`orress_emu`], and read back the value(s) the code compared the input against via
+/// `strcmp`/`strncmp`/`memcmp`. This cracks the shapes symbolic solving struggles with — keygens
+/// (`serial = f(name)`, then `strcmp(entered, serial)`) and hardcoded-string password checks —
+/// because the expected value is *computed then compared* rather than branched on per byte.
+///
+/// Returns one [`CompareRecovery`] per seed length that produced at least one printable candidate
+/// (best/longest seed first). The keys are leads to be verified by running the binary, not
+/// self-verifying solves. Empty if the function reads/compares nothing we can observe.
+pub fn recover_by_compare(program: &Program, func_entry: u64, abi: Abi) -> Vec<CompareRecovery> {
+    let mut out = Vec::new();
+    for seed in COMPARE_SEEDS {
+        let mut emu = orress_emu::Emulator::new();
+        emu.mem = emu_image(program);
+        emu.hooks = import_hooks(program);
+        emu.budget = COMPARE_BUDGET;
+        emu.seed_input(seed.to_vec());
+        emu.record_compares(true);
+        // Run to the sentinel return. A fault/budget stop is fine: the compare may already have
+        // fired, and the recorder keeps every operand seen before the stop.
+        let _ = emu.call(func_entry, &[], abi);
+
+        let mut keys: Vec<Vec<u8>> = Vec::new();
+        for (a, b) in emu.compares() {
+            for operand in [a, b] {
+                if operand.as_slice() != seed
+                    && is_printable_key(operand)
+                    && !keys.contains(operand)
+                {
+                    keys.push(operand.clone());
+                }
+            }
+        }
+        if !keys.is_empty() {
+            out.push(CompareRecovery { seed: seed.to_vec(), keys });
+        }
+    }
+    out
+}
+
+/// Whether recovered bytes look like a real key: non-empty and all printable ASCII (a computed
+/// serial or hardcoded password), not binary filler a `memcmp` happened to see.
+fn is_printable_key(bytes: &[u8]) -> bool {
+    !bytes.is_empty() && bytes.iter().all(|&b| (0x20..=0x7e).contains(&b))
+}
+
 /// Builds an emulator memory image from the program's mapped regions (each followed by
 /// `BSS_SLACK` zeroed bytes where nothing else is mapped). The shared seeding step for every
 /// front end that runs a loaded program in `orress-emu` / `orress-sym`.

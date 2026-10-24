@@ -258,8 +258,9 @@ impl Abi {
     }
 }
 
-/// The address a called function "returns to"; the run stops when RIP reaches it.
-const SENTINEL: u64 = 0x1337_0000_0000_0000;
+/// The address a called function "returns to"; the run stops when RIP reaches it. Chosen to fit in
+/// 32 bits so a 32-bit cdecl `ret` pops it back intact (a 64-bit value would truncate to 0).
+const SENTINEL: u64 = 0x1337_0000;
 /// Where [`Emulator::setup_stack`] puts the stack top by default.
 const DEFAULT_STACK_TOP: u64 = 0x7fff_0000_0000;
 const DEFAULT_STACK_SIZE: u64 = 0x10_0000; // 1 MiB
@@ -280,6 +281,14 @@ pub struct Emulator {
     pub hooks: std::collections::HashMap<u64, Stub>,
     /// The next address `malloc` hands out (a simple bump allocator).
     heap: u64,
+    /// Concrete bytes an input-reading stub (gets/scanf/…) writes into its destination buffer, so
+    /// a keygen's serial algorithm runs *forward* on a known input. Empty = read nothing.
+    input_seed: Vec<u8>,
+    /// When set, every `strcmp`/`strncmp`/`memcmp` records its two operands here — the compare-hook
+    /// oracle: a check compares the input against the *expected* value, so the operand that isn't
+    /// the seed is the recovered key/serial.
+    record_compares: bool,
+    compares: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl Default for Emulator {
@@ -299,7 +308,30 @@ impl Emulator {
             abi: Abi::SysV,
             hooks: std::collections::HashMap::new(),
             heap: 0x2000_0000,
+            input_seed: Vec::new(),
+            record_compares: false,
+            compares: Vec::new(),
         }
+    }
+
+    /// Sets the concrete bytes each input-reading stub (gets/scanf/fgets/…) writes into its
+    /// destination buffer. With a seed set, a keygen's serial algorithm runs *forward* on a known
+    /// name, so the comparison that gates success sees the real expected serial — see [`compares`].
+    pub fn seed_input(&mut self, seed: impl Into<Vec<u8>>) {
+        self.input_seed = seed.into();
+    }
+
+    /// Turns the compare-hook oracle on/off. While on, every `strcmp`/`strncmp`/`memcmp` appends its
+    /// two operands to [`compares`](Self::compares).
+    pub fn record_compares(&mut self, on: bool) {
+        self.record_compares = on;
+    }
+
+    /// The operand pairs recorded by every string/memory compare since the last reset (oldest
+    /// first), when [`record_compares`](Self::record_compares) is on. A crackme checks the input
+    /// against the *expected* value, so the operand that isn't the seeded input is the key/serial.
+    pub fn compares(&self) -> &[(Vec<u8>, Vec<u8>)] {
+        &self.compares
     }
 
     /// Registers an import stub at `addr` (the address a call to that import reaches).
@@ -319,8 +351,32 @@ impl Emulator {
         out
     }
 
+    /// Stack-slot / pointer width in bytes for the current ABI (8 for 64-bit, 4 for 32-bit cdecl).
+    fn ptr(&self) -> u64 {
+        self.abi.ptr_size()
+    }
+
     fn arg(&self, i: usize) -> u64 {
-        self.abi.arg_reg(i).map(|r| self.cpu.reg(r)).unwrap_or(0)
+        if let Some(r) = self.abi.arg_reg(i) {
+            return self.cpu.reg(r);
+        }
+        // Stack-passed (cdecl: every argument). At stub entry RSP points at the return address the
+        // `call` pushed, so argument i sits at [RSP + ptr*(i+1)]. (Win64/SysV register args are
+        // handled above; their stack-spilled tail is rare in crackmes and left as 0 as before.)
+        if self.abi.stack_args() {
+            let ptr = self.abi.ptr_size();
+            let slot = self.cpu.rsp().wrapping_add(ptr * (i as u64 + 1));
+            return self.mem.read(slot, ptr as usize).unwrap_or(0);
+        }
+        0
+    }
+
+    /// Records a compare's operands when the oracle is on (see [`record_compares`]). Skips a pair
+    /// where either side is empty — a NUL/zero-length operand carries no key.
+    fn record_compare(&mut self, a: &[u8], b: &[u8]) {
+        if self.record_compares && !a.is_empty() && !b.is_empty() {
+            self.compares.push((a.to_vec(), b.to_vec()));
+        }
     }
 
     /// Applies an import stub: reads arguments, computes the result into RAX, and returns to
@@ -328,29 +384,41 @@ impl Emulator {
     pub(crate) fn apply_stub(&mut self, stub: &Stub) -> Result<(), EmuError> {
         let result = match stub {
             Stub::Return(v) => *v,
-            // Concrete emulation has no real stdin; leave the buffer as-is and return plausibly.
-            // (Symbolic execution is what turns the buffer into input — see the symbolic executor.)
-            Stub::ReadInput { buf_arg, ret } => match ret {
-                InputReturn::Buffer => self.arg(*buf_arg),
-                InputReturn::Count(n) => *n,
-                InputReturn::Len => 0,
-            },
+            // Concrete emulation has no real stdin. With a seed set (the compare-hook driver), write
+            // it into the destination buffer so a keygen runs forward on a known input; otherwise
+            // leave the buffer as-is. (Symbolic execution is what *symbolizes* the buffer instead.)
+            Stub::ReadInput { buf_arg, ret } => {
+                let buf = self.arg(*buf_arg);
+                if !self.input_seed.is_empty() && buf != 0 {
+                    let seed = self.input_seed.clone();
+                    self.mem.write_slice(buf, &seed)?;
+                    self.mem.write_u8(buf.wrapping_add(seed.len() as u64), 0)?;
+                }
+                match ret {
+                    InputReturn::Buffer => buf,
+                    InputReturn::Count(n) => *n,
+                    InputReturn::Len => self.input_seed.len() as u64,
+                }
+            }
             Stub::Strlen => self.read_cstr(self.arg(0), 1 << 20).len() as u64,
             Stub::Strcmp => {
                 let a = self.read_cstr(self.arg(0), 1 << 20);
                 let b = self.read_cstr(self.arg(1), 1 << 20);
+                self.record_compare(&a, &b);
                 cmp_result(&a, &b)
             }
             Stub::Strncmp => {
                 let n = self.arg(2) as usize;
                 let a = self.read_cstr(self.arg(0), n);
                 let b = self.read_cstr(self.arg(1), n);
+                self.record_compare(&a, &b);
                 cmp_result(&a, &b)
             }
             Stub::Memcmp => {
                 let n = self.arg(2) as usize;
                 let a = self.mem.read_vec(self.arg(0), n)?;
                 let b = self.mem.read_vec(self.arg(1), n)?;
+                self.record_compare(&a, &b);
                 cmp_result(&a, &b)
             }
             Stub::Memcpy => {
@@ -399,11 +467,12 @@ impl Emulator {
         Ok(())
     }
 
-    /// Pops the return address (used by stubs; mirrors a `ret`).
+    /// Pops the return address (used by stubs; mirrors a `ret`). Pointer-width per ABI.
     fn pop_ret(&mut self) -> Result<u64, EmuError> {
         let sp = self.cpu.rsp();
-        let v = self.mem.read(sp, 8)?;
-        self.cpu.set_rsp(sp.wrapping_add(8));
+        let ptr = self.ptr();
+        let v = self.mem.read(sp, ptr as usize)?;
+        self.cpu.set_rsp(sp.wrapping_add(ptr));
         Ok(v)
     }
 
@@ -447,7 +516,10 @@ impl Emulator {
         if n == 0 {
             return Err(EmuError::Fault(ip));
         }
-        let mut dec = iced_x86::Decoder::with_ip(64, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
+        // Decode at the ABI's bitness: a 32-bit cdecl binary must decode as 32-bit, or e.g.
+        // `inc edx` (0x42) is misread as a REX prefix. 64-bit ABIs decode as 64-bit.
+        let bits = if self.abi.ptr_size() == 4 { 32 } else { 64 };
+        let mut dec = iced_x86::Decoder::with_ip(bits, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
         let instr = dec.decode();
         if instr.is_invalid() {
             return Err(EmuError::InvalidInstruction(ip));
@@ -503,19 +575,20 @@ impl Emulator {
             }
         }
         let extra = args.get(nregs..).unwrap_or(&[]);
+        let ptr = abi.ptr_size();
         // The argument area (shadow space + stack args), kept a multiple of 16 so the callee sees
         // the ABI's entry alignment.
-        let area = (abi.shadow_space() + 8 * extra.len() as u64 + 15) & !15;
+        let area = (abi.shadow_space() + ptr * extra.len() as u64 + 15) & !15;
         let base = (self.cpu.rsp() & !0xf).wrapping_sub(area);
         for (i, &a) in extra.iter().enumerate() {
             let slot = base
                 .wrapping_add(abi.shadow_space())
-                .wrapping_add(8 * i as u64);
-            self.mem.write(slot, a, 8)?;
+                .wrapping_add(ptr * i as u64);
+            self.mem.write(slot, a, ptr as usize)?;
         }
-        // Push the sentinel return address.
-        let sp = base.wrapping_sub(8);
-        self.mem.write(sp, SENTINEL, 8)?;
+        // Push the sentinel return address (pointer-width).
+        let sp = base.wrapping_sub(ptr);
+        self.mem.write(sp, SENTINEL, ptr as usize)?;
         self.cpu.set_rsp(sp);
         self.cpu.rip = func;
         self.steps = 0;

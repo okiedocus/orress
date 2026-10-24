@@ -214,16 +214,18 @@ impl Emulator {
     // --- stack ------------------------------------------------------------
 
     fn push(&mut self, val: u64) -> Result<(), EmuError> {
-        let sp = self.cpu.rsp().wrapping_sub(8);
-        self.mem.write(sp, val, 8)?;
+        let ptr = self.ptr();
+        let sp = self.cpu.rsp().wrapping_sub(ptr);
+        self.mem.write(sp, val, ptr as usize)?;
         self.cpu.set_rsp(sp);
         Ok(())
     }
 
     fn pop(&mut self) -> Result<u64, EmuError> {
+        let ptr = self.ptr();
         let sp = self.cpu.rsp();
-        let val = self.mem.read(sp, 8)?;
-        self.cpu.set_rsp(sp.wrapping_add(8));
+        let val = self.mem.read(sp, ptr as usize)?;
+        self.cpu.set_rsp(sp.wrapping_add(ptr));
         Ok(val)
     }
 
@@ -480,19 +482,21 @@ impl Emulator {
                 self.cpu.set_reg(Register::RDX, hi);
             }
             M::Push => {
-                let v = self.read_op(instr, 0, 8)?;
+                let ptr = self.ptr() as usize;
+                let v = self.read_op(instr, 0, ptr)?;
                 self.push(v)?;
             }
             M::Pop => {
+                let ptr = self.ptr() as usize;
                 let v = self.pop()?;
-                self.write_op(instr, 0, v, 8)?;
+                self.write_op(instr, 0, v, ptr)?;
             }
             M::Call => {
                 let slot_stub = self.slot_hook(instr);
                 let target = if slot_stub.is_some() {
                     0
                 } else {
-                    self.read_op(instr, 0, 8)?
+                    self.read_op(instr, 0, self.ptr() as usize)?
                 };
                 self.push(self.cpu.rip)?; // RIP already points past the call
                 match slot_stub {
