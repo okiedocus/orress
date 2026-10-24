@@ -229,6 +229,71 @@ fn path_explorer_solves_a_symbolic_length_loop() {
     assert_eq!(&found.result.input[..3], b"abc", "explorer must recover the key prefix");
 }
 
+/// Return-verdict path exploration: a `check() -> bool` that reads its input internally (hooked
+/// `gets`) and has a symbolic-length `strlen` loop before a per-byte test. The single-path return
+/// solver exits the loop immediately and can't solve it; the return-model explorer forks the loop
+/// and recovers the key — with no printed success string to steer at.
+#[test]
+fn return_model_explorer_solves_internal_read_with_loop() {
+    use iced_x86::code_asm::*;
+    use orress_emu::{Abi, InputReturn, Stub};
+    let buf = 0x9000u64;
+    let mut a = CodeAssembler::new(64).unwrap();
+    let mut top = a.create_label();
+    let mut fail = a.create_label();
+    a.mov(rcx, buf).unwrap();
+    a.call(qword_ptr(SLOT)).unwrap(); // gets(buf)
+    a.mov(rsi, buf).unwrap();
+    a.xor(edx, edx).unwrap();
+    a.set_label(&mut top).unwrap();
+    a.movzx(eax, byte_ptr(rsi + rdx)).unwrap();
+    a.inc(rdx).unwrap();
+    a.test(eax, eax).unwrap();
+    a.jne(top).unwrap(); // continue while buf[i] != 0 (loop-back is the taken edge)
+    a.dec(rdx).unwrap(); // rdx = strlen
+    a.cmp(rdx, 3).unwrap();
+    a.jb(fail).unwrap();
+    a.movzx(eax, byte_ptr(rsi)).unwrap();
+    a.cmp(eax, b'a' as i32).unwrap();
+    a.jne(fail).unwrap();
+    a.movzx(eax, byte_ptr(rsi + 1u64)).unwrap();
+    a.cmp(eax, b'b' as i32).unwrap();
+    a.jne(fail).unwrap();
+    a.movzx(eax, byte_ptr(rsi + 2u64)).unwrap();
+    a.cmp(eax, b'c' as i32).unwrap();
+    a.jne(fail).unwrap();
+    a.mov(eax, 1).unwrap(); // return true
+    a.ret().unwrap();
+    a.set_label(&mut fail).unwrap();
+    a.xor(eax, eax).unwrap(); // return false
+    a.ret().unwrap();
+    let code = a.assemble(BASE).unwrap();
+
+    let mut mem = Memory::new();
+    mem.write_bytes(BASE, &code);
+    mem.map_zeroed(buf, 64);
+    mem.write_bytes(SLOT, &0u64.to_le_bytes());
+    let hooks: std::collections::HashMap<u64, Stub> =
+        [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })].into_iter().collect();
+
+    // Single-path return solver exits the strlen loop on the first byte → cannot solve.
+    let single = orress_sym::solve_check_return(
+        mem.clone(), BASE, &[], 0xd000, 4, vec![], hooks.clone(), Abi::Win64,
+    );
+    let single_ok = single
+        .map(|f| f.result.complete && f.result.input.get(..3) == Some(b"abc"))
+        .unwrap_or(false);
+    assert!(!single_ok, "single-path must not solve the symbolic-length loop");
+
+    // The return-model explorer forks the loop and recovers "abc".
+    let found = orress_sym::solve_check_return_explore(
+        mem, BASE, &[], 0xd000, 4, vec![], hooks, Abi::Win64, 4000, 2_000_000,
+    )
+    .expect("return-model explorer should find an accepting path");
+    assert!(found.result.complete, "incomplete: {}", found.result.message);
+    assert_eq!(&found.result.input[..3], b"abc", "must recover the key prefix");
+}
+
 /// A **32-bit cdecl** per-byte check: the input pointer arrives on the stack (`[esp+4]`), not in a
 /// register, and the stack slots are 4 bytes wide. Exercises the pointer-size parameterization and
 /// cdecl stack-argument reading.

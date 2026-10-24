@@ -117,6 +117,12 @@ pub struct SymExec {
     forking: bool,
     /// Set by [`Self::branch`] in forking mode: `(condition, taken_rip, fallthrough_rip)`.
     fork_pending: Option<(Expr, u64, u64)>,
+    /// Return-verdict exploration: the target is the return sentinel, and a path "accepts" only
+    /// when the returned `al` can be non-zero. Lets the explorer solve a `check() -> bool` that
+    /// reads its input internally (gets/scanf) and loops on a symbolic length — which neither the
+    /// single-path return solver (no path exploration) nor the success-string explorer (needs a
+    /// printed "you win" block) can.
+    return_model: bool,
 }
 
 impl SymExec {
@@ -145,7 +151,14 @@ impl SymExec {
             gs_base: 0,
             forking: false,
             fork_pending: None,
+            return_model: false,
         }
+    }
+
+    /// Switch the path explorer to the return-verdict model: it explores to the return sentinel and
+    /// a path accepts when `al != 0` there. Use with [`Self::new_to_return`]'s `SENTINEL` target.
+    pub fn set_return_model(&mut self) {
+        self.return_model = true;
     }
 
     /// Like [`Self::new`], but steers toward the function **returning** rather than reaching a
@@ -459,9 +472,13 @@ impl SymExec {
         while let Some(mut st) = frontier.pop() {
             loop {
                 if st.rip == st.target {
-                    // Reached the goal: is this path's accumulated condition satisfiable? (Built-in
-                    // solver, then the z3 fallback — so a checksum the built-in can't crack but z3
-                    // can still counts as a solved path.)
+                    // In the return-verdict model the target is the return sentinel; require the
+                    // returned al to be non-zero (the check passed) before solving.
+                    if st.return_model {
+                        st.constrain_return_nonzero();
+                    }
+                    // Is this path's accumulated condition satisfiable? (Built-in solver, then the
+                    // z3 fallback — so a checksum the built-in can't crack but z3 can still counts.)
                     if crate::solve::solve_with_fallback(&st.constraints, input_len).complete {
                         return Some(st);
                     }

@@ -103,6 +103,44 @@ pub fn solve_check_explore(
     })
 }
 
+/// Path-exploring **return-verdict** solver: explores paths to the function's return and accepts
+/// one where the returned `al` can be non-zero. This cracks a `check() -> bool` that reads its
+/// input internally (gets/scanf) and loops on a symbolic length — the single-path
+/// [`solve_check_return`] can't explore the loop, and [`solve_check_explore`] needs a printed
+/// success block. Bounded by `max_states` / `max_steps`; `None` if no accepting path is found.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_check_return_explore(
+    mem: orress_emu::Memory,
+    func: u64,
+    args: &[u64],
+    input_base: u64,
+    input_len: u32,
+    avoid: Vec<u64>,
+    hooks: std::collections::HashMap<u64, orress_emu::Stub>,
+    abi: Abi,
+    max_states: usize,
+    max_steps: u64,
+) -> Option<Found> {
+    let mut sx = SymExec::new_to_return(mem, input_base, input_len, avoid);
+    sx.set_hooks(hooks);
+    sx.set_return_model();
+    let win = sx.run_explore(func, args, abi, max_states, max_steps)?;
+    // The explorer already appended the `al != 0` return constraint on reaching the sentinel.
+    let result = solve::solve_with_fallback(&win.constraints, input_len as usize);
+    let smt2 = expr::to_smt2(&win.constraints, input_len);
+    let checks = win
+        .constraints
+        .iter()
+        .map(|c| expr::render(&expr::simplify(c)))
+        .collect();
+    Some(Found {
+        result,
+        constraints: win.constraints.len(),
+        smt2,
+        checks,
+    })
+}
+
 /// Like [`solve_check`], but instead of steering to a chosen success *block*, it runs `func` until
 /// it **returns** (steering away from `avoid` — the `return false` blocks) and then requires the
 /// return value be non-zero. This recovers an input a `check(input) -> bool` function *accepts*,

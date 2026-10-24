@@ -243,7 +243,44 @@ pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<Vm
             }
         }
     }
-    best
+    if best.is_some() {
+        return best;
+    }
+
+    // Fallback: the greedy single-path return solver can't discover a path that must loop N times
+    // on a symbolic condition (an input-length scan, a validation loop). Re-try with the path
+    // explorer, which forks the loop. Handles checks that read input internally (gets/scanf) too.
+    for input_len in 1..=MAX_LEN {
+        let mut mem = base_mem.clone();
+        mem.map_zeroed(input_base, u64::from(input_len) + 16);
+        let args = [input_base, u64::from(input_len)];
+        let Some(found) = orress_sym::solve_check_return_explore(
+            mem,
+            func.entry,
+            &args,
+            input_base,
+            input_len,
+            avoid.clone(),
+            hooks.clone(),
+            abi,
+            EXPLORE_MAX_STATES,
+            EXPLORE_MAX_STEPS,
+        ) else {
+            continue;
+        };
+        if found.result.complete && found.constraints > 0 {
+            return Some(VmSolution {
+                func: func.entry,
+                input_len,
+                key: found.result.input,
+                complete: true,
+                constraints: found.constraints,
+                checks: found.checks,
+                smt2: found.smt2,
+            });
+        }
+    }
+    None
 }
 
 /// The success block to steer toward and the set of blocks to avoid. Success = the verdict block
