@@ -102,16 +102,19 @@ pub fn ite(c: Expr, a: Expr, b: Expr) -> Expr {
 }
 
 impl Node {
-    /// The bit width of this expression (1 for booleans).
+    /// The bit width of this expression (1 for booleans). Iterative: it follows the single
+    /// width-determining operand down, so a deeply nested expression can't overflow the stack.
     pub fn width(&self) -> u32 {
-        match self {
-            Node::Const(_, b) => *b,
-            Node::Var(_) => 8,
-            Node::Bin(_, a, _) | Node::Not(a) | Node::Neg(a) => a.width(),
-            Node::ZeroExt(_, b) | Node::SignExt(_, b) => *b,
-            Node::Extract(_, hi, lo) => hi - lo + 1,
-            Node::Rel(..) | Node::BoolNot(_) | Node::BoolAnd(..) | Node::BoolOr(..) => 1,
-            Node::Ite(_, a, _) => a.width(),
+        let mut cur = self;
+        loop {
+            match cur {
+                Node::Const(_, b) => return *b,
+                Node::Var(_) => return 8,
+                Node::ZeroExt(_, b) | Node::SignExt(_, b) => return *b,
+                Node::Extract(_, hi, lo) => return hi - lo + 1,
+                Node::Rel(..) | Node::BoolNot(_) | Node::BoolAnd(..) | Node::BoolOr(..) => return 1,
+                Node::Bin(_, a, _) | Node::Not(a) | Node::Neg(a) | Node::Ite(_, a, _) => cur = a,
+            }
         }
     }
 
@@ -167,38 +170,89 @@ impl Node {
         }
     }
 
-    /// Collects the input-variable indices this expression references.
+    /// Collects the input-variable indices this expression references. Iterative (explicit stack)
+    /// so a deeply nested expression — e.g. a widened `memcmp` building a long `BoolAnd` chain in a
+    /// single step — can't overflow the stack.
     pub fn vars(&self, out: &mut BTreeSet<u32>) {
-        match self {
-            Node::Const(..) => {}
-            Node::Var(i) => {
+        let mut stack: Vec<&Node> = vec![self];
+        while let Some(n) = stack.pop() {
+            if let Node::Var(i) = n {
                 out.insert(*i);
-            }
-            Node::Not(a)
-            | Node::Neg(a)
-            | Node::ZeroExt(a, _)
-            | Node::SignExt(a, _)
-            | Node::Extract(a, ..)
-            | Node::BoolNot(a) => a.vars(out),
-            Node::Bin(_, a, b) | Node::Rel(_, a, b) | Node::BoolAnd(a, b) | Node::BoolOr(a, b) => {
-                a.vars(out);
-                b.vars(out);
-            }
-            Node::Ite(c, a, b) => {
-                c.vars(out);
-                a.vars(out);
-                b.vars(out);
+            } else {
+                stack.extend(kids(n).into_iter().flatten());
             }
         }
     }
 
-    /// Whether this expression contains no input variables (a concrete value).
+    /// Whether this expression contains no input variables (a concrete value). Iterative, with an
+    /// early exit on the first variable.
     pub fn is_concrete(&self) -> bool {
-        let mut v = BTreeSet::new();
-        self.vars(&mut v);
-        v.is_empty()
+        let mut stack: Vec<&Node> = vec![self];
+        while let Some(n) = stack.pop() {
+            if matches!(n, Node::Var(_)) {
+                return false;
+            }
+            stack.extend(kids(n).into_iter().flatten());
+        }
+        true
     }
 }
+
+/// The child expressions of a node (up to three), for iterative tree walks. `None` slots are
+/// skipped by `.into_iter().flatten()`.
+pub(crate) fn kids(n: &Node) -> [Option<&Node>; 3] {
+    match n {
+        Node::Const(..) | Node::Var(_) => [None, None, None],
+        Node::Not(a)
+        | Node::Neg(a)
+        | Node::ZeroExt(a, _)
+        | Node::SignExt(a, _)
+        | Node::Extract(a, ..)
+        | Node::BoolNot(a) => [Some(&**a), None, None],
+        Node::Bin(_, a, b) | Node::Rel(_, a, b) | Node::BoolAnd(a, b) | Node::BoolOr(a, b) => {
+            [Some(&**a), Some(&**b), None]
+        }
+        Node::Ite(c, a, b) => [Some(&**c), Some(&**a), Some(&**b)],
+    }
+}
+
+/// Whether the longest root-to-leaf path in `e` exceeds `cap`. Iterative post-order with
+/// memoization over shared sub-terms and an early exit once the cap is passed, so it is bounded and
+/// can't itself overflow. The symbolic executor uses this to abandon a function whose check builds
+/// an unboundedly deep expression (a multi-round hash) rather than crash or spin on it.
+pub fn too_deep(e: &Expr, cap: usize) -> bool {
+    use std::collections::HashMap;
+    let addr = |n: &Node| std::ptr::from_ref(n) as usize;
+    let mut depth: HashMap<usize, usize> = HashMap::new();
+    let mut stack: Vec<(&Node, bool)> = vec![(&**e, false)];
+    while let Some((n, expanded)) = stack.pop() {
+        let k = addr(n);
+        if depth.contains_key(&k) {
+            continue;
+        }
+        if expanded {
+            let d = 1 + kids(n)
+                .into_iter()
+                .flatten()
+                .map(|c| depth.get(&addr(c)).copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            if d > cap {
+                return true;
+            }
+            depth.insert(k, d);
+        } else {
+            stack.push((n, true));
+            stack.extend(kids(n).into_iter().flatten().map(|c| (c, false)));
+        }
+    }
+    false
+}
+
+/// Depth beyond which the (recursive) display/export helpers bail to a placeholder rather than
+/// risk a deep recursion. The executor keeps live expressions far shallower than this; it is a
+/// backstop for anything that slips through to rendering.
+const DISPLAY_DEPTH_GUARD: usize = 4096;
 
 fn sign_ext(v: u64, bits: u32) -> i64 {
     if bits >= 64 {
@@ -240,6 +294,11 @@ fn same(a: &Expr, b: &Expr) -> bool {
 /// leaves behind, so the underlying per-byte check (`rol(in[0] ^ 0x3b, 1)`) is visible. Every
 /// rewrite is value-preserving; `simplify_preserves_value` differential-tests that against `eval`.
 pub fn simplify(e: &Expr) -> Expr {
+    // Backstop: never recurse into a pathologically deep tree (the executor keeps live expressions
+    // far shallower, but a slipped-through monster would overflow the recursive rewrites below).
+    if too_deep(e, DISPLAY_DEPTH_GUARD) {
+        return e.clone();
+    }
     if e.is_concrete() {
         return konst(e.eval(&[]), e.width());
     }
@@ -386,6 +445,9 @@ fn as_rotate(e: &Node) -> Option<(Expr, u32, bool)> {
 /// Renders an expression as a readable, Rust-flavoured string (input bytes as `in[i]`), with the
 /// rotate idiom printed as `rol`/`ror`. Intended for a *simplified* expression.
 pub fn render(e: &Expr) -> String {
+    if too_deep(e, DISPLAY_DEPTH_GUARD) {
+        return "<expression too deep to render>".to_string();
+    }
     if let Some((x, amt, left)) = as_rotate(e) {
         return format!(
             "{}({}, {amt})",
@@ -450,6 +512,10 @@ pub fn to_smt2(constraints: &[Expr], n: u32) -> String {
         s.push_str(&format!("(declare-const b{i} (_ BitVec 8))\n"));
     }
     for c in constraints {
+        if too_deep(c, DISPLAY_DEPTH_GUARD) {
+            s.push_str("(assert true) ; omitted: expression too deep\n");
+            continue;
+        }
         s.push_str(&format!("(assert {})\n", smt(c)));
     }
     s.push_str("(check-sat)\n(get-model)\n");
@@ -494,5 +560,59 @@ fn smt(e: &Node) -> String {
         Node::BoolAnd(a, b) => format!("(and {} {})", smt(a), smt(b)),
         Node::BoolOr(a, b) => format!("(or {} {})", smt(a), smt(b)),
         Node::Ite(c, a, b) => format!("(ite {} {} {})", smt(c), smt(a), smt(b)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A long accumulator chain — `((… (v0 + v1) + v2) …)`, depth ≈ `n` — is exactly what an
+    /// input-dependent loop builds. The recursive tree-walks used to overflow the stack on this;
+    /// the iterative `width`/`vars`/`is_concrete`/`too_deep` must handle it without recursing.
+    #[test]
+    fn deep_expression_does_not_overflow() {
+        // Build/walk the deep chain on a large-stack thread: the iterative walks below never
+        // recurse, but `Rc<Node>`'s own Drop does, so tearing a 200k-deep chain down at end of
+        // scope needs headroom. (In the executor, depth caps keep live expressions shallow, so its
+        // drops are safe on an ordinary stack — this is only to let the test build an extreme case.)
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(|| {
+                let n = 200_000u32;
+                let mut acc = var(0);
+                for i in 1..n {
+                    acc = bin(Op::Add, acc, var(i % 8));
+                }
+                assert_eq!(acc.width(), 8);
+                assert!(!acc.is_concrete());
+                let mut vs = BTreeSet::new();
+                acc.vars(&mut vs);
+                assert_eq!(vs.len(), 8);
+                assert!(too_deep(&acc, 512));
+                assert!(!too_deep(&var(0), 512));
+            })
+            .expect("spawn deep-test thread")
+            .join()
+            .expect("deep-expression walks must not overflow");
+
+        // A shallow expression is not flagged; a modest concrete chain still evaluates correctly.
+        let mut small = konst(0, 8);
+        for _ in 0..200 {
+            small = bin(Op::Add, small, konst(1, 8));
+        }
+        assert_eq!(small.eval(&[]), 200 & 0xff);
+        assert!(!too_deep(&small, 512));
+    }
+
+    /// `too_deep` must not blow up on a shared DAG (a node reachable by many paths is counted once).
+    #[test]
+    fn too_deep_handles_sharing() {
+        let mut e = var(0);
+        for _ in 0..40 {
+            e = bin(Op::Xor, e.clone(), e.clone()); // doubling fan-in, but shared via Rc
+        }
+        // Depth is only 40 despite 2^40 root-to-leaf paths; memoization keeps it linear.
+        assert!(!too_deep(&e, 512));
     }
 }

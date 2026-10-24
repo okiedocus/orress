@@ -69,6 +69,14 @@ const HEAP_BASE: u64 = 0x5000_0000_0000;
 const STUB_MAX_BYTES: u64 = 1 << 20;
 /// Upper bound on a NUL-terminated string a stub walks.
 const MAX_CSTR: u64 = 1 << 16;
+/// Depth past which a live symbolic expression is treated as unsolvable here, so the executor
+/// abandons the function instead of spinning. Real per-byte crackme checks stay far shallower
+/// (tens); only input-dependent loops like multi-round hashes reach this.
+const MAX_EXPR_DEPTH: usize = 512;
+/// Most bytes a single symbolic compare (`memcmp`/`strcmp` model) will chain into one `BoolAnd`
+/// expression. Caps the depth built in one step, so the expression stays shallow enough that even
+/// its (recursive) `Rc` drop is safe; a larger compare is reported unsupported.
+const MAX_CMP_BYTES: usize = 4096;
 
 pub struct SymExec {
     regs: [Expr; 16],
@@ -159,6 +167,12 @@ impl SymExec {
     /// Byte-wise equality of `n` bytes at `a` and `b`, as a memcmp-style result expression
     /// (0 when all equal). The input bytes contribute symbolic equalities.
     fn cmp_expr(&self, a: u64, b: u64, n: usize) -> Result<Expr, SymError> {
+        if n > MAX_CMP_BYTES {
+            return Err(SymError::Unsupported {
+                addr: self.rip,
+                what: format!("symbolic compare of {n} bytes"),
+            });
+        }
         let mut all = expr::konst(1, 1);
         for i in 0..n as u64 {
             let eq = expr::rel(
@@ -340,7 +354,7 @@ impl SymExec {
     }
 
     fn run(&mut self) -> Result<(), SymError> {
-        for _ in 0..self.budget {
+        for i in 0..self.budget {
             if self.rip == self.target {
                 return Ok(());
             }
@@ -352,8 +366,25 @@ impl SymExec {
                 return Ok(());
             }
             self.step()?;
+            // An input-dependent loop (e.g. a multi-round hash) can build an ever-deeper symbolic
+            // expression that the built-in brute-force solver can't crack and that re-walking each
+            // step makes quadratic. Bail so the caller moves to the next candidate function rather
+            // than burning the whole step budget. Checked every 64 steps to keep it cheap.
+            if i % 64 == 0 && self.too_complex() {
+                return Err(SymError::BudgetExhausted);
+            }
         }
         Err(SymError::BudgetExhausted)
+    }
+
+    /// Whether any live register or the newest constraint has grown past [`MAX_EXPR_DEPTH`] — the
+    /// signature of an input-dependent loop the built-in solver won't crack.
+    fn too_complex(&self) -> bool {
+        self.regs.iter().any(|r| expr::too_deep(r, MAX_EXPR_DEPTH))
+            || self
+                .constraints
+                .last()
+                .is_some_and(|c| expr::too_deep(c, MAX_EXPR_DEPTH))
     }
 
     fn step(&mut self) -> Result<(), SymError> {
@@ -1275,18 +1306,24 @@ fn simplify(e: Expr) -> Expr {
     }
 }
 
-/// Splits a conjunction into its parts, dropping trivially-true constants.
+/// Splits a conjunction into its parts, dropping trivially-true constants. Iterative (explicit
+/// stack): a widened `memcmp` can build a `BoolAnd` chain thousands deep in a single step, and a
+/// recursive split would overflow.
 fn flatten(e: Expr, out: &mut Vec<Expr>) {
-    match &*e {
-        Node::BoolAnd(a, b) => {
-            flatten(a.clone(), out);
-            flatten(b.clone(), out);
-        }
-        _ => {
-            if e.is_concrete() && e.eval(&[]) != 0 {
-                return; // trivially satisfied
+    let mut stack = vec![e];
+    while let Some(e) = stack.pop() {
+        match &*e {
+            Node::BoolAnd(a, b) => {
+                // Push right then left so the left conjunct is processed first (preserves order).
+                stack.push(b.clone());
+                stack.push(a.clone());
             }
-            out.push(e);
+            _ => {
+                if e.is_concrete() && e.eval(&[]) != 0 {
+                    continue; // trivially satisfied
+                }
+                out.push(e);
+            }
         }
     }
 }
