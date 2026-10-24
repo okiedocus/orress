@@ -9,15 +9,16 @@
 //! This is a deterministic, CFG-only heuristic (no execution): it flags functions whose structure
 //! matches an interpreter, ranked by confidence. It does not yet *lift* the bytecode.
 //!
-//! Precision note: a high fan-in block alone is *not* enough, and neither is a high fan-out one.
-//! Ordinary loops in library code (error-handling latches in a statically-linked runtime) have a
-//! high-fan-in block; an ordinary `switch` has a high-fan-out block. On their own either produces a
-//! flood of false positives. The distinguishing mark of an interpreter is a **dispatch loop**: a
-//! block that branches *out* to many handlers, most of which *loop back* to it to fetch the next
-//! opcode. So we look for a high-fan-out block whose successors can reach it again, and count those
-//! looping handlers. A one-shot `switch` fails this (its cases fall through, they don't return to
-//! the switch) and so does a plain loop latch (low fan-out), while a real interpreter scores high.
-//! `scan` additionally drops low-confidence matches and keeps only the strongest few.
+//! Precision note: the dispatch-loop *shape* — a high-fan-out block whose successors loop back to
+//! it — rules out a one-shot `switch` (cases fall through) and a plain loop latch (low fan-out),
+//! but it does **not** rule out a *large `switch` inside a loop* (a parser, a formatter, a
+//! compiler-generated state machine): that has exactly the same shape, and in practice scores even
+//! *higher* than a real VM (more cases). [`detect`] reports the shape and is intentionally not
+//! enough on its own. [`scan`] gates every shape match on one of two marks a real dispatch loop
+//! has and a switch-in-a-loop does not: the handlers branch *directly* back to the dispatcher
+//! (in-degree ≈ handler count), or the opcode is fetched from a **bytecode array through a virtual
+//! PC** (a data-driven dispatch, via [`bytecode`]). That keeps genuine VMs and flattened checks
+//! while dropping the flood of big-switch matches seen across a real corpus.
 
 use std::collections::{HashMap, HashSet};
 
@@ -507,14 +508,31 @@ fn reach_to(preds: &HashMap<u64, Vec<u64>>, target: u64) -> HashSet<u64> {
 }
 
 /// Scans every function in a program for interpreters, highest-confidence first. Only matches at
-/// or above `CONFIDENCE_FLOOR` are returned, capped at `MAX_REPORTS`, so the result is a short
-/// list of strong candidates rather than every loop in the binary.
+/// or above `CONFIDENCE_FLOOR`, **with a locatable bytecode fetch**, are returned, capped at
+/// `MAX_REPORTS`.
+///
+/// The dispatch-loop *shape* ([`detect`]) cannot by itself tell a real dispatch loop from an
+/// ordinary large `switch` inside a loop (a parser, a formatter, a compiler-generated state
+/// machine): both have a high-fan-out block whose cases loop back, and the switch-in-loop often
+/// scores *higher* (more cases). Two marks separate the genuine article, and `scan` requires one:
+///
+/// - **handlers branch *directly* back** to the dispatcher, so its in-degree ≈ its handler count
+///   (`max_fan_in >= handlers`). A `switch` in a `for`/`while` loop instead loops back *indirectly*
+///   through the loop latch, so the switch block's own in-degree is ~1 — the tell of the
+///   false positives (fan-in 1–2 against 27+ handlers);
+/// - or a **bytecode fetch**: the opcode is read from a bytecode array through a virtual PC (a
+///   data-driven dispatch, located by [`bytecode`]), which a computed `switch` lacks.
+///
+/// Together these keep both a classic bytecode interpreter (direct-fan-in may be low, but it has
+/// the fetch) and a control-flow-flattened check (no bytecode blob, but its handlers branch
+/// straight back), while dropping the flood of big-switch shape matches seen across a real corpus.
 pub fn scan(program: &Program) -> Vec<VmReport> {
     let mut out: Vec<VmReport> = program
         .functions
         .values()
         .filter_map(detect)
         .filter(|r| r.confidence >= CONFIDENCE_FLOOR)
+        .filter(|r| r.max_fan_in >= r.handlers || bytecode(program, r).is_some())
         .collect();
     out.sort_by(|a, b| {
         b.confidence

@@ -40,6 +40,35 @@ fn vm_like(handlers: usize) -> Function {
     func(dispatcher, blocks)
 }
 
+/// A large `switch` inside a `for`/`while` loop: the dispatcher fans out to `cases`, but each case
+/// returns to the loop *latch*, which jumps back to the dispatcher — so a case reaches the
+/// dispatcher only *indirectly*. Same dispatch-loop *shape* as an interpreter ([`detect`] matches
+/// it), but the dispatcher's in-degree is ~1, not ~`cases`.
+fn switch_in_loop(cases: usize) -> Function {
+    let dispatcher = 0x1000;
+    let latch = 0x9000;
+    let case_addrs: Vec<u64> = (0..cases).map(|i| 0x1100 + i as u64 * 0x20).collect();
+    let mut blocks = vec![block(dispatcher, &case_addrs)];
+    for &c in &case_addrs {
+        blocks.push(block(c, &[latch])); // case → loop latch
+    }
+    blocks.push(block(latch, &[dispatcher])); // latch → back to the switch
+    func(dispatcher, blocks)
+}
+
+#[test]
+fn switch_in_loop_has_low_dispatcher_fan_in() {
+    // The false-positive shape: a big switch in a loop matches the dispatcher shape, but its cases
+    // loop back indirectly through the latch, so the dispatcher's in-degree is 1 — far below the
+    // handler count. That gap (max_fan_in < handlers), with no bytecode fetch, is exactly why
+    // `scan` rejects it while keeping real dispatch loops (whose handlers branch straight back, or
+    // which fetch from a bytecode blob).
+    let r = detect(&switch_in_loop(12)).expect("a switch-in-loop matches the dispatcher shape");
+    assert_eq!(r.handlers, 12, "every case loops back (indirectly)");
+    assert_eq!(r.max_fan_in, 1, "only the latch targets the dispatcher");
+    assert!(r.max_fan_in < r.handlers, "indirect loop-back → low fan-in");
+}
+
 #[test]
 fn detects_an_interpreter_dispatch_loop() {
     let report = detect(&vm_like(20)).expect("a VM interpreter shape is detected");
