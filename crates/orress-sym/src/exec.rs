@@ -72,6 +72,9 @@ const MAX_CSTR: u64 = 1 << 16;
 
 pub struct SymExec {
     regs: [Expr; 16],
+    /// XMM registers as 16 byte lanes each (SSE byte-vector modelling, enough for the widened
+    /// `[u8; 16] == …` compare: movdqu / pcmpeqb / pmovmskb).
+    xmm: Vec<[Expr; 16]>,
     rip: u64,
     mem: Memory,
     /// Symbolic bytes written to concrete addresses (overrides concrete memory).
@@ -100,6 +103,9 @@ impl SymExec {
     pub fn new(mem: Memory, input_base: u64, input_len: u32, target: u64, avoid: Vec<u64>) -> Self {
         Self {
             regs: std::array::from_fn(|_| expr::konst(0, 64)),
+            xmm: (0..16)
+                .map(|_| std::array::from_fn(|_| expr::konst(0, 8)))
+                .collect(),
             rip: 0,
             mem,
             sym_mem: HashMap::new(),
@@ -570,6 +576,56 @@ impl SymExec {
         Ok(())
     }
 
+    fn unsupported(&self, instr: &Instruction, what: &str) -> SymError {
+        SymError::Unsupported {
+            addr: instr.ip(),
+            what: what.to_string(),
+        }
+    }
+
+    /// Reads operand `i` as 16 XMM byte lanes (from an XMM register or a 128-bit memory operand).
+    fn read_xmm(&self, instr: &Instruction, i: u32) -> Result<[Expr; 16], SymError> {
+        match instr.op_kind(i) {
+            OpKind::Register => {
+                let idx = reg_xmm(instr.op_register(i))
+                    .ok_or_else(|| self.unsupported(instr, "xmm register > 15"))?;
+                Ok(self.xmm[idx].clone())
+            }
+            OpKind::Memory => {
+                let ea = self.ea(instr)?;
+                let mut lanes: [Expr; 16] = std::array::from_fn(|_| expr::konst(0, 8));
+                for (j, lane) in lanes.iter_mut().enumerate() {
+                    *lane = self.byte_at(ea.wrapping_add(j as u64))?;
+                }
+                Ok(lanes)
+            }
+            _ => Err(self.unsupported(instr, "xmm operand")),
+        }
+    }
+
+    /// A 128-bit SSE move between an XMM register and an XMM register or 128-bit memory operand.
+    fn sse_move(&mut self, instr: &Instruction) -> Result<(), SymError> {
+        match (instr.op_kind(0), instr.op_kind(1)) {
+            (OpKind::Register, _) => {
+                let didx = reg_xmm(instr.op_register(0))
+                    .ok_or_else(|| self.unsupported(instr, "sse move to non-xmm"))?;
+                self.xmm[didx] = self.read_xmm(instr, 1)?;
+                Ok(())
+            }
+            (OpKind::Memory, OpKind::Register) => {
+                let sidx = reg_xmm(instr.op_register(1))
+                    .ok_or_else(|| self.unsupported(instr, "sse store of non-xmm"))?;
+                let ea = self.ea(instr)?;
+                let lanes = self.xmm[sidx].clone();
+                for (j, lane) in lanes.iter().enumerate() {
+                    self.store(ea.wrapping_add(j as u64), lane, 1);
+                }
+                Ok(())
+            }
+            _ => Err(self.unsupported(instr, "sse move form")),
+        }
+    }
+
     /// The stub for an indirect `call`/`jmp` through a hooked import slot: `call [IAT slot]`
     /// loads the slot's contents (a hint/name RVA or lazy PLT address in the file image), so
     /// the slot address itself must be matched or the hook never fires.
@@ -745,6 +801,34 @@ impl SymExec {
                 self.set_reg(Register::RBP, v);
             }
             M::Nop | M::Endbr64 | M::Endbr32 => {}
+            // SSE byte-vector modelling — enough to follow a widened `[u8; N] == …` compare.
+            M::Movdqu | M::Movdqa | M::Movups | M::Movaps | M::Movupd | M::Movapd => {
+                self.sse_move(instr)?;
+            }
+            M::Pcmpeqb => {
+                let didx = reg_xmm(instr.op_register(0))
+                    .ok_or_else(|| self.unsupported(instr, "pcmpeqb xmm index"))?;
+                let a = self.xmm[didx].clone();
+                let b = self.read_xmm(instr, 1)?;
+                for j in 0..16 {
+                    // Each lane becomes 0xff where the bytes are equal, 0x00 otherwise.
+                    self.xmm[didx][j] = fold(expr::ite(
+                        expr::rel(expr::Rel::Eq, a[j].clone(), b[j].clone()),
+                        expr::konst(0xff, 8),
+                        expr::konst(0, 8),
+                    ));
+                }
+            }
+            M::Pmovmskb => {
+                // Gather bit 7 of each lane into a scalar mask (bit j = lane j's top bit).
+                let src = self.read_xmm(instr, 1)?;
+                let mut acc = expr::konst(0, 32);
+                for j in 0..16u32 {
+                    let bit = expr::zext(expr::extract(src[j as usize].clone(), 7, 7), 32);
+                    acc = expr::bin(Op::Or, acc, expr::bin(Op::Shl, bit, expr::konst(u64::from(j), 32)));
+                }
+                self.set_reg(instr.op_register(0), fold(acc));
+            }
             other => self.skip_unmodelled(instr, other)?,
         }
         Ok(())
@@ -1242,6 +1326,16 @@ fn keep_low(cont: Expr, val: Expr, mask: u64, bits: u32) -> Expr {
 }
 
 // Register-index helpers (mirrors the concrete emulator).
+/// The index 0..16 of an XMM register we model (XMM0–XMM15), or `None`.
+fn reg_xmm(r: Register) -> Option<usize> {
+    if r.is_xmm() {
+        let idx = (r as u32).wrapping_sub(Register::XMM0 as u32) as usize;
+        (idx < 16).then_some(idx)
+    } else {
+        None
+    }
+}
+
 fn gpr_index(full: Register) -> Option<usize> {
     use Register::*;
     Some(match full {

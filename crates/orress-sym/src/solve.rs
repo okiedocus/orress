@@ -192,12 +192,33 @@ fn constraint_cost(c: &Expr, assign: &[u8]) -> u64 {
     if c.eval(assign) != 0 {
         return 0;
     }
+    // Smooth gradient from the equalities inside the (possibly register-merged, extended, masked)
+    // verdict expression; at least 1 so descent knows it is unsatisfied.
+    eq_cost(c, assign).max(1)
+}
+
+/// Sum of the Hamming distances of every `Eq` subexpression currently violated, anywhere in the
+/// tree. The verdict a `setcc` leaves is wrapped in register merges / `zext` / masks, so the
+/// deciding `a == K` can be buried under `Or`/`And`/`Extract`; walking the whole tree finds it.
+/// Each input byte that controls one bit of a compared value then lowers the distance by one, so
+/// descent converges. Equalities over only concrete bits contribute a constant (ignored by descent).
+fn eq_cost(c: &Expr, assign: &[u8]) -> u64 {
     match c.as_ref() {
         Node::Rel(Rel::Eq, a, b) => {
             let w = a.width().max(b.width());
             ((a.eval(assign) ^ b.eval(assign)) & bits_mask(w)).count_ones() as u64
         }
-        _ => 2,
+        Node::Bin(_, a, b) | Node::Rel(_, a, b) | Node::BoolAnd(a, b) | Node::BoolOr(a, b) => {
+            eq_cost(a, assign) + eq_cost(b, assign)
+        }
+        Node::Not(a)
+        | Node::Neg(a)
+        | Node::ZeroExt(a, _)
+        | Node::SignExt(a, _)
+        | Node::Extract(a, _, _)
+        | Node::BoolNot(a) => eq_cost(a, assign),
+        Node::Ite(c, a, b) => eq_cost(c, assign) + eq_cost(a, assign) + eq_cost(b, assign),
+        Node::Const(..) | Node::Var(_) => 0,
     }
 }
 
@@ -205,16 +226,17 @@ fn constraint_cost(c: &Expr, assign: &[u8]) -> u64 {
 /// minimises the total constraint cost, until everything is satisfied or no byte can improve.
 /// Solves separable wide equalities (the widened `memcmp` pattern) that are too large to brute.
 fn descend(idxs: &[usize], group_constraints: &[&Expr], assign: &mut [u8]) -> bool {
+    let satisfied = |assign: &[u8]| group_constraints.iter().all(|c| c.eval(assign) != 0);
     let total = |assign: &[u8]| -> u64 {
         group_constraints
             .iter()
             .map(|c| constraint_cost(c, assign))
             .sum()
     };
-    let mut cur = total(assign);
-    if cur == 0 {
+    if satisfied(assign) {
         return true;
     }
+    let mut cur = total(assign);
     // A pass per byte-bit of the group plus slack is ample for a separable equality to converge.
     for _ in 0..(idxs.len() * 8 + 16) {
         let mut improved = false;
@@ -234,13 +256,13 @@ fn descend(idxs: &[usize], group_constraints: &[&Expr], assign: &mut [u8]) -> bo
                 cur = best_cost;
                 improved = true;
             }
-        }
-        if cur == 0 {
-            return true;
+            if satisfied(assign) {
+                return true;
+            }
         }
         if !improved {
             break;
         }
     }
-    cur == 0
+    satisfied(assign)
 }
