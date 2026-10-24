@@ -160,6 +160,89 @@ pub fn try_solve(program: &Program, report: &VmReport) -> Result<VmSolution, Sym
     }
 }
 
+/// Place the symbolic input above every mapped region (clear of the program and of the scratch
+/// stack `run_check` maps near `0x7fff_0000`).
+fn input_placement(program: &Program) -> u64 {
+    let max_end = program
+        .memory
+        .regions
+        .iter()
+        .map(|r| r.start.saturating_add(r.len))
+        .max()
+        .unwrap_or(0);
+    let mut base = max_end.saturating_add(0x1_0000) & !0xfff;
+    if (0x7fe0_0000..0x8010_0000).contains(&base) {
+        base = 0x8010_0000;
+    }
+    base
+}
+
+/// Solve an arbitrary `check(input) -> bool` function (not only a VM interpreter): recover an input
+/// the function *accepts*. It steers away from the function's `return false` verdict blocks, runs to
+/// the return, and requires the return value be non-zero — so a branchless final comparison
+/// (`return a[i] == c`) is captured as a constraint, which steering to a success *block* cannot do.
+///
+/// `func_entry` is the check function's entry (e.g. from [`crate::scan`]-adjacent analysis or a
+/// caller's own function selection). Returns the recovered input and the lifted per-byte checks, or
+/// `None` if the program is not x86-64, the function is unknown, or no input length solves.
+pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<VmSolution> {
+    if program.isa != Isa::X64 {
+        return None;
+    }
+    let func = program
+        .functions
+        .get(&func_entry)
+        .or_else(|| program.function_containing(func_entry))?;
+
+    // The failure path: blocks that leave 0 in the return register and flow to `ret` (`return
+    // false`). Steering away from these keeps execution on the accepting path.
+    let avoid: Vec<u64> = func
+        .blocks
+        .iter()
+        .filter(|b| verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start))
+        .map(|b| b.start)
+        .collect();
+
+    let input_base = input_placement(program);
+    let base_mem = emu_image(program);
+    let hooks = import_hooks(program);
+
+    let mut best: Option<VmSolution> = None;
+    for input_len in 1..=MAX_LEN {
+        let mut mem = base_mem.clone();
+        mem.map_zeroed(input_base, u64::from(input_len) + 16);
+        let args = [input_base, u64::from(input_len)];
+        let Ok(found) = orress_sym::solve_check_return(
+            mem,
+            func.entry,
+            &args,
+            input_base,
+            input_len,
+            avoid.clone(),
+            hooks.clone(),
+            abi,
+        ) else {
+            continue;
+        };
+        if found.result.complete && found.constraints > 0 {
+            let sol = VmSolution {
+                func: func.entry,
+                input_len,
+                key: found.result.input,
+                complete: true,
+                constraints: found.constraints,
+                checks: found.checks,
+                smt2: found.smt2,
+            };
+            // Keep the richest solve (the length/path that constrained the most bytes).
+            if best.as_ref().is_none_or(|b| sol.constraints > b.constraints) {
+                best = Some(sol);
+            }
+        }
+    }
+    best
+}
+
 /// The success block to steer toward and the set of blocks to avoid. Success = the verdict block
 /// that sets the return register to a non-zero constant and flows straight to `ret`; the avoid set
 /// is every block from which that success block is unreachable (the "doomed" set), so steering an

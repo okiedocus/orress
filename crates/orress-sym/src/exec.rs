@@ -118,6 +118,24 @@ impl SymExec {
         }
     }
 
+    /// Like [`Self::new`], but steers toward the function **returning** rather than reaching a
+    /// block: the target is the return sentinel, so [`Self::run_check`] stops when the callee pops
+    /// it off the stack. Pair with [`Self::constrain_return_nonzero`] to solve for an input the
+    /// function *accepts* — this captures a branchless final comparison (`return a[i] == c`) that a
+    /// block-reachability target would leave unconstrained.
+    pub fn new_to_return(mem: Memory, input_base: u64, input_len: u32, avoid: Vec<u64>) -> Self {
+        Self::new(mem, input_base, input_len, SENTINEL, avoid)
+    }
+
+    /// Adds a constraint that the return value is "true" — i.e. the check passed. A `bool`/`int`
+    /// verdict is returned in `al` (the low byte of `rax`), and only that byte is guaranteed; the
+    /// upper bytes can hold caller-irrelevant leftovers (a stale pointer), so constraining the full
+    /// `rax` would be trivially satisfied. Constrain `al != 0`.
+    pub fn constrain_return_nonzero(&mut self) {
+        let al = self.reg(Register::AL);
+        self.add_constraint(al);
+    }
+
     /// Registers import stubs (by the address a call reaches, or the import slot it loads).
     pub fn set_hooks(&mut self, hooks: HashMap<u64, orress_emu::Stub>) {
         self.hooks = hooks;

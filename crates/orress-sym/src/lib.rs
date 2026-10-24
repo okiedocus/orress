@@ -64,3 +64,38 @@ pub fn solve_check(
         checks,
     })
 }
+
+/// Like [`solve_check`], but instead of steering to a chosen success *block*, it runs `func` until
+/// it **returns** (steering away from `avoid` — the `return false` blocks) and then requires the
+/// return value be non-zero. This recovers an input a `check(input) -> bool` function *accepts*,
+/// including when the deciding comparison is branchless (`return a[i] == c`), which a block target
+/// cannot constrain. `avoid` should list the failure-verdict blocks.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_check_return(
+    mem: orress_emu::Memory,
+    func: u64,
+    args: &[u64],
+    input_base: u64,
+    input_len: u32,
+    avoid: Vec<u64>,
+    hooks: std::collections::HashMap<u64, orress_emu::Stub>,
+    abi: Abi,
+) -> Result<Found, SymError> {
+    let mut sx = SymExec::new_to_return(mem, input_base, input_len, avoid);
+    sx.set_hooks(hooks);
+    sx.run_check(func, args, abi)?;
+    sx.constrain_return_nonzero();
+    let result = solve::solve(&sx.constraints, input_len as usize);
+    let smt2 = expr::to_smt2(&sx.constraints, input_len);
+    let checks = sx
+        .constraints
+        .iter()
+        .map(|c| expr::render(&expr::simplify(c)))
+        .collect();
+    Ok(Found {
+        result,
+        constraints: sx.constraints.len(),
+        smt2,
+        checks,
+    })
+}
