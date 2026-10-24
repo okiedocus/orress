@@ -107,11 +107,10 @@ fn the_image_maps_a_zeroed_bss_tail() {
     assert!(mem.write(0, 1, 1).is_err(), "null stays unmapped");
 }
 
-/// VM lifting decodes and executes x86-64 only; any other ISA is refused with a reason rather
-/// than mis-decoded.
+/// VM lifting decodes and executes x86 (both 64- and 32-bit); any other ISA is refused with a
+/// reason rather than mis-decoded.
 #[test]
-fn try_solve_rejects_non_x64_programs() {
-    let p = program("x86 (32-bit)", 32);
+fn try_solve_accepts_x86_and_rejects_other_arches() {
     let report = orress_vm::VmReport {
         entry: BASE,
         dispatcher: BASE,
@@ -120,11 +119,22 @@ fn try_solve_rejects_non_x64_programs() {
         max_fan_in: 0,
         confidence: 1.0,
     };
-    match orress_vm::try_solve(&p, &report) {
-        Err(orress_sym::SymError::Unsupported { what, .. }) => {
-            assert!(what.contains("x86-64"), "{what}");
-        }
-        other => panic!("expected Unsupported, got {:?}", other.map(|s| s.key)),
+
+    // x86-32 is now supported: it gets past the architecture gate. (This synthetic has no real VM,
+    // so it still fails — but not with an "x86 only" architecture rejection.)
+    let x86 = program("x86 (32-bit)", 32);
+    if let Err(orress_sym::SymError::Unsupported { what, .. }) = orress_vm::try_solve(&x86, &report) {
+        assert!(
+            !what.contains("x86 only"),
+            "x86-32 must not be rejected for its architecture: {what}"
+        );
     }
-    assert!(orress_vm::solve(&p, &report).is_none());
+
+    // A non-x86 architecture is still refused at the gate.
+    let arm = program("ARM64 (AArch64)", 64);
+    match orress_vm::try_solve(&arm, &report) {
+        Err(orress_sym::SymError::Unsupported { what, .. }) => assert!(what.contains("x86"), "{what}"),
+        other => panic!("expected an arch rejection for ARM64, got {:?}", other.map(|s| s.key)),
+    }
+    assert!(orress_vm::solve(&arm, &report).is_none());
 }

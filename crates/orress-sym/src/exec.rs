@@ -63,7 +63,9 @@ enum Flags {
     },
 }
 
-const SENTINEL: u64 = 0x1337_0000_0000_0000;
+/// The fake return address a call pushes so the executor knows the function returned. Chosen to be
+/// unmapped and to fit in 32 bits, so it works for both the 64-bit and 32-bit (cdecl) stack widths.
+const SENTINEL: u64 = 0x1337_0000;
 /// Where the symbolic `malloc` model hands out memory (far from images, stacks and inputs).
 const HEAP_BASE: u64 = 0x5000_0000_0000;
 /// Upper bound on bytes a modelled libc stub copies/sets/allocates, so a bogus size can't spin.
@@ -213,11 +215,24 @@ impl SymExec {
         n
     }
 
-    /// Argument `i` of the current call under the run's ABI.
+    /// Pointer / stack-slot width in bytes for the run's ABI (8 for x64, 4 for 32-bit cdecl).
+    fn ptr(&self) -> u64 {
+        self.abi.ptr_size()
+    }
+
+    /// Argument `i` of the current call under the run's ABI: a register for the 64-bit ABIs, or
+    /// `[rsp + (i+1)*ptr]` (above the return address) for stack-passed cdecl.
     fn arg(&self, i: usize) -> Expr {
-        self.abi
-            .arg_reg(i)
-            .map_or_else(|| expr::konst(0, 64), |r| self.reg(r))
+        if let Some(r) = self.abi.arg_reg(i) {
+            return self.reg(r);
+        }
+        let sp = self.reg(Register::RSP);
+        if !sp.is_concrete() {
+            return expr::konst(0, 64);
+        }
+        let addr = sp.eval(&[]).wrapping_add((i as u64 + 1) * self.ptr());
+        self.load(addr, self.ptr() as usize)
+            .unwrap_or_else(|_| expr::konst(0, 64))
     }
 
     /// Argument `i`, which must be concrete (a pointer or a size).
@@ -362,8 +377,8 @@ impl SymExec {
             }
         };
         let sp = self.concrete_reg(Register::RSP)?;
-        let ret = self.load(sp, 8)?;
-        self.set_reg(Register::RSP, expr::konst(sp.wrapping_add(8), 64));
+        let ret = self.load(sp, self.ptr() as usize)?;
+        self.set_reg(Register::RSP, expr::konst(sp.wrapping_add(self.ptr()), 64));
         self.set_reg(Register::RAX, rax);
         self.rip = if ret.is_concrete() {
             ret.eval(&[])
@@ -383,11 +398,7 @@ impl SymExec {
     /// ABI registers, a stack with a return sentinel, the thread block, and `rip` at `func`.
     fn setup_call(&mut self, func: u64, args: &[u64], abi: Abi) {
         self.abi = abi;
-        for (i, &a) in args.iter().enumerate() {
-            if let Some(r) = abi.arg_reg(i) {
-                self.set_reg(r, expr::konst(a, 64));
-            }
-        }
+        let ps = abi.ptr_size();
         let top = 0x7fff_0000u64;
         let m = Rc::make_mut(&mut self.mem);
         m.map_zeroed(top - 0x10000, 0x10000);
@@ -395,8 +406,25 @@ impl SymExec {
         self.fs_base = fs;
         self.gs_base = gs;
         let sp = (top - 0x100) & !0xf;
-        Rc::make_mut(&mut self.mem).write(sp - 8, SENTINEL, 8).ok();
-        self.set_reg(Register::RSP, expr::konst(sp - 8, 64));
+        let esp = if abi.stack_args() {
+            // cdecl: esp -> return address, arg i at [esp + (i+1)*ptr].
+            let m = Rc::make_mut(&mut self.mem);
+            let _ = m.write(sp, SENTINEL, ps as usize);
+            for (i, &a) in args.iter().enumerate() {
+                let _ = m.write(sp + (i as u64 + 1) * ps, a, ps as usize);
+            }
+            sp
+        } else {
+            // register ABI: arguments in registers, the return sentinel pushed below sp.
+            for (i, &a) in args.iter().enumerate() {
+                if let Some(r) = abi.arg_reg(i) {
+                    self.set_reg(r, expr::konst(a, 64));
+                }
+            }
+            let _ = Rc::make_mut(&mut self.mem).write(sp - ps, SENTINEL, ps as usize);
+            sp - ps
+        };
+        self.set_reg(Register::RSP, expr::konst(esp, 64));
         self.rip = func;
     }
 
@@ -521,7 +549,10 @@ impl SymExec {
         if n == 0 {
             return Err(SymError::Fault(ip));
         }
-        let mut dec = iced_x86::Decoder::with_ip(64, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
+        // Decode at the ABI's bitness: 32-bit cdecl code decodes differently (e.g. 0x42 is `inc
+        // edx`, not a REX prefix), so a fixed 64-bit decoder would mis-read every 32-bit function.
+        let bitness = if self.ptr() == 4 { 32 } else { 64 };
+        let mut dec = iced_x86::Decoder::with_ip(bitness, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
         let instr = dec.decode();
         if instr.is_invalid() {
             return Err(SymError::Fault(ip));
@@ -787,8 +818,9 @@ impl SymExec {
 
     /// Pushes the return address (`self.rip`, already past the call).
     fn push_ret(&mut self) -> Result<(), SymError> {
-        let sp = self.concrete_reg(Register::RSP)?.wrapping_sub(8);
-        self.store(sp, &expr::konst(self.rip, 64), 8);
+        let ps = self.ptr();
+        let sp = self.concrete_reg(Register::RSP)?.wrapping_sub(ps);
+        self.store(sp, &expr::konst(self.rip, 64), ps as usize);
         self.set_reg(Register::RSP, expr::konst(sp, 64));
         Ok(())
     }
@@ -882,16 +914,18 @@ impl SymExec {
                 self.set_reg(Register::RAX, v);
             }
             M::Push => {
-                let v = self.read_op(instr, 0, 64)?;
-                let sp = self.concrete_reg(Register::RSP)?.wrapping_sub(8);
-                self.store(sp, &v, 8);
+                let ps = self.ptr();
+                let v = self.read_op(instr, 0, (ps * 8) as u32)?;
+                let sp = self.concrete_reg(Register::RSP)?.wrapping_sub(ps);
+                self.store(sp, &v, ps as usize);
                 self.set_reg(Register::RSP, expr::konst(sp, 64));
             }
             M::Pop => {
+                let ps = self.ptr();
                 let sp = self.concrete_reg(Register::RSP)?;
-                let v = self.load(sp, 8)?;
-                self.set_reg(Register::RSP, expr::konst(sp.wrapping_add(8), 64));
-                self.write_op(instr, 0, v, 64)?;
+                let v = self.load(sp, ps as usize)?;
+                self.set_reg(Register::RSP, expr::konst(sp.wrapping_add(ps), 64));
+                self.write_op(instr, 0, v, (ps * 8) as u32)?;
             }
             M::Call => {
                 if let Some(stub) = self.slot_hook(instr)? {
@@ -912,8 +946,9 @@ impl SymExec {
                 self.rip = t;
             }
             M::Ret => {
+                let ps = self.ptr();
                 let sp = self.concrete_reg(Register::RSP)?;
-                let v = self.load(sp, 8)?;
+                let v = self.load(sp, ps as usize)?;
                 let extra = if instr.op_count() == 1 {
                     instr.immediate(0)
                 } else {
@@ -921,7 +956,7 @@ impl SymExec {
                 };
                 self.set_reg(
                     Register::RSP,
-                    expr::konst(sp.wrapping_add(8).wrapping_add(extra), 64),
+                    expr::konst(sp.wrapping_add(ps).wrapping_add(extra), 64),
                 );
                 self.rip = if v.is_concrete() {
                     v.eval(&[])
@@ -943,10 +978,11 @@ impl SymExec {
                 }
             }
             M::Leave => {
+                let ps = self.ptr();
                 let rbp = self.concrete_reg(Register::RBP)?;
                 self.set_reg(Register::RSP, expr::konst(rbp, 64));
-                let v = self.load(rbp, 8)?;
-                self.set_reg(Register::RSP, expr::konst(rbp.wrapping_add(8), 64));
+                let v = self.load(rbp, ps as usize)?;
+                self.set_reg(Register::RSP, expr::konst(rbp.wrapping_add(ps), 64));
                 self.set_reg(Register::RBP, v);
             }
             M::Nop | M::Endbr64 | M::Endbr32 => {}

@@ -198,6 +198,10 @@ pub enum Abi {
     Win64,
     /// System V (Linux/macOS): rdi, rsi, rdx, rcx, r8, r9.
     SysV,
+    /// 32-bit x86 cdecl/stdcall: all integer arguments on the stack (`[esp+4]`, `[esp+8]`, …),
+    /// 4-byte pointers. (For *reading* arguments cdecl and stdcall are identical; who cleans the
+    /// stack afterward doesn't matter to the solver.)
+    Cdecl,
 }
 
 /// C-style comparison result (0 equal, 1 / -1 as u64) for strcmp/memcmp stubs.
@@ -217,6 +221,7 @@ impl Abi {
         let regs: &[iced_x86::Register] = match self {
             Self::Win64 => &[RCX, RDX, R8, R9],
             Self::SysV => &[RDI, RSI, RDX, RCX, R8, R9],
+            Self::Cdecl => &[], // all arguments on the stack
         };
         regs.get(i).copied()
     }
@@ -226,16 +231,30 @@ impl Abi {
         match self {
             Self::Win64 => 4,
             Self::SysV => 6,
+            Self::Cdecl => 0,
         }
     }
 
     /// Bytes the caller reserves above the return address before the stack arguments (Win64's
-    /// 32-byte home/shadow space; none for System V).
+    /// 32-byte home/shadow space; none for System V or cdecl).
     pub fn shadow_space(self) -> u64 {
         match self {
             Self::Win64 => 32,
-            Self::SysV => 0,
+            Self::SysV | Self::Cdecl => 0,
         }
+    }
+
+    /// Pointer / stack-slot width in bytes: 8 for the 64-bit ABIs, 4 for 32-bit cdecl.
+    pub fn ptr_size(self) -> u64 {
+        match self {
+            Self::Win64 | Self::SysV => 8,
+            Self::Cdecl => 4,
+        }
+    }
+
+    /// Whether integer arguments are passed on the stack (cdecl) rather than in registers.
+    pub fn stack_args(self) -> bool {
+        matches!(self, Self::Cdecl)
     }
 }
 

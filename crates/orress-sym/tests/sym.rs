@@ -229,6 +229,72 @@ fn path_explorer_solves_a_symbolic_length_loop() {
     assert_eq!(&found.result.input[..3], b"abc", "explorer must recover the key prefix");
 }
 
+/// A **32-bit cdecl** per-byte check: the input pointer arrives on the stack (`[esp+4]`), not in a
+/// register, and the stack slots are 4 bytes wide. Exercises the pointer-size parameterization and
+/// cdecl stack-argument reading.
+#[test]
+fn recovers_a_32bit_cdecl_check() {
+    use iced_x86::code_asm::*;
+    use orress_emu::Abi;
+    let target = [0x11u8, 0x22, 0x33, 0x44];
+    let len = target.len();
+
+    let mut a = CodeAssembler::new(32).unwrap();
+    let mut loop_l = a.create_label();
+    let mut pass_l = a.create_label();
+    let mut fail_l = a.create_label();
+    a.mov(ecx, dword_ptr(esp + 4)).unwrap(); // s = arg0 (cdecl: on the stack)
+    a.xor(edx, edx).unwrap(); // i = 0
+    a.set_label(&mut loop_l).unwrap();
+    a.cmp(edx, len as i32).unwrap();
+    a.jae(pass_l).unwrap();
+    a.movzx(eax, byte_ptr(ecx + edx)).unwrap();
+    a.xor(al, KEY as i32).unwrap();
+    a.mov(esi, TARGET_ADDR as u32).unwrap();
+    a.movzx(ebx, byte_ptr(esi + edx)).unwrap();
+    a.cmp(al, bl).unwrap();
+    a.jne(fail_l).unwrap();
+    a.inc(edx).unwrap();
+    a.jmp(loop_l).unwrap();
+    a.set_label(&mut pass_l).unwrap();
+    a.mov(eax, 1).unwrap();
+    a.ret().unwrap();
+    a.set_label(&mut fail_l).unwrap();
+    a.xor(eax, eax).unwrap();
+    a.ret().unwrap();
+    let code = a.assemble(BASE).unwrap();
+
+    // 32-bit decode to find the `jne fail` target (the shared fail_addr uses a 64-bit decoder).
+    let mut dec = Decoder::with_ip(32, &code, BASE, DecoderOptions::NONE);
+    let mut fail = 0u64;
+    while dec.can_decode() {
+        let insn = dec.decode();
+        if insn.mnemonic() == Mnemonic::Jne {
+            fail = insn.near_branch_target();
+        }
+    }
+
+    let mut mem = Memory::new();
+    mem.write_bytes(BASE, &code);
+    mem.write_bytes(TARGET_ADDR, &target);
+    mem.map_zeroed(INPUT, 64);
+
+    let found = orress_sym::solve_check_return(
+        mem,
+        BASE,
+        &[INPUT],
+        INPUT,
+        len as u32,
+        vec![fail],
+        Default::default(),
+        Abi::Cdecl,
+    )
+    .unwrap();
+    assert!(found.result.complete, "incomplete: {}", found.result.message);
+    let expected: Vec<u8> = target.iter().map(|&t| t ^ KEY as u8).collect();
+    assert_eq!(found.result.input, expected, "32-bit cdecl key must be recovered");
+}
+
 /// `check(ptr) { for i { if rol(ptr[i]^KEY, 3) != target[i] return 0 } return 1 }` — the kind of
 /// per-byte transform a bytecode VM performs. Exercises symbolic `rol`.
 fn build_rol(len: i32) -> Vec<u8> {

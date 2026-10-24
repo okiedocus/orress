@@ -40,6 +40,20 @@ pub struct VmSolution {
 /// Input lengths to try (the VM's length check rejects wrong lengths concretely and fast).
 const MAX_LEN: u32 = 48;
 
+/// The calling convention for `program`'s architecture, or `None` if the symbolic executor can't
+/// handle it. x86-64 uses the platform ABI (SysV for ELF, Win64 otherwise); x86-32 uses cdecl.
+fn abi_for(program: &Program) -> Option<Abi> {
+    match program.isa {
+        Isa::X64 => Some(if program.memory.is_elf {
+            Abi::SysV
+        } else {
+            Abi::Win64
+        }),
+        Isa::X86 => Some(Abi::Cdecl),
+        _ => None,
+    }
+}
+
 /// Concolically solve a detected VM, recovering the key. Returns `None` if the interpreter's
 /// verdict blocks can't be identified or no length yields a solution; [`try_solve`] says why.
 pub fn solve(program: &Program, report: &VmReport) -> Option<VmSolution> {
@@ -66,21 +80,12 @@ pub fn try_solve(program: &Program, report: &VmReport) -> Result<VmSolution, Sym
         addr: report.entry,
         what: what.to_string(),
     };
-    // The symbolic executor and `decode_block` are x86-64 only.
-    if program.isa != Isa::X64 {
-        return Err(unsupported(&format!(
-            "VM lifting for {:?} (x86-64 only)",
-            program.isa
-        )));
-    }
+    // The symbolic executor handles x86-64 and x86-32.
+    let abi = abi_for(program)
+        .ok_or_else(|| unsupported(&format!("VM lifting for {:?} (x86 only)", program.isa)))?;
     let func = program
         .function_containing(report.entry)
         .ok_or_else(|| unsupported("VM entry outside any function"))?;
-    let abi = if program.memory.is_elf {
-        Abi::SysV
-    } else {
-        Abi::Win64
-    };
 
     let (target, avoid) = verdict_blocks(program, func)
         .ok_or_else(|| unsupported("interpreter without a recognisable success verdict"))?;
@@ -186,9 +191,7 @@ fn input_placement(program: &Program) -> u64 {
 /// caller's own function selection). Returns the recovered input and the lifted per-byte checks, or
 /// `None` if the program is not x86-64, the function is unknown, or no input length solves.
 pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<VmSolution> {
-    if program.isa != Isa::X64 {
-        return None;
-    }
+    abi_for(program)?;
     let func = program
         .functions
         .get(&func_entry)
@@ -299,9 +302,7 @@ fn avoid_set_for_target(program: &Program, func: &Function, target: u64) -> Vec<
 /// Returns the recovered accepting input, or `None` if the program is not x86-64, the function is
 /// unknown, has no identifiable success block, or no input length solves.
 pub fn solve_stdin_function(program: &Program, func_entry: u64, abi: Abi) -> Option<VmSolution> {
-    if program.isa != Isa::X64 {
-        return None;
-    }
+    abi_for(program)?;
     let func = program
         .functions
         .get(&func_entry)
