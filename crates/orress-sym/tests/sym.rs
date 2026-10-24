@@ -150,6 +150,85 @@ fn recovers_input_read_via_hooked_gets() {
     assert_eq!(found.result.input, expected, "key read via gets must be recovered");
 }
 
+/// A check with a **symbolic-length `strlen` loop** whose loop-back is the *taken* edge, so the
+/// single-path steerer exits it on the first byte and never discovers the accepting path. The
+/// path explorer forks the loop and finds it. Shape:
+///   gets(buf); i=0; while buf[i]!=0 { i++ }      // strlen, loop-back taken
+///   if i < 3 return;                              // length gate
+///   if buf[0..3] != "abc" return;                 // per-byte check
+///   success:                                      // the target block
+#[test]
+fn path_explorer_solves_a_symbolic_length_loop() {
+    use iced_x86::{Decoder, DecoderOptions, Mnemonic};
+    use orress_emu::{Abi, InputReturn, Stub};
+    let buf = 0x9000u64;
+    let mut a = CodeAssembler::new(64).unwrap();
+    let mut top = a.create_label();
+    let mut done = a.create_label();
+    let mut fail = a.create_label();
+    a.mov(rcx, buf).unwrap();
+    a.call(qword_ptr(SLOT)).unwrap(); // gets(buf) → symbolize [buf, buf+len)
+    a.mov(rsi, buf).unwrap();
+    a.xor(edx, edx).unwrap(); // i = 0
+    a.set_label(&mut top).unwrap();
+    a.movzx(eax, byte_ptr(rsi + rdx)).unwrap();
+    a.inc(rdx).unwrap();
+    a.test(eax, eax).unwrap();
+    a.jne(top).unwrap(); // continue while buf[i] != 0  (taken edge = loop-back)
+    a.set_label(&mut done).unwrap();
+    a.dec(rdx).unwrap(); // rdx = strlen
+    a.cmp(rdx, 3).unwrap();
+    a.jb(fail).unwrap(); // length < 3 → reject
+    a.movzx(eax, byte_ptr(rsi)).unwrap();
+    a.cmp(eax, b'a' as i32).unwrap();
+    a.jne(fail).unwrap();
+    a.movzx(eax, byte_ptr(rsi + 1u64)).unwrap();
+    a.cmp(eax, b'b' as i32).unwrap();
+    a.jne(fail).unwrap();
+    a.movzx(eax, byte_ptr(rsi + 2u64)).unwrap();
+    a.cmp(eax, b'c' as i32).unwrap();
+    a.jne(fail).unwrap(); // success falls through here
+    a.nop().unwrap(); // the success/target block
+    a.ret().unwrap();
+    a.set_label(&mut fail).unwrap();
+    a.ret().unwrap();
+    let code = a.assemble(BASE).unwrap();
+
+    // The success block is the fall-through of the last `jne` (the nop).
+    let mut dec = Decoder::with_ip(64, &code, BASE, DecoderOptions::NONE);
+    let mut last_jne_end = 0u64;
+    while dec.can_decode() {
+        let insn = dec.decode();
+        if insn.mnemonic() == Mnemonic::Jne {
+            last_jne_end = insn.next_ip();
+        }
+    }
+    let success = last_jne_end;
+
+    let mut mem = Memory::new();
+    mem.write_bytes(BASE, &code);
+    mem.map_zeroed(buf, 64);
+    mem.write_bytes(SLOT, &0u64.to_le_bytes());
+    let hooks: std::collections::HashMap<u64, Stub> =
+        [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })].into_iter().collect();
+
+    // Single-path steerer exits the strlen loop immediately → can't reach success.
+    let single = orress_sym::solve_check(
+        mem.clone(), BASE, &[], 0xd000, 4, success, vec![], hooks.clone(), Abi::Win64,
+    )
+    .unwrap();
+    assert!(!single.result.complete || &single.result.input[..3] != b"abc",
+        "single-path should NOT solve the symbolic-length loop (got {:?})", single.result.input);
+
+    // Path explorer forks the loop and finds "abc".
+    let found = orress_sym::solve_check_explore(
+        mem, BASE, &[], 0xd000, 4, success, vec![], hooks, Abi::Win64, 4000, 2_000_000,
+    )
+    .expect("explorer should find an accepting path");
+    assert!(found.result.complete, "explorer solve incomplete: {}", found.result.message);
+    assert_eq!(&found.result.input[..3], b"abc", "explorer must recover the key prefix");
+}
+
 /// `check(ptr) { for i { if rol(ptr[i]^KEY, 3) != target[i] return 0 } return 1 }` — the kind of
 /// per-byte transform a bytecode VM performs. Exercises symbolic `rol`.
 fn build_rol(len: i32) -> Vec<u8> {

@@ -65,6 +65,43 @@ pub fn solve_check(
     })
 }
 
+/// Path-exploring variant of [`solve_check`]: at a symbolic branch it forks and follows **both**
+/// directions, so it can find an input the function accepts even when reaching `target` requires
+/// looping N times on a symbolic condition (an input-length `strlen`, a digit-validation loop) —
+/// which the single-path steerer cannot. Bounded by `max_states` (frontier size) and `max_steps`
+/// (total instructions). Returns `None` if no accepting path is found within budget.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_check_explore(
+    mem: orress_emu::Memory,
+    func: u64,
+    args: &[u64],
+    input_base: u64,
+    input_len: u32,
+    target: u64,
+    avoid: Vec<u64>,
+    hooks: std::collections::HashMap<u64, orress_emu::Stub>,
+    abi: Abi,
+    max_states: usize,
+    max_steps: u64,
+) -> Option<Found> {
+    let mut sx = SymExec::new(mem, input_base, input_len, target, avoid);
+    sx.set_hooks(hooks);
+    let win = sx.run_explore(func, args, abi, max_states, max_steps)?;
+    let result = solve::solve(&win.constraints, input_len as usize);
+    let smt2 = expr::to_smt2(&win.constraints, input_len);
+    let checks = win
+        .constraints
+        .iter()
+        .map(|c| expr::render(&expr::simplify(c)))
+        .collect();
+    Some(Found {
+        result,
+        constraints: win.constraints.len(),
+        smt2,
+        checks,
+    })
+}
+
 /// Like [`solve_check`], but instead of steering to a chosen success *block*, it runs `func` until
 /// it **returns** (steering away from `avoid` — the `return false` blocks) and then requires the
 /// return value be non-zero. This recovers an input a `check(input) -> bool` function *accepts*,

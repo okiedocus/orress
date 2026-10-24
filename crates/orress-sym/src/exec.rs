@@ -11,6 +11,7 @@
 //! silently producing constraints that don't describe the real program.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use iced_x86::{
     Instruction, InstructionInfoFactory, Mnemonic, OpAccess, OpKind, Register, RflagsBits,
@@ -78,13 +79,19 @@ const MAX_EXPR_DEPTH: usize = 512;
 /// its (recursive) `Rc` drop is safe; a larger compare is reported unsupported.
 const MAX_CMP_BYTES: usize = 4096;
 
+/// Cloneable so the path-exploring driver ([`crate::explore`]) can fork a state at a symbolic
+/// branch. The base image is an `Rc<Memory>` shared across forks (reads deref it; the rare write —
+/// `malloc`/stack growth — copies-on-write via `Rc::make_mut`), because every *symbolic* write
+/// already lands in the per-state `sym_mem` overlay, not the base. So a fork clones only the small
+/// symbolic state (registers, overlay, constraints), not the whole address space.
+#[derive(Clone)]
 pub struct SymExec {
     regs: [Expr; 16],
     /// XMM registers as 16 byte lanes each (SSE byte-vector modelling, enough for the widened
     /// `[u8; 16] == …` compare: movdqu / pcmpeqb / pmovmskb).
     xmm: Vec<[Expr; 16]>,
     rip: u64,
-    mem: Memory,
+    mem: Rc<Memory>,
     /// Symbolic bytes written to concrete addresses (overrides concrete memory).
     sym_mem: HashMap<u64, Expr>,
     input_base: u64,
@@ -103,6 +110,11 @@ pub struct SymExec {
     /// FS / GS segment bases (the thread block mapped by [`orress_emu::setup_tls`]).
     fs_base: u64,
     gs_base: u64,
+    /// Path-exploration mode: when set, a symbolic conditional does not greedily pick a direction;
+    /// it records [`Self::fork_pending`] for the driver to split the state in two.
+    forking: bool,
+    /// Set by [`Self::branch`] in forking mode: `(condition, taken_rip, fallthrough_rip)`.
+    fork_pending: Option<(Expr, u64, u64)>,
 }
 
 impl SymExec {
@@ -115,7 +127,7 @@ impl SymExec {
                 .map(|_| std::array::from_fn(|_| expr::konst(0, 8)))
                 .collect(),
             rip: 0,
-            mem,
+            mem: Rc::new(mem),
             sym_mem: HashMap::new(),
             input_base,
             input_len,
@@ -129,6 +141,8 @@ impl SymExec {
             heap: HEAP_BASE,
             fs_base: 0,
             gs_base: 0,
+            forking: false,
+            fork_pending: None,
         }
     }
 
@@ -264,7 +278,11 @@ impl SymExec {
                 for i in 0..u64::from(self.input_len) {
                     self.sym_mem.remove(&buf.wrapping_add(i));
                 }
-                self.mem.map_zeroed(buf, u64::from(self.input_len) + 16);
+                // Usually the buffer is on the already-mapped stack; only map (copy-on-write) if
+                // not, so a fork that reads input doesn't needlessly clone the base image.
+                if !self.mem.is_mapped(buf) {
+                    Rc::make_mut(&mut self.mem).map_zeroed(buf, u64::from(self.input_len) + 16);
+                }
                 for i in 0..16 {
                     self.sym_mem
                         .insert(buf.wrapping_add(u64::from(self.input_len) + i), expr::konst(0, 8));
@@ -339,7 +357,7 @@ impl SymExec {
                 let size = self.stub_size(0, "malloc")?.max(1);
                 let addr = self.heap;
                 self.heap = self.heap.wrapping_add(size).wrapping_add(15) & !15;
-                self.mem.map_zeroed(addr, size);
+                Rc::make_mut(&mut self.mem).map_zeroed(addr, size);
                 expr::konst(addr, 64)
             }
         };
@@ -355,8 +373,15 @@ impl SymExec {
         Ok(())
     }
 
-    /// Sets up a call `func(args...)` under `abi`, then runs until the target is reached.
+    /// Sets up a call `func(args...)` under `abi`, then runs (single-path) until the target.
     pub fn run_check(&mut self, func: u64, args: &[u64], abi: Abi) -> Result<(), SymError> {
+        self.setup_call(func, args, abi);
+        self.run()
+    }
+
+    /// The call frame setup shared by [`Self::run_check`] and the path explorer: arguments in the
+    /// ABI registers, a stack with a return sentinel, the thread block, and `rip` at `func`.
+    fn setup_call(&mut self, func: u64, args: &[u64], abi: Abi) {
         self.abi = abi;
         for (i, &a) in args.iter().enumerate() {
             if let Some(r) = abi.arg_reg(i) {
@@ -364,15 +389,84 @@ impl SymExec {
             }
         }
         let top = 0x7fff_0000u64;
-        self.mem.map_zeroed(top - 0x10000, 0x10000);
-        let (fs, gs) = orress_emu::setup_tls(&mut self.mem);
+        let m = Rc::make_mut(&mut self.mem);
+        m.map_zeroed(top - 0x10000, 0x10000);
+        let (fs, gs) = orress_emu::setup_tls(m);
         self.fs_base = fs;
         self.gs_base = gs;
         let sp = (top - 0x100) & !0xf;
-        self.mem.write(sp - 8, SENTINEL, 8).ok();
+        Rc::make_mut(&mut self.mem).write(sp - 8, SENTINEL, 8).ok();
         self.set_reg(Register::RSP, expr::konst(sp - 8, 64));
         self.rip = func;
-        self.run()
+    }
+
+    /// Path-exploring run: set up the call, then explore forked paths to the target. Unlike the
+    /// single-path [`Self::run_check`], at a symbolic branch it clones the state and follows **both**
+    /// directions, so it can discover a path that must loop N times on a symbolic condition (an
+    /// input-length `strlen`, a digit-validation loop) — which the greedy single-path steerer
+    /// cannot. Returns the first state that reaches the target with a satisfiable path condition, or
+    /// `None` if none is found within the state/step budget.
+    pub fn run_explore(
+        mut self,
+        func: u64,
+        args: &[u64],
+        abi: Abi,
+        max_states: usize,
+        max_steps: u64,
+    ) -> Option<SymExec> {
+        self.forking = true;
+        self.setup_call(func, args, abi);
+        self.explore(max_states, max_steps)
+    }
+
+    /// Worklist exploration (DFS, taken-branch first). Each state advances until it forks (push both
+    /// children), reaches the target (solve its path condition — return it if satisfiable), or dies
+    /// (returns via the sentinel, hits an avoided block, faults, or grows too complex). Bounded by
+    /// the frontier size and a total step budget so a path explosion or an unbounded loop can't run
+    /// away.
+    fn explore(self, max_states: usize, max_steps: u64) -> Option<SymExec> {
+        let input_len = self.input_len as usize;
+        let mut frontier: Vec<SymExec> = vec![self];
+        let mut steps = 0u64;
+        while let Some(mut st) = frontier.pop() {
+            loop {
+                if st.rip == st.target {
+                    // Reached the goal: is this path's accumulated condition satisfiable?
+                    if crate::solve::solve(&st.constraints, input_len).complete {
+                        return Some(st);
+                    }
+                    break; // unsatisfiable path condition — drop it
+                }
+                if st.rip == SENTINEL || st.avoid.contains(&st.rip) {
+                    break; // returned without the target, or steered into a doomed block
+                }
+                if steps >= max_steps {
+                    return None;
+                }
+                steps += 1;
+                if st.step().is_err() {
+                    break; // fault / unmodelled op on this path
+                }
+                if steps.is_multiple_of(64) && st.too_complex() {
+                    break; // deep input-dependent expression this path's solver won't crack
+                }
+                if let Some((cond, taken, fall)) = st.fork_pending.take() {
+                    if frontier.len() + 2 > max_states {
+                        return None; // frontier cap — give up rather than thrash
+                    }
+                    let mut child_t = st.clone();
+                    child_t.add_constraint(cond.clone());
+                    child_t.rip = taken;
+                    let mut child_f = st; // reuse this state as the fall-through child
+                    child_f.add_constraint(expr::bnot(cond));
+                    child_f.rip = fall;
+                    frontier.push(child_f); // explore the taken branch first (DFS)
+                    frontier.push(child_t);
+                    break;
+                }
+            }
+        }
+        None
     }
 
     fn run(&mut self) -> Result<(), SymError> {
@@ -1205,7 +1299,13 @@ impl SymExec {
             self.rip = if cond.eval(&[]) != 0 { taken } else { fall };
             return Ok(());
         }
-        // Input-dependent: steer toward the target, away from the avoided blocks.
+        // Path-exploration mode: don't pick — hand both directions to the driver, which clones the
+        // state and adds `cond` to one branch and `!cond` to the other.
+        if self.forking {
+            self.fork_pending = Some((cond, taken, fall));
+            return Ok(());
+        }
+        // Single-path mode: steer toward the target, away from the avoided blocks.
         let go_taken = if self.avoid.contains(&taken) {
             false
         } else if self.avoid.contains(&fall) {

@@ -306,32 +306,38 @@ pub fn solve_stdin_function(program: &Program, func_entry: u64, abi: Abi) -> Opt
         .functions
         .get(&func_entry)
         .or_else(|| program.function_containing(func_entry))?;
-    let (target, avoid) = success_block(program, func)?;
+    // Only the target (success block) matters here; the path explorer prunes dead paths by the
+    // return sentinel, so it doesn't need — and isn't misled by — a reverse-reachability avoid set.
+    let (target, _avoid) = success_block(program, func)?;
 
     let input_base = input_placement(program);
     let base_mem = emu_image(program);
     let hooks = import_hooks(program);
 
-    let mut best: Option<VmSolution> = None;
+    // Reaching the verdict means looping N times on a symbolic condition (the input-length scan,
+    // the per-char validation), so this uses the path-exploring solver, not the single-path steerer.
     for input_len in 1..=MAX_LEN {
         let mut mem = base_mem.clone();
         mem.map_zeroed(input_base, u64::from(input_len) + 16);
-        // No meaningful arguments: the input arrives through the read hook, not as an argument.
-        let Ok(found) = orress_sym::solve_check(
+        let Some(found) = orress_sym::solve_check_explore(
             mem,
             func.entry,
             &[],
             input_base,
             input_len,
             target,
-            avoid.clone(),
+            Vec::new(),
             hooks.clone(),
             abi,
+            EXPLORE_MAX_STATES,
+            EXPLORE_MAX_STEPS,
         ) else {
             continue;
         };
         if found.result.complete && found.constraints > 0 {
-            let sol = VmSolution {
+            // First accepting path wins: a shorter length is the natural key length, and the
+            // explorer already proved this input drives execution to the success block.
+            return Some(VmSolution {
                 func: func.entry,
                 input_len,
                 key: found.result.input,
@@ -339,14 +345,16 @@ pub fn solve_stdin_function(program: &Program, func_entry: u64, abi: Abi) -> Opt
                 constraints: found.constraints,
                 checks: found.checks,
                 smt2: found.smt2,
-            };
-            if best.as_ref().is_none_or(|b| sol.constraints > b.constraints) {
-                best = Some(sol);
-            }
+            });
         }
     }
-    best
+    None
 }
+
+/// Frontier and total-step caps for [`solve_stdin_function`]'s path exploration, bounding path
+/// explosion and unbounded loops.
+const EXPLORE_MAX_STATES: usize = 4000;
+const EXPLORE_MAX_STEPS: u64 = 1_000_000;
 
 /// The success block to steer toward (and the blocks to avoid): a block of `func` whose code
 /// references a success-indicator string. `None` if the function references no such string.
