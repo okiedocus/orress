@@ -447,7 +447,7 @@ impl SymExec {
                 }
                 steps += 1;
                 if st.step().is_err() {
-                    break; // fault / unmodelled op on this path
+                    break; // fault / unmodelled op (e.g. a symbolic-address access) on this path
                 }
                 if steps.is_multiple_of(64) && st.too_complex() {
                     break; // deep input-dependent expression this path's solver won't crack
