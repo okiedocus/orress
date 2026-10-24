@@ -17,6 +17,6 @@ mod vm;
 pub use etw::{ActivityEvent, Category, Monitor};
 pub use fakenet::{Config as FakeNetConfig, FakeNet, NetEvent, NetKind};
 pub use guard::{Decision, Policy, guard};
-pub use launch::{RunEvent, RunLog, run};
+pub use launch::{RunEvent, RunLog, run, run_with_stdin};
 pub use store::{defang, load, refang, store};
 pub use vm::{VmEvidence, detect, in_vm};

@@ -99,6 +99,18 @@ impl Tree {
 /// Runs `exe` with `args` (in `cwd` if given), capturing its output and exit, killing it after
 /// `timeout`. The caller is responsible for having passed the execution guard first.
 pub fn run(exe: &Path, args: &[String], cwd: Option<&Path>, timeout: Duration) -> RunLog {
+    run_with_stdin(exe, args, cwd, timeout, None)
+}
+
+/// Like [`run`], but also writes `stdin_data` to the sample's standard input (then closes it, so a
+/// program blocked on `read_line` sees EOF). Used to drive console password prompts.
+pub fn run_with_stdin(
+    exe: &Path,
+    args: &[String],
+    cwd: Option<&Path>,
+    timeout: Duration,
+    stdin_data: Option<&[u8]>,
+) -> RunLog {
     let events: Events = Arc::new(Mutex::new(Vec::new()));
     let push = |e: RunEvent| events.lock().unwrap().push(e);
     let start = Instant::now();
@@ -106,7 +118,11 @@ pub fn run(exe: &Path, args: &[String], cwd: Option<&Path>, timeout: Duration) -
 
     let mut cmd = Command::new(exe);
     cmd.args(args)
-        .stdin(Stdio::null())
+        .stdin(if stdin_data.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(dir) = cwd {
@@ -137,6 +153,17 @@ pub fn run(exe: &Path, args: &[String], cwd: Option<&Path>, timeout: Duration) -
     };
     let tree = Tree::attach(&child);
     push(RunEvent::Started(child.id()));
+
+    // Feed stdin (after the child is resumed on Windows), then close it so a blocked read sees EOF.
+    if let Some(data) = stdin_data
+        && let Some(mut si) = child.stdin.take()
+    {
+        let data = data.to_vec();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = si.write_all(&data);
+        });
+    }
 
     // Stream stdout/stderr on helper threads into the shared log.
     let budget = Arc::new(AtomicUsize::new(0));
