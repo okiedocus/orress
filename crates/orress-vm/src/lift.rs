@@ -255,10 +255,14 @@ fn verdict_blocks(program: &Program, func: &Function) -> Option<(u64, Vec<u64>)>
         .filter(|b| reaches_ret_cleanly(program, func, b.start))
         .find(|b| matches!(verdict_const(program, b), Some(k) if k != 0))
         .map(|b| b.start)?;
+    Some((target, avoid_set_for_target(program, func, target)))
+}
 
-    // Each block's successors, augmented with its recovered switch-table targets: a dispatcher's
-    // register-indirect jump has its cases in `switch_tables`, and the analysis CFG may not carry
-    // every one as a `succs` edge, so reachability has to consult the table directly.
+/// Blocks of `func` from which `target` is NOT reachable over successor edges (augmented with
+/// recovered switch-table targets — a dispatcher's register-indirect `jmp` keeps its cases in
+/// `switch_tables`, and the CFG may not carry every one as a `succs` edge). Steering an
+/// input-dependent branch away from these keeps execution on a path that can still reach `target`.
+fn avoid_set_for_target(program: &Program, func: &Function, target: u64) -> Vec<u64> {
     let succs_of = |b: &Block| -> Vec<u64> {
         let mut s: Vec<u64> = b.succs.iter().map(|e| e.target).collect();
         if let Some(cases) = b.insns.last().and_then(|a| program.switch_tables.get(a)) {
@@ -266,7 +270,6 @@ fn verdict_blocks(program: &Program, func: &Function) -> Option<(u64, Vec<u64>)>
         }
         s
     };
-
     // Reverse reachability: the blocks from which `target` is reachable over successor edges.
     let mut can_reach: HashSet<u64> = HashSet::from([target]);
     let mut changed = true;
@@ -279,13 +282,114 @@ fn verdict_blocks(program: &Program, func: &Function) -> Option<(u64, Vec<u64>)>
             }
         }
     }
-    let avoid = func
-        .blocks
+    func.blocks
         .iter()
         .map(|b| b.start)
         .filter(|a| !can_reach.contains(a))
-        .collect();
-    Some((target, avoid))
+        .collect()
+}
+
+/// Solve a function that reads its input *internally* (via `gets`/`scanf`/`fgets`/`read`/…) and
+/// signals acceptance by reaching a block that prints a success string ("Correct", "You win!", …),
+/// rather than by returning a bool. The input-reading hooks ([`orress_emu::stub_for`]) make the
+/// read buffer the symbolic input; execution is then steered to the success block. This is the
+/// common real-world shape that [`solve_function`] (input == argument, verdict == return) misses:
+/// the input arrives from libc into a stack buffer, not as a function argument.
+///
+/// Returns the recovered accepting input, or `None` if the program is not x86-64, the function is
+/// unknown, has no identifiable success block, or no input length solves.
+pub fn solve_stdin_function(program: &Program, func_entry: u64, abi: Abi) -> Option<VmSolution> {
+    if program.isa != Isa::X64 {
+        return None;
+    }
+    let func = program
+        .functions
+        .get(&func_entry)
+        .or_else(|| program.function_containing(func_entry))?;
+    let (target, avoid) = success_block(program, func)?;
+
+    let input_base = input_placement(program);
+    let base_mem = emu_image(program);
+    let hooks = import_hooks(program);
+
+    let mut best: Option<VmSolution> = None;
+    for input_len in 1..=MAX_LEN {
+        let mut mem = base_mem.clone();
+        mem.map_zeroed(input_base, u64::from(input_len) + 16);
+        // No meaningful arguments: the input arrives through the read hook, not as an argument.
+        let Ok(found) = orress_sym::solve_check(
+            mem,
+            func.entry,
+            &[],
+            input_base,
+            input_len,
+            target,
+            avoid.clone(),
+            hooks.clone(),
+            abi,
+        ) else {
+            continue;
+        };
+        if found.result.complete && found.constraints > 0 {
+            let sol = VmSolution {
+                func: func.entry,
+                input_len,
+                key: found.result.input,
+                complete: true,
+                constraints: found.constraints,
+                checks: found.checks,
+                smt2: found.smt2,
+            };
+            if best.as_ref().is_none_or(|b| sol.constraints > b.constraints) {
+                best = Some(sol);
+            }
+        }
+    }
+    best
+}
+
+/// The success block to steer toward (and the blocks to avoid): a block of `func` whose code
+/// references a success-indicator string. `None` if the function references no such string.
+fn success_block(program: &Program, func: &Function) -> Option<(u64, Vec<u64>)> {
+    // Instruction addresses that reference a success string anywhere in the program.
+    let mut refs: HashSet<u64> = HashSet::new();
+    for (&addr, text) in &program.string_refs {
+        if is_success_text(text) {
+            for x in program.xrefs(addr) {
+                refs.insert(x.from);
+            }
+        }
+    }
+    if refs.is_empty() {
+        return None;
+    }
+    // This function's block that contains one of those references.
+    let target = func
+        .blocks
+        .iter()
+        .find(|b| b.insns.iter().any(|a| refs.contains(a)))?
+        .start;
+    Some((target, avoid_set_for_target(program, func, target)))
+}
+
+/// Whether a referenced string reads like an acceptance verdict. Deliberately strict: a wrong
+/// target would steer the solver at the wrong block, so a failure marker (even one that contains a
+/// success word, like "**in**correct") vetoes the match first.
+fn is_success_text(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    const FAIL: &[&str] = &[
+        "incorrect", "wrong", "invalid", "denied", "fail", "unsuccessful", "try again", "sorry",
+        "error", "not correct", "no match",
+    ];
+    if FAIL.iter().any(|m| t.contains(m)) {
+        return false;
+    }
+    const WIN: &[&str] = &[
+        "correct", "congrat", "you win", "access granted", "well done", "good job", "accepted",
+        "unlocked", "right password", "right key", "right serial", "winner", "you did it",
+        "you got it", "flag{",
+    ];
+    WIN.iter().any(|m| t.contains(m))
 }
 
 /// The constant this block leaves in the return register (rax/eax/al), if its net effect is a

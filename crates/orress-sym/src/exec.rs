@@ -250,9 +250,31 @@ impl SymExec {
     /// Applies an import stub symbolically and returns to the caller. Arguments come from the
     /// run's ABI registers and are only demanded concrete where the model needs them to be.
     fn apply_stub_sym(&mut self, stub: &orress_emu::Stub) -> Result<(), SymError> {
-        use orress_emu::Stub as S;
+        use orress_emu::{InputReturn, Stub as S};
         let rax = match stub {
             S::Return(v) => expr::konst(*v, 64),
+            // An input read: redirect the symbolic input region onto the destination buffer, so the
+            // bytes the program then checks are the symbolic input. The buffer pointer is a concrete
+            // (stack/global) address by the time the call runs.
+            S::ReadInput { buf_arg, ret } => {
+                let buf = self.concrete_arg(*buf_arg)?;
+                self.input_base = buf;
+                // Drop any stale symbolic bytes in the new window, and plant a concrete NUL just
+                // past it so a `strlen`-style scan stops at `input_len` (the swept length).
+                for i in 0..u64::from(self.input_len) {
+                    self.sym_mem.remove(&buf.wrapping_add(i));
+                }
+                self.mem.map_zeroed(buf, u64::from(self.input_len) + 16);
+                for i in 0..16 {
+                    self.sym_mem
+                        .insert(buf.wrapping_add(u64::from(self.input_len) + i), expr::konst(0, 8));
+                }
+                match ret {
+                    InputReturn::Buffer => expr::konst(buf, 64),
+                    InputReturn::Count(n) => expr::konst(*n, 64),
+                    InputReturn::Len => expr::konst(u64::from(self.input_len), 64),
+                }
+            }
             S::Strlen => {
                 let a = self.concrete_arg(0)?;
                 if self.in_input(a) {

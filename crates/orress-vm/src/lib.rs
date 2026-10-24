@@ -538,7 +538,9 @@ fn confidence(handlers: usize, fan_out: usize) -> f32 {
 }
 
 mod lift;
-pub use lift::{VmSolution, emu_image, import_hooks, solve, solve_function, try_solve};
+pub use lift::{
+    VmSolution, emu_image, import_hooks, solve, solve_function, solve_stdin_function, try_solve,
+};
 
 #[cfg(test)]
 mod tests;

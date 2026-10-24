@@ -69,6 +69,17 @@ pub enum Stop {
 /// guest-controlled size can't exhaust host memory or spin an effectively unbounded loop.
 const STUB_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
+/// What an input-reading stub ([`Stub::ReadInput`]) returns in RAX.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputReturn {
+    /// The destination buffer pointer — `gets`/`fgets` return it.
+    Buffer,
+    /// A fixed success count — e.g. `scanf`'s number of conversions, or a WinAPI `BOOL`.
+    Count(u64),
+    /// The number of input bytes read — `read`/`fread` return a byte/element count.
+    Len,
+}
+
 /// A stub that stands in for an imported library function, so calls into code we don't have
 /// (libc / WinAPI) return something sensible instead of faulting. Arguments are read from the
 /// current ABI's argument registers; the result goes in RAX.
@@ -76,6 +87,11 @@ const STUB_MAX_BYTES: u64 = 256 * 1024 * 1024;
 pub enum Stub {
     /// Set RAX to a constant and return (the catch-all for unmodelled imports).
     Return(u64),
+    /// An input read into a caller-supplied buffer (`gets`/`fgets`/`scanf`/`read`/…). The
+    /// destination pointer is argument `buf_arg`; the symbolic executor marks that buffer as the
+    /// symbolic input region so the subsequent checks become constraints on the input. (The
+    /// concrete emulator has no real stdin, so it only returns a plausible value.)
+    ReadInput { buf_arg: usize, ret: InputReturn },
     /// `strlen(s)`.
     Strlen,
     /// `strcmp(a, b)` → 0 if equal.
@@ -110,6 +126,15 @@ pub fn stub_for(name: &str) -> Stub {
         "strcpy" => Stub::Strcpy,
         "atoi" | "strtol" => Stub::Atoi,
         "malloc" | "calloc" => Stub::Malloc,
+        // Input readers: mark the destination buffer as symbolic input. Buffer-pointer argument
+        // index differs per function (and `scanf`'s is its first variadic target, one %s assumed).
+        "gets" | "gets_s" | "fgets" => Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer },
+        "scanf" | "isoc99_scanf" | "scanf_s" => {
+            Stub::ReadInput { buf_arg: 1, ret: InputReturn::Count(1) }
+        }
+        "read" => Stub::ReadInput { buf_arg: 1, ret: InputReturn::Len },
+        "fread" => Stub::ReadInput { buf_arg: 0, ret: InputReturn::Len },
+        "ReadConsoleA" | "ReadConsoleW" => Stub::ReadInput { buf_arg: 1, ret: InputReturn::Count(1) },
         _ => Stub::Return(0),
     }
 }
@@ -284,6 +309,13 @@ impl Emulator {
     pub(crate) fn apply_stub(&mut self, stub: &Stub) -> Result<(), EmuError> {
         let result = match stub {
             Stub::Return(v) => *v,
+            // Concrete emulation has no real stdin; leave the buffer as-is and return plausibly.
+            // (Symbolic execution is what turns the buffer into input — see the symbolic executor.)
+            Stub::ReadInput { buf_arg, ret } => match ret {
+                InputReturn::Buffer => self.arg(*buf_arg),
+                InputReturn::Count(n) => *n,
+                InputReturn::Len => 0,
+            },
             Stub::Strlen => self.read_cstr(self.arg(0), 1 << 20).len() as u64,
             Stub::Strcmp => {
                 let a = self.read_cstr(self.arg(0), 1 << 20);

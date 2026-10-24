@@ -83,6 +83,73 @@ fn recovers_xor_check_input() {
     assert_eq!(found.constraints, target.len());
 }
 
+/// Input read *internally* via a hooked `gets` (not passed as an argument): the `ReadInput` stub
+/// must redirect the symbolic input region onto the buffer the call fills, so the subsequent
+/// per-byte check becomes constraints and the key is recovered. The `input_base` we pass is a
+/// decoy the hook must override.
+#[test]
+fn recovers_input_read_via_hooked_gets() {
+    use orress_emu::{Abi, InputReturn, Stub};
+    let target = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+    let buf = 0x9000u64; // the gets destination buffer
+    let decoy = 0xd000u64; // the input_base we pass; the hook must override it to `buf`
+    let len = target.len() as i32;
+
+    let mut a = CodeAssembler::new(64).unwrap();
+    let mut loop_l = a.create_label();
+    let mut pass_l = a.create_label();
+    let mut fail_l = a.create_label();
+    // gets(buf) — Win64 arg0 is rcx; the hook symbolizes [buf, buf+len).
+    a.mov(rcx, buf).unwrap();
+    a.call(qword_ptr(SLOT)).unwrap();
+    // for i in 0..len { if (buf[i] ^ KEY) != target[i] return 0 }
+    a.xor(ecx, ecx).unwrap();
+    a.set_label(&mut loop_l).unwrap();
+    a.cmp(rcx, len).unwrap();
+    a.jae(pass_l).unwrap();
+    a.mov(rdi, buf).unwrap();
+    a.movzx(eax, byte_ptr(rdi + rcx)).unwrap();
+    a.xor(al, KEY as i32).unwrap();
+    a.mov(r8, TARGET_ADDR).unwrap();
+    a.movzx(edx, byte_ptr(r8 + rcx)).unwrap();
+    a.cmp(al, dl).unwrap();
+    a.jne(fail_l).unwrap();
+    a.inc(rcx).unwrap();
+    a.jmp(loop_l).unwrap();
+    a.set_label(&mut pass_l).unwrap();
+    a.mov(eax, 1).unwrap();
+    a.ret().unwrap();
+    a.set_label(&mut fail_l).unwrap();
+    a.xor(eax, eax).unwrap();
+    a.ret().unwrap();
+    let code = a.assemble(BASE).unwrap();
+    let fail = fail_addr(&code);
+
+    let mut mem = Memory::new();
+    mem.write_bytes(BASE, &code);
+    mem.write_bytes(TARGET_ADDR, &target);
+    mem.map_zeroed(buf, 64);
+    mem.write_bytes(SLOT, &0u64.to_le_bytes());
+
+    let hooks = [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })]
+        .into_iter()
+        .collect();
+    let found = orress_sym::solve_check_return(
+        mem,
+        BASE,
+        &[],
+        decoy,
+        len as u32,
+        vec![fail],
+        hooks,
+        Abi::Win64,
+    )
+    .unwrap();
+    assert!(found.result.complete, "incomplete: {}", found.result.message);
+    let expected: Vec<u8> = target.iter().map(|&t| t ^ KEY as u8).collect();
+    assert_eq!(found.result.input, expected, "key read via gets must be recovered");
+}
+
 /// `check(ptr) { for i { if rol(ptr[i]^KEY, 3) != target[i] return 0 } return 1 }` — the kind of
 /// per-byte transform a bytecode VM performs. Exercises symbolic `rol`.
 fn build_rol(len: i32) -> Vec<u8> {
