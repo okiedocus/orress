@@ -586,15 +586,17 @@ fn unmodelled_instructions_touching_symbolic_data_bail() {
         },
         |a, l| a.jne(l).unwrap(),
     );
-    let movdqu = flag_check(
+    // An unmodelled SSE instruction that reads symbolic memory still bails (movdqu/pcmpeqb/pmovmskb
+    // are modelled now, but a packed-float op is not).
+    let addps = flag_check(
         |a| {
-            a.movdqu(xmm0, xmmword_ptr(rdi)).unwrap();
+            a.addps(xmm0, xmmword_ptr(rdi)).unwrap();
             a.movzx(eax, byte_ptr(rdi)).unwrap();
             a.cmp(al, 0x41).unwrap();
         },
         |a, l| a.jne(l).unwrap(),
     );
-    for (name, (code, fail)) in [("cmove", cmov), ("movdqu", movdqu)] {
+    for (name, (code, fail)) in [("cmove", cmov), ("addps", addps)] {
         let r = run_sym(&code, fail, 16, Default::default(), Abi::SysV, |_| {});
         assert!(
             matches!(r, Err(SymError::Unsupported { .. })),
@@ -602,7 +604,7 @@ fn unmodelled_instructions_touching_symbolic_data_bail() {
             r.err()
         );
     }
-    // A concrete-only SSE read (constant data) is still skipped.
+    // A concrete-only SSE read (constant data) is modelled and adds no constraint of its own.
     let ok = flag_check(
         |a| {
             a.mov(rax, TARGET_ADDR).unwrap();
