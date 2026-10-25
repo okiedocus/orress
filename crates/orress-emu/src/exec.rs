@@ -142,18 +142,31 @@ impl Emulator {
     }
 
     /// After a `mov`/`movzx`/`movsx` into a register, tag that register with the input-buffer byte
-    /// offset when the source was a single byte loaded from the seeded input — so a later
-    /// `cmp reg, key` reveals the expected byte for that offset (inline, no library call).
+    /// offset it now holds, so a later `cmp reg, key` reveals the expected byte for that offset
+    /// (inline, no library call). Two sources carry input taint:
+    ///   * a single byte loaded from the seeded input (`movzx eax, byte [input+i]`); and
+    ///   * a **register copy** of an already-tainted byte (`mov ecx, eax`) — compilers routinely
+    ///     stage the loaded byte through another register before the compare, and without
+    ///     propagating taint across the copy the comparison looks untainted and is missed.
+    /// (`write_op` has already cleared the destination's old taint, so a copy from an untainted
+    /// source correctly leaves it untainted.)
     fn taint_from_load(&mut self, instr: &Instruction) {
-        if !self.record_compares
-            || instr.op0_kind() != OpKind::Register
-            || instr.op1_kind() != OpKind::Memory
-            || instr.memory_size().size() != 1
-        {
+        if !self.record_compares || instr.op0_kind() != OpKind::Register {
             return;
         }
-        if let Some(off) = self.input_offset(self.ea(instr)) {
-            self.reg_taint.insert(instr.op_register(0).full_register(), off);
+        let dst = instr.op_register(0).full_register();
+        match instr.op1_kind() {
+            OpKind::Memory if instr.memory_size().size() == 1 => {
+                if let Some(off) = self.input_offset(self.ea(instr)) {
+                    self.reg_taint.insert(dst, off);
+                }
+            }
+            OpKind::Register => {
+                if let Some(&off) = self.reg_taint.get(&instr.op_register(1).full_register()) {
+                    self.reg_taint.insert(dst, off);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -163,6 +176,20 @@ impl Emulator {
     fn note_cmp(&mut self, instr: &Instruction, size: usize, a: u64, b: u64) {
         if !self.record_compares || self.input_region.is_none() {
             return;
+        }
+        // Length gate: a value equal to the seeded input's length compared against a *different*
+        // small constant is `strlen(input) == N` (or `len != N`). Record N so the caller can re-seed
+        // to that length and get past the gate to the byte-compare loop behind it. (`strlen` is
+        // stubbed to return the real seed length, so the gate sees our length on one side.)
+        if let Some((lo, hi)) = self.input_region {
+            let seedlen = hi - lo;
+            if seedlen != 0 {
+                for (x, y) in [(a, b), (b, a)] {
+                    if x == seedlen && y != seedlen && (1..=256).contains(&y) && !self.wanted_lens.contains(&y) {
+                        self.wanted_lens.push(y);
+                    }
+                }
+            }
         }
         // Input byte sitting in a register (byte-granular taint) → a 1-byte comparison.
         if size == 1 {

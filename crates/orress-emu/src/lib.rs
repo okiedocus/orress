@@ -148,6 +148,21 @@ pub fn stub_for(name: &str) -> Stub {
     }
 }
 
+/// Whether a function with this name is a compare-hook **oracle** worth hooking even when it is
+/// *statically linked* (not an import): the input readers (so the seed is injected into the buffer)
+/// and the comparators / `strlen` (so the recorded operands and any length gate are observed).
+///
+/// Deliberately narrow. Statically-linked MinGW/MSVC binaries compile `scanf`/`strcmp`/`strlen` in,
+/// so an import-only hook table misses the oracle entirely and the compare-hook sees nothing. But
+/// hooking *computational* helpers (`memcpy`/`memset`/`malloc`/`strcpy`/`atoi`) by name would risk
+/// replacing a keygen's own arithmetic with a stub, so those stay import-only — their real code runs.
+pub fn is_oracle_name(name: &str) -> bool {
+    matches!(
+        stub_for(name),
+        Stub::ReadInput { .. } | Stub::Strcmp | Stub::Strncmp | Stub::Memcmp | Stub::Strlen
+    )
+}
+
 /// C `atoi`: skips leading whitespace, takes an optional sign, then the leading decimal digits
 /// (`"123abc"` -> 123, `"  -42"` -> -42, `"x1"` -> 0). Overflow wraps rather than panicking.
 pub fn parse_atoi(s: &[u8]) -> i64 {
@@ -307,6 +322,10 @@ pub struct Emulator {
     reg_taint: std::collections::HashMap<iced_x86::Register, usize>,
     /// Recovered (input offset, expected byte) pairs from inline comparisons.
     byte_expect: Vec<(usize, u8)>,
+    /// Length constants a seed-length-valued operand was compared against — a length gate
+    /// (`strlen(input) == 19`) the caller can satisfy by re-seeding to that length. See
+    /// [`wanted_lens`](Self::wanted_lens).
+    wanted_lens: Vec<u64>,
 }
 
 impl Default for Emulator {
@@ -332,6 +351,7 @@ impl Emulator {
             input_region: None,
             reg_taint: std::collections::HashMap::new(),
             byte_expect: Vec::new(),
+            wanted_lens: Vec::new(),
         }
     }
 
@@ -350,6 +370,7 @@ impl Emulator {
         self.compares.clear();
         self.reg_taint.clear();
         self.byte_expect.clear();
+        self.wanted_lens.clear();
     }
 
     /// The operand pairs recorded by every string/memory compare since the last reset (oldest
@@ -376,6 +397,14 @@ impl Emulator {
             key[off] = b;
         }
         Some(key)
+    }
+
+    /// Lengths a seed-length-valued operand was compared against during the run — the length(s) a
+    /// gate like `strlen(input) == 19` requires. The compare-hook caller re-seeds to one of these so
+    /// the input clears the gate and the byte-compare loop past it can be observed. Deduped, in the
+    /// order first seen; empty when no length gate referenced the seed length.
+    pub fn wanted_lens(&self) -> &[u64] {
+        &self.wanted_lens
     }
 
     /// Input-buffer offset of a guest address, if it falls in the seeded region.

@@ -573,56 +573,90 @@ const COMPARE_BUDGET: u64 = 2_000_000;
 /// self-verifying solves. Empty if the function reads/compares nothing we can observe.
 pub fn recover_by_compare(program: &Program, func_entry: u64, abi: Abi) -> Vec<CompareRecovery> {
     let mut out = Vec::new();
-    for seed in COMPARE_SEEDS {
-        // A single run only reaches the first mismatching byte of a per-byte check (it then branches
-        // to failure), so we iterate: learn the bytes the run compared, feed them back into the
-        // input, and re-run so the next byte is reached. This fixpoint recovers the whole inline key
-        // (`cmp input[0],'W'` → seed[0]='W' → next run reaches `cmp input[1],'X'` → …).
-        let mut cur = seed.to_vec();
-        let mut keys: Vec<Vec<u8>> = Vec::new();
-        for _ in 0..MAX_LEN {
-            let mut emu = orress_emu::Emulator::new();
-            emu.mem = emu_image(program);
-            emu.hooks = import_hooks(program);
-            emu.budget = COMPARE_BUDGET;
-            emu.seed_input(cur.clone());
-            emu.record_compares(true);
-            let _ = emu.call(func_entry, &[], abi);
-
-            // Collect library-compare operands (keygen serials / hardcoded strings) as before.
-            for (a, b) in emu.compares() {
-                for operand in [a, b] {
-                    if operand.as_slice() != cur.as_slice()
-                        && is_printable_key(operand)
-                        && !keys.contains(operand)
-                    {
-                        keys.push(operand.clone());
-                    }
-                }
+    // Start from the fixed seed lengths. A length gate observed mid-run (`strlen(input) == 19`, which
+    // the three fixed lengths fail so the byte loop behind it never runs) appends a seed of exactly
+    // that length, so a later pass clears the gate and the inline compares become observable.
+    let mut seeds: Vec<Vec<u8>> = COMPARE_SEEDS.iter().map(|s| s.to_vec()).collect();
+    let mut i = 0;
+    while i < seeds.len() {
+        let seed = seeds[i].clone();
+        i += 1;
+        let (keys, wanted) = run_seed(program, func_entry, abi, &seed);
+        for n in wanted {
+            let n = n as usize;
+            if (1..=MAX_LEN as usize).contains(&n) && !seeds.iter().any(|s| s.len() == n) {
+                seeds.push(vec![b'A'; n]);
             }
-            // Feed inline per-byte findings back into the working input.
-            let Some(k) = emu.inline_key() else { break };
-            let mut next = cur.clone();
-            for (i, &b) in k.iter().enumerate() {
-                if i < next.len() {
-                    next[i] = b;
-                }
-            }
-            if next == cur {
-                // Fixpoint: the input now satisfies every byte the check looks at.
-                let recovered = k[..k.len().min(cur.len())].to_vec();
-                if is_printable_key(&recovered) && !keys.contains(&recovered) {
-                    keys.insert(0, recovered); // strongest signal first
-                }
-                break;
-            }
-            cur = next;
         }
         if !keys.is_empty() {
-            out.push(CompareRecovery { seed: seed.to_vec(), keys });
+            out.push(CompareRecovery { seed, keys });
         }
     }
     out
+}
+
+/// One compare-hook fixpoint for a single seed. A single run only reaches the first mismatching byte
+/// of a per-byte check (it then branches to failure), so we iterate: learn the bytes the run
+/// compared, feed them back into the input, and re-run so the next byte is reached. This recovers the
+/// whole inline key (`cmp input[0],'W'` → seed[0]='W' → next run reaches `cmp input[1],'X'` → …).
+///
+/// Returns the recovered key/serial candidates and any length-gate constants the run observed (a
+/// value equal to the seed length compared against a different small constant — see
+/// [`orress_emu::Emulator::wanted_lens`]).
+fn run_seed(
+    program: &Program,
+    func_entry: u64,
+    abi: Abi,
+    seed: &[u8],
+) -> (Vec<Vec<u8>>, Vec<u64>) {
+    let mut cur = seed.to_vec();
+    let mut keys: Vec<Vec<u8>> = Vec::new();
+    let mut wanted: Vec<u64> = Vec::new();
+    for _ in 0..MAX_LEN {
+        let mut emu = orress_emu::Emulator::new();
+        emu.mem = emu_image(program);
+        emu.hooks = import_hooks(program);
+        emu.budget = COMPARE_BUDGET;
+        emu.seed_input(cur.clone());
+        emu.record_compares(true);
+        let _ = emu.call(func_entry, &[], abi);
+
+        // Length gates seen this run — surfaced to the caller to try that exact length.
+        for &n in emu.wanted_lens() {
+            if !wanted.contains(&n) {
+                wanted.push(n);
+            }
+        }
+        // Collect library-compare operands (keygen serials / hardcoded strings).
+        for (a, b) in emu.compares() {
+            for operand in [a, b] {
+                if operand.as_slice() != cur.as_slice()
+                    && is_printable_key(operand)
+                    && !keys.contains(operand)
+                {
+                    keys.push(operand.clone());
+                }
+            }
+        }
+        // Feed inline per-byte findings back into the working input.
+        let Some(k) = emu.inline_key() else { break };
+        let mut next = cur.clone();
+        for (j, &b) in k.iter().enumerate() {
+            if j < next.len() {
+                next[j] = b;
+            }
+        }
+        if next == cur {
+            // Fixpoint: the input now satisfies every byte the check looks at.
+            let recovered = k[..k.len().min(cur.len())].to_vec();
+            if is_printable_key(&recovered) && !keys.contains(&recovered) {
+                keys.insert(0, recovered); // strongest signal first
+            }
+            break;
+        }
+        cur = next;
+    }
+    (keys, wanted)
 }
 
 /// Whether recovered bytes look like a real key: non-empty and all printable ASCII (a computed
@@ -652,11 +686,16 @@ pub fn emu_image(program: &Program) -> orress_emu::Memory {
 /// import), so library calls return something sensible instead of faulting. The emulator and
 /// the symbolic executor match a hooked slot on `call [slot]` / `jmp [slot]` as well as a direct
 /// call to a hooked address. The name → stub mapping is [`orress_emu::stub_for`].
+///
+/// Also hooks **statically-linked** compare-hook oracles by name (readers, comparators, `strlen`;
+/// see [`orress_emu::is_oracle_name`]). MinGW/MSVC binaries routinely compile `scanf`/`strcmp`/
+/// `strlen` straight in, so an import-only table would leave the compare-hook with no seeded input
+/// and no observable comparison on exactly the common console-crackme shape.
 pub fn import_hooks(program: &Program) -> std::collections::HashMap<u64, orress_emu::Stub> {
     program
         .names
         .iter()
-        .filter(|(_, n)| n.kind == NameKind::Import)
+        .filter(|(_, n)| n.kind == NameKind::Import || orress_emu::is_oracle_name(&n.text))
         .map(|(&addr, n)| (addr, orress_emu::stub_for(&n.text)))
         .collect()
 }
