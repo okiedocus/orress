@@ -4506,6 +4506,7 @@ version = "1.2.0"
 dependencies = [
  "ferrisetw",
  "nix 0.29.0",
+ "portable-pty",
  "windows 0.59.0",
 ]
 

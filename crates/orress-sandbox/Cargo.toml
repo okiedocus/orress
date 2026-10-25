@@ -19,6 +19,10 @@ unsafe_code = "deny"
 all = { level = "warn", priority = -1 }
 
 [dependencies]
+# A pseudo-console/PTY so a console sample sees a real terminal: it line-buffers and flushes its
+# output (block-buffered to a pipe, prompts/verdicts never appear before we kill it) and reads our
+# input through the console the way it expects. ConPTY on Windows, openpty on Unix.
+portable-pty = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 ferrisetw = "1"

@@ -328,6 +328,132 @@ fn read_lines<R: Read>(
     }
 }
 
+/// Runs `exe` under a **pseudo-console** (ConPTY on Windows, openpty on Unix), feeding `stdin` to
+/// the terminal and capturing everything the program writes to it, until the program exits or
+/// `timeout` elapses. A console program attached to a real terminal line-buffers and flushes its
+/// output — so its prompts and verdicts appear — and reads input the way it expects, where the same
+/// program attached to a plain pipe often block-buffers (we never see the output before killing it)
+/// or waits on console I/O forever. Output comes back merged into one `Stdout` event (a terminal
+/// has a single stream) and includes the echo of the input.
+///
+/// Containment note: unlike [`run_with_stdin`], the PTY child is spawned by `portable_pty` and is
+/// NOT placed in a kill-on-close Job Object, so this relies on the caller's danger gate + the
+/// `timeout` + an explicit kill. Use it for samples already cleared as host-safe.
+pub fn run_with_pty(
+    exe: &Path,
+    args: &[String],
+    cwd: Option<&Path>,
+    timeout: Duration,
+    stdin: Option<&[u8]>,
+) -> RunLog {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use std::io::Write;
+
+    let start = Instant::now();
+    let mut log = RunLog::default();
+    let pair = match native_pty_system().openpty(PtySize {
+        rows: 50,
+        cols: 200,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            log.events.push(RunEvent::Error(format!("openpty: {e}")));
+            return log;
+        }
+    };
+    let mut cmd = CommandBuilder::new(exe);
+    for a in args {
+        cmd.arg(a);
+    }
+    if let Some(c) = cwd {
+        cmd.cwd(c);
+    }
+    let mut child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => {
+            log.events.push(RunEvent::Error(format!("spawn: {e}")));
+            return log;
+        }
+    };
+    if let Some(pid) = child.process_id() {
+        log.events.push(RunEvent::Started(pid));
+    }
+    drop(pair.slave); // so the child's exit closes the pty
+
+    let reader = pair.master.try_clone_reader();
+    // Feed input but KEEP the writer open: on a ConPTY, dropping the master write side is a hangup
+    // the console turns into Ctrl+C, killing the program before it finishes (seen as exit
+    // 0xC000013A). Holding it open lets the program print its (line-buffered, flushed) verdict and
+    // then block on any further read until our timeout — by when the verdict is already captured.
+    let mut writer = pair.master.take_writer().ok();
+    if let (Some(data), Some(w)) = (stdin, writer.as_mut()) {
+        let _ = w.write_all(data);
+        let _ = w.flush();
+    }
+
+    let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let reader_thread = reader.ok().map(|mut r| {
+        let b = Arc::clone(&buf);
+        std::thread::spawn(move || {
+            let mut tmp = [0u8; 4096];
+            let mut total = 0usize;
+            loop {
+                match r.read(&mut tmp) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        total += n;
+                        let mut g = b.lock().unwrap();
+                        if g.len() < MAX_OUTPUT {
+                            g.extend_from_slice(&tmp[..n]);
+                        }
+                        if total > MAX_OUTPUT {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+    });
+
+    // Poll for exit until the timeout, then kill.
+    let mut exit = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                exit = Some(status.exit_code() as i32);
+                break;
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        if start.elapsed() >= timeout {
+            log.timed_out = true;
+            log.events.push(RunEvent::Timeout);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    drop(writer); // now safe to close the write side
+    drop(pair.master); // closes the pty so the reader sees EOF
+    if let Some(t) = reader_thread {
+        let _ = t.join();
+    }
+
+    let out = String::from_utf8_lossy(&buf.lock().unwrap()).into_owned();
+    if !out.is_empty() {
+        log.events.push(RunEvent::Stdout(out));
+    }
+    if let Some(code) = exit {
+        log.events.push(RunEvent::Exited(code));
+        log.exit_code = Some(code);
+    }
+    log.duration = start.elapsed();
+    log
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
