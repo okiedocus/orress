@@ -295,9 +295,18 @@ pub struct Emulator {
     input_seed: Vec<u8>,
     /// When set, every `strcmp`/`strncmp`/`memcmp` records its two operands here — the compare-hook
     /// oracle: a check compares the input against the *expected* value, so the operand that isn't
-    /// the seed is the recovered key/serial.
+    /// the seed is the recovered key/serial. The same flag enables *inline* compare detection
+    /// (see [`input_region`]/[`byte_expect`]/[`reg_taint`]) for statically-linked checks that
+    /// compare the input byte-by-byte without calling a library routine.
     record_compares: bool,
     compares: Vec<(Vec<u8>, Vec<u8>)>,
+    /// `[lo, hi)` of the seeded input buffer, so an inline `cmp` against an input byte can be seen.
+    input_region: Option<(u64, u64)>,
+    /// GPR (64-bit parent) → the input-buffer byte offset it currently holds, tracked across a
+    /// byte load so a later `cmp reg, key` reveals the expected byte for that offset.
+    reg_taint: std::collections::HashMap<iced_x86::Register, usize>,
+    /// Recovered (input offset, expected byte) pairs from inline comparisons.
+    byte_expect: Vec<(usize, u8)>,
 }
 
 impl Default for Emulator {
@@ -320,6 +329,9 @@ impl Emulator {
             input_seed: Vec::new(),
             record_compares: false,
             compares: Vec::new(),
+            input_region: None,
+            reg_taint: std::collections::HashMap::new(),
+            byte_expect: Vec::new(),
         }
     }
 
@@ -331,9 +343,13 @@ impl Emulator {
     }
 
     /// Turns the compare-hook oracle on/off. While on, every `strcmp`/`strncmp`/`memcmp` appends its
-    /// two operands to [`compares`](Self::compares).
+    /// two operands to [`compares`](Self::compares) and inline per-byte comparisons against the
+    /// seeded input are recorded into [`byte_expect`]. Toggling resets the recorded state.
     pub fn record_compares(&mut self, on: bool) {
         self.record_compares = on;
+        self.compares.clear();
+        self.reg_taint.clear();
+        self.byte_expect.clear();
     }
 
     /// The operand pairs recorded by every string/memory compare since the last reset (oldest
@@ -341,6 +357,31 @@ impl Emulator {
     /// against the *expected* value, so the operand that isn't the seeded input is the key/serial.
     pub fn compares(&self) -> &[(Vec<u8>, Vec<u8>)] {
         &self.compares
+    }
+
+    /// The expected key reconstructed from inline per-byte comparisons: for each input offset that
+    /// was compared against a concrete byte, that byte; gaps (offsets never compared) are filled
+    /// with the seed byte. `None` if no inline comparison against the input was observed. This is
+    /// how a statically-linked check (`cmp input[i], key[i]` in a loop, no strcmp) yields its key.
+    pub fn inline_key(&self) -> Option<Vec<u8>> {
+        if self.byte_expect.is_empty() {
+            return None;
+        }
+        let max = self.byte_expect.iter().map(|(o, _)| *o).max().unwrap();
+        let mut key: Vec<u8> = (0..=max)
+            .map(|i| self.input_seed.get(i).copied().unwrap_or(b'A'))
+            .collect();
+        // Last writer wins per offset (a later, tighter comparison overrides an earlier one).
+        for &(off, b) in &self.byte_expect {
+            key[off] = b;
+        }
+        Some(key)
+    }
+
+    /// Input-buffer offset of a guest address, if it falls in the seeded region.
+    fn input_offset(&self, ea: u64) -> Option<usize> {
+        let (lo, hi) = self.input_region?;
+        (ea >= lo && ea < hi).then(|| (ea - lo) as usize)
     }
 
     /// Registers an import stub at `addr` (the address a call to that import reaches).
@@ -402,6 +443,10 @@ impl Emulator {
                     let seed = self.input_seed.clone();
                     self.mem.write_slice(buf, &seed)?;
                     self.mem.write_u8(buf.wrapping_add(seed.len() as u64), 0)?;
+                    // Remember where the input lives so inline `cmp input[i], key[i]` is observable.
+                    if self.record_compares {
+                        self.input_region = Some((buf, buf + seed.len() as u64));
+                    }
                 }
                 match ret {
                     InputReturn::Buffer => buf,

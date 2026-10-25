@@ -72,6 +72,84 @@ fn keygen() -> Program {
     Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
 }
 
+/// `check() { gets(buf); for i in 0..5 { if buf[i] != KEY[i] return 0 } return 1 }` — an INLINE
+/// per-byte comparison loop against a hardcoded key, with NO strcmp/memcmp call (the shape of
+/// statically-linked crackmes like EasyCrackMe). The key is recovered by taint-tracking the input
+/// byte into a register and reading what each `cmp` checks it against.
+fn inline_keycheck() -> Program {
+    const KEY: u64 = DATA + 0x60; // "WXYZ!" lives here
+    let mut a = CodeAssembler::new(64).unwrap();
+    a.mov(rdi, BUF).unwrap();
+    a.call(qword_ptr(GETS_SLOT)).unwrap();
+    a.mov(rsi, BUF).unwrap(); // input base
+    a.mov(rdi, KEY).unwrap(); // key base
+    a.xor(rax, rax).unwrap();
+    let mut loop_lbl = a.create_label();
+    let mut fail = a.create_label();
+    a.set_label(&mut loop_lbl).unwrap();
+    a.movzx(ecx, byte_ptr(rsi + rax)).unwrap(); // cl = input[i]
+    a.cmp(cl, byte_ptr(rdi + rax)).unwrap(); // vs key[i]
+    a.jne(fail).unwrap();
+    a.inc(rax).unwrap();
+    a.cmp(rax, 5i32).unwrap();
+    a.jne(loop_lbl).unwrap();
+    a.mov(eax, 1u32).unwrap();
+    a.ret().unwrap();
+    a.set_label(&mut fail).unwrap();
+    a.xor(eax, eax).unwrap();
+    a.ret().unwrap();
+    let mut code = a.assemble(BASE).unwrap();
+    code.resize(0x100, 0xcc);
+
+    let mut data = vec![0u8; 0x200];
+    data[0x60..0x65].copy_from_slice(b"WXYZ!"); // KEY at DATA+0x60
+    let mut file = vec![0u8; 0x200];
+    file.extend(&code);
+    file.extend(&data);
+
+    let section = |name: &str, offset, size, address, execute: bool| Section {
+        name: name.into(),
+        offset,
+        file_size: size,
+        address,
+        virtual_size: size,
+        perms: Perms { read: true, write: !execute, execute },
+        entropy: None,
+    };
+    let info = BinaryInfo {
+        format: Format::Elf,
+        kind: Kind::Executable,
+        arch: "x86-64".into(),
+        bits: Some(64),
+        entry: Some(BASE),
+        image_base: 0x40_0000,
+        sections: vec![
+            section(".text", 0x200, 0x100, BASE, true),
+            section(".data", 0x300, 0x200, DATA, false),
+        ],
+        import_slots: vec![NamedAddress { address: GETS_SLOT, name: "gets".into() }],
+        function_symbols: vec![NamedAddress { address: BASE, name: "check".into() }],
+        ..BinaryInfo::default()
+    };
+    Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
+}
+
+#[test]
+fn compare_hook_recovers_an_inline_byte_loop_key() {
+    let p = inline_keycheck();
+    let recoveries = orress_vm::recover_by_compare(&p, BASE, Abi::SysV);
+    assert!(!recoveries.is_empty(), "no inline comparison observed");
+    assert!(
+        recoveries.iter().any(|r| r.keys.iter().any(|k| k == b"WXYZ!")),
+        "expected inline key WXYZ! among {:?}",
+        recoveries
+            .iter()
+            .flat_map(|r| &r.keys)
+            .map(|k| String::from_utf8_lossy(k).to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn compare_hook_recovers_a_computed_serial() {
     let p = keygen();

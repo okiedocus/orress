@@ -126,11 +126,73 @@ impl Emulator {
         size: usize,
     ) -> Result<(), EmuError> {
         match instr.op_kind(i) {
-            OpKind::Register => self.cpu.set_reg(instr.op_register(i), val),
+            OpKind::Register => {
+                let r = instr.op_register(i);
+                self.cpu.set_reg(r, val);
+                // Writing a register clears any input-byte taint it held; a qualifying byte load
+                // from the input re-tags it (see `taint_from_load`).
+                if !self.reg_taint.is_empty() {
+                    self.reg_taint.remove(&r.full_register());
+                }
+            }
             OpKind::Memory => self.mem.write(self.ea(instr), val & mask(size), size)?,
             _ => {}
         }
         Ok(())
+    }
+
+    /// After a `mov`/`movzx`/`movsx` into a register, tag that register with the input-buffer byte
+    /// offset when the source was a single byte loaded from the seeded input — so a later
+    /// `cmp reg, key` reveals the expected byte for that offset (inline, no library call).
+    fn taint_from_load(&mut self, instr: &Instruction) {
+        if !self.record_compares
+            || instr.op0_kind() != OpKind::Register
+            || instr.op1_kind() != OpKind::Memory
+            || instr.memory_size().size() != 1
+        {
+            return;
+        }
+        if let Some(off) = self.input_offset(self.ea(instr)) {
+            self.reg_taint.insert(instr.op_register(0).full_register(), off);
+        }
+    }
+
+    /// Records an inline comparison against the seeded input: if one `cmp` operand is a byte loaded
+    /// from the input (a tainted register) or the input memory itself, the other operand is the
+    /// expected byte(s) for that input offset. Collected into `byte_expect` → [`Emulator::inline_key`].
+    fn note_cmp(&mut self, instr: &Instruction, size: usize, a: u64, b: u64) {
+        if !self.record_compares || self.input_region.is_none() {
+            return;
+        }
+        // Input byte sitting in a register (byte-granular taint) → a 1-byte comparison.
+        if size == 1 {
+            if instr.op0_kind() == OpKind::Register
+                && let Some(&off) = self.reg_taint.get(&instr.op_register(0).full_register())
+            {
+                self.byte_expect.push((off, b as u8));
+            }
+            if instr.op1_kind() == OpKind::Register
+                && let Some(&off) = self.reg_taint.get(&instr.op_register(1).full_register())
+            {
+                self.byte_expect.push((off, a as u8));
+            }
+        }
+        // Input compared directly in memory (`cmp [input+i], imm32`) → up to `size` little-endian
+        // bytes of the other operand.
+        if instr.op0_kind() == OpKind::Memory
+            && let Some(off) = self.input_offset(self.ea(instr))
+        {
+            for k in 0..size {
+                self.byte_expect.push((off + k, (b >> (8 * k)) as u8));
+            }
+        }
+        if instr.op1_kind() == OpKind::Memory
+            && let Some(off) = self.input_offset(self.ea(instr))
+        {
+            for k in 0..size {
+                self.byte_expect.push((off + k, (a >> (8 * k)) as u8));
+            }
+        }
     }
 
     // --- SSE / 128-bit operands -------------------------------------------
@@ -357,17 +419,20 @@ impl Emulator {
             M::Mov => {
                 let v = self.read_op(instr, 1, size)?;
                 self.write_op(instr, 0, v, size)?;
+                self.taint_from_load(instr);
             }
             M::Movzx => {
                 let src = self.src_size(instr);
                 let v = self.read_op(instr, 1, src)? & mask(src);
                 self.write_op(instr, 0, v, size)?;
+                self.taint_from_load(instr);
             }
             M::Movsx | M::Movsxd => {
                 let src = self.src_size(instr);
                 let v = self.read_op(instr, 1, src)?;
                 let ext = sign_extend(v, src) as u64;
                 self.write_op(instr, 0, ext, size)?;
+                self.taint_from_load(instr);
             }
             M::Lea => {
                 let a = self.offset(instr);
@@ -386,6 +451,7 @@ impl Emulator {
             M::Cmp => {
                 let (a, b) = self.two(instr, size)?;
                 self.do_sub(a, b, size);
+                self.note_cmp(instr, size, a, b);
             }
             M::Adc => {
                 let (a, b) = self.two(instr, size)?;

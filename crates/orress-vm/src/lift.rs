@@ -574,26 +574,49 @@ const COMPARE_BUDGET: u64 = 2_000_000;
 pub fn recover_by_compare(program: &Program, func_entry: u64, abi: Abi) -> Vec<CompareRecovery> {
     let mut out = Vec::new();
     for seed in COMPARE_SEEDS {
-        let mut emu = orress_emu::Emulator::new();
-        emu.mem = emu_image(program);
-        emu.hooks = import_hooks(program);
-        emu.budget = COMPARE_BUDGET;
-        emu.seed_input(seed.to_vec());
-        emu.record_compares(true);
-        // Run to the sentinel return. A fault/budget stop is fine: the compare may already have
-        // fired, and the recorder keeps every operand seen before the stop.
-        let _ = emu.call(func_entry, &[], abi);
-
+        // A single run only reaches the first mismatching byte of a per-byte check (it then branches
+        // to failure), so we iterate: learn the bytes the run compared, feed them back into the
+        // input, and re-run so the next byte is reached. This fixpoint recovers the whole inline key
+        // (`cmp input[0],'W'` → seed[0]='W' → next run reaches `cmp input[1],'X'` → …).
+        let mut cur = seed.to_vec();
         let mut keys: Vec<Vec<u8>> = Vec::new();
-        for (a, b) in emu.compares() {
-            for operand in [a, b] {
-                if operand.as_slice() != seed
-                    && is_printable_key(operand)
-                    && !keys.contains(operand)
-                {
-                    keys.push(operand.clone());
+        for _ in 0..MAX_LEN {
+            let mut emu = orress_emu::Emulator::new();
+            emu.mem = emu_image(program);
+            emu.hooks = import_hooks(program);
+            emu.budget = COMPARE_BUDGET;
+            emu.seed_input(cur.clone());
+            emu.record_compares(true);
+            let _ = emu.call(func_entry, &[], abi);
+
+            // Collect library-compare operands (keygen serials / hardcoded strings) as before.
+            for (a, b) in emu.compares() {
+                for operand in [a, b] {
+                    if operand.as_slice() != cur.as_slice()
+                        && is_printable_key(operand)
+                        && !keys.contains(operand)
+                    {
+                        keys.push(operand.clone());
+                    }
                 }
             }
+            // Feed inline per-byte findings back into the working input.
+            let Some(k) = emu.inline_key() else { break };
+            let mut next = cur.clone();
+            for (i, &b) in k.iter().enumerate() {
+                if i < next.len() {
+                    next[i] = b;
+                }
+            }
+            if next == cur {
+                // Fixpoint: the input now satisfies every byte the check looks at.
+                let recovered = k[..k.len().min(cur.len())].to_vec();
+                if is_printable_key(&recovered) && !keys.contains(&recovered) {
+                    keys.insert(0, recovered); // strongest signal first
+                }
+                break;
+            }
+            cur = next;
         }
         if !keys.is_empty() {
             out.push(CompareRecovery { seed: seed.to_vec(), keys });
