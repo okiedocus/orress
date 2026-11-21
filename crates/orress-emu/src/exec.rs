@@ -84,7 +84,7 @@ fn sign_extend128(v: u128, bits: u32) -> i128 {
 impl Emulator {
     /// How many *different* values one compare site may test the numeric input against before it is
     /// treated as a table scan rather than a key check. See [`Emulator::note_int_cmp`].
-    const MAX_SITE_EXPECTED: usize = 3;
+    pub(crate) const MAX_SITE_EXPECTED: usize = 3;
 
     // --- operands ---------------------------------------------------------
 

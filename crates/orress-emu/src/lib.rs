@@ -519,6 +519,18 @@ pub struct Emulator {
     /// compare the input byte-by-byte without calling a library routine.
     record_compares: bool,
     compares: Vec<(Vec<u8>, Vec<u8>)>,
+    /// The call site each [`compares`] entry was recorded at, same order and length. Used only to
+    /// recognise a site that SCANS a table of strings — see [`Emulator::record_compare`].
+    cmp_sites: Vec<u64>,
+    /// Call sites found to be scanning rather than checking: one place comparing the input against
+    /// many different strings. Their entries are withdrawn and nothing more is recorded from them.
+    ///
+    /// The C++ locale's ctype-name lookup is the case that forced this: it compares its argument
+    /// against `alnum`, `alpha`, `cntrl`, `digit`, … in a loop, so the compare-hook harvested the
+    /// whole table as candidate keys and then "confirmed" the first one, in three unrelated
+    /// binaries. Matching all five bytes of `alnum` proves nothing when the code compares against
+    /// a table containing it.
+    cmp_scan_sites: std::collections::HashSet<u64>,
     /// `[lo, hi)` of the seeded input buffer, so an inline `cmp` against an input byte can be seen.
     input_region: Option<(u64, u64)>,
     /// GPR (64-bit parent) → the input-buffer byte offset it currently holds, tracked across a
@@ -591,6 +603,8 @@ impl Emulator {
             input_seed: Vec::new(),
             record_compares: false,
             compares: Vec::new(),
+            cmp_sites: Vec::new(),
+            cmp_scan_sites: std::collections::HashSet::new(),
             input_region: None,
             reg_taint: std::collections::HashMap::new(),
             byte_expect: Vec::new(),
@@ -636,6 +650,8 @@ impl Emulator {
     pub fn record_compares(&mut self, on: bool) {
         self.record_compares = on;
         self.compares.clear();
+        self.cmp_sites.clear();
+        self.cmp_scan_sites.clear();
         self.reg_taint.clear();
         self.byte_expect.clear();
         self.wanted_lens.clear();
@@ -802,11 +818,49 @@ impl Emulator {
     }
 
     /// Records a compare's operands when the oracle is on (see [`record_compares`]). Skips a pair
-    /// where either side is empty — a NUL/zero-length operand carries no key.
+    /// where either side is empty — a NUL/zero-length operand carries no key — and skips a call
+    /// site that turns out to be **scanning a table** rather than checking a key.
+    ///
+    /// Scan detection mirrors the numeric path's (`note_int_cmp`). One call site comparing the
+    /// input against many different strings is walking a list, so every entry in that list would
+    /// otherwise become a candidate key AND satisfy the comparison when seeded back — which is how
+    /// `alnum`, from the C++ ctype class-name table, was confirmed as the key of three unrelated
+    /// binaries. Earlier entries are withdrawn too, because the first few look like a real check
+    /// until the loop comes round again.
     fn record_compare(&mut self, a: &[u8], b: &[u8]) {
-        if self.record_compares && !a.is_empty() && !b.is_empty() {
-            self.compares.push((a.to_vec(), b.to_vec()));
+        if !self.record_compares || a.is_empty() || b.is_empty() {
+            return;
         }
+        // Inside a stub, RIP is the caller's return address: one `strcmp` call site, however many
+        // times the loop goes round.
+        let site = self.cpu.rip;
+        if self.cmp_scan_sites.contains(&site) {
+            return;
+        }
+        let pair = (a.to_vec(), b.to_vec());
+        let distinct = self
+            .cmp_sites
+            .iter()
+            .zip(&self.compares)
+            .filter(|(s, _)| **s == site)
+            .map(|(_, p)| p)
+            .chain(std::iter::once(&pair))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if distinct > Self::MAX_SITE_EXPECTED {
+            self.cmp_scan_sites.insert(site);
+            let keep: Vec<bool> = self.cmp_sites.iter().map(|s| *s != site).collect();
+            let mut i = 0;
+            self.compares.retain(|_| {
+                let k = keep[i];
+                i += 1;
+                k
+            });
+            self.cmp_sites.retain(|s| *s != site);
+            return;
+        }
+        self.compares.push(pair);
+        self.cmp_sites.push(site);
     }
 
     /// Applies an import stub: reads arguments, computes the result into RAX, and returns to
