@@ -7,6 +7,41 @@ use std::fmt::Write as _;
 /// Largest text result returned to the agent.
 const MAX_OUT: usize = 60_000;
 
+/// How much bytecode disassembly to produce.
+///
+/// The display limits exist so a huge binary cannot flood an agent's context. An *analysis*
+/// consumer needs the opposite: a password literal can sit in any method of any type, and silently
+/// dropping the tail of a method — or of the whole listing — loses the very thing being looked for.
+/// So analysis gets its own, far looser limits, and the two callers say which they are.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    /// Instructions printed per method.
+    pub per_method: usize,
+    /// Largest result in bytes; past this the text is truncated with a marker.
+    pub max_bytes: usize,
+}
+
+impl Limits {
+    /// For a human or an agent reading the output.
+    pub const DISPLAY: Self = Self { per_method: 80, max_bytes: MAX_OUT };
+    /// For a program searching the output — see the note on [`Limits`].
+    pub const ANALYSIS: Self = Self { per_method: 4096, max_bytes: 8 << 20 };
+
+    fn cap(self, mut s: String) -> String {
+        if s.len() > self.max_bytes {
+            // Cut at a char boundary at or below the limit (`truncate` panics mid-character).
+            let mut end = self.max_bytes;
+            while !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            s.truncate(end);
+            s.push_str("
+… (truncated)");
+        }
+        s
+    }
+}
+
 fn read(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))
 }
@@ -238,33 +273,71 @@ pub fn solve_vm(path: &str) -> Result<String, String> {
 
 /// Auto-detects a managed/bytecode format and disassembles it.
 pub fn disassemble(path: &str) -> Result<String, String> {
+    disassemble_with(path, Limits::DISPLAY)
+}
+
+/// Which bytecode family these bytes are, if any — `"dotnet"`, `"java"`, `"pyc"`, `"dex"`,
+/// `"wasm"`, or `None` for a native binary.
+///
+/// A cheap magic test, for a caller that needs to *route* on the format rather than read it. It
+/// deliberately shares the gates [`disassemble_with`] dispatches on, so the answer can never
+/// disagree with which engine would actually run; a caller re-deriving this from its own magic
+/// table is how routing and analysis drift apart.
+pub fn bytecode_kind(data: &[u8]) -> Option<&'static str> {
+    if orress_wasm::is_wasm(data) {
+        return Some("wasm");
+    }
+    if orress_pyc::looks_like_pyc(data) {
+        return Some("pyc");
+    }
+    if orress_java::is_class(data) {
+        return Some("java");
+    }
+    if orress_dotnet::is_dotnet(data) {
+        return Some("dotnet");
+    }
+    if orress_dex::is_dex(data) {
+        return Some("dex");
+    }
+    None
+}
+
+/// As [`disassemble`], but at the caller's [`Limits`] — pass [`Limits::ANALYSIS`] when a program,
+/// not a reader, consumes the text and truncation would hide a key.
+pub fn disassemble_with(path: &str, lim: Limits) -> Result<String, String> {
     let data = read(path)?;
     if orress_wasm::is_wasm(&data) {
-        return orress_wasm::disassemble(&data).map(cap);
+        return orress_wasm::disassemble(&data).map(|s| lim.cap(s));
     }
     if orress_pyc::looks_like_pyc(&data) {
-        return dis_pyc(&data);
+        return dis_pyc(&data, lim);
     }
     if orress_java::is_class(&data) {
-        return dis_java(&data);
+        return dis_java(&data, lim);
     }
     if orress_dotnet::is_dotnet(&data) {
-        return dis_dotnet(&data);
+        return dis_dotnet(&data, lim);
     }
     if orress_dex::is_dex(&data) {
-        return dis_dex(&data);
+        return dis_dex(&data, lim);
     }
     Err("no bytecode disassembler for this format (try the `triage` tool)".into())
 }
 
-fn dis_pyc(data: &[u8]) -> Result<String, String> {
+fn dis_pyc(data: &[u8], lim: Limits) -> Result<String, String> {
     let pyc = orress_pyc::parse(data)?;
     let mut out = format!("{}\n", pyc.version_label());
-    fn walk(c: &orress_pyc::CodeObject, depth: usize, v: Option<(u8, u8)>, out: &mut String) {
+    fn walk(
+        c: &orress_pyc::CodeObject,
+        depth: usize,
+        v: Option<(u8, u8)>,
+        lim: Limits,
+        out: &mut String,
+    ) {
         let pad = "  ".repeat(depth);
         let _ = writeln!(out, "{pad}{}", c.signature());
         if let Some(insns) = orress_pyc::disassemble(c, v) {
-            for i in insns.iter().take(60) {
+            for i in insns.iter().take(lim.per_method) {
                 let arg = i
                     .argval
                     .clone()
@@ -274,20 +347,20 @@ fn dis_pyc(data: &[u8]) -> Result<String, String> {
             }
         }
         for n in c.nested() {
-            walk(n, depth + 1, v, out);
+            walk(n, depth + 1, v, lim, out);
         }
     }
-    walk(&pyc.top, 0, pyc.version, &mut out);
-    Ok(cap(out))
+    walk(&pyc.top, 0, pyc.version, lim, &mut out);
+    Ok(lim.cap(out))
 }
 
-fn dis_java(data: &[u8]) -> Result<String, String> {
+fn dis_java(data: &[u8], lim: Limits) -> Result<String, String> {
     let cf = orress_java::parse(data)?;
     let mut out = format!("class {} ({})\n", cf.this_class, cf.java_version());
     for m in &cf.methods {
         let Some(code) = &m.code else { continue };
         let _ = writeln!(out, "\n  {}{}", m.name, m.descriptor);
-        for ins in orress_java::disassemble(code, &cf.cp) {
+        for ins in orress_java::disassemble(code, &cf.cp).into_iter().take(lim.per_method) {
             let _ = writeln!(
                 out,
                 "    {:>4}: {:<16} {}",
@@ -295,17 +368,17 @@ fn dis_java(data: &[u8]) -> Result<String, String> {
             );
         }
     }
-    Ok(cap(out))
+    Ok(lim.cap(out))
 }
 
-fn dis_dotnet(data: &[u8]) -> Result<String, String> {
+fn dis_dotnet(data: &[u8], lim: Limits) -> Result<String, String> {
     let a = orress_dotnet::parse(data)?;
     let mut out = format!("{} module {}\n", a.runtime_version, a.module_name);
     for t in &a.types {
         for m in &t.methods {
             let _ = writeln!(out, "\n  {}.{}{}", t.full_name(), m.name, m.signature);
             if let Ok(il) = a.disassemble(data, m.rva) {
-                for i in il.iter().take(80) {
+                for i in il.iter().take(lim.per_method) {
                     let _ = writeln!(
                         out,
                         "    IL_{:04x}: {:<12} {}",
@@ -315,10 +388,10 @@ fn dis_dotnet(data: &[u8]) -> Result<String, String> {
             }
         }
     }
-    Ok(cap(out))
+    Ok(lim.cap(out))
 }
 
-fn dis_dex(data: &[u8]) -> Result<String, String> {
+fn dis_dex(data: &[u8], lim: Limits) -> Result<String, String> {
     let dex = orress_dex::parse(data)?;
     let mut out = format!("DEX {} · {} strings\n", dex.version, dex.string_count);
     for c in &dex.classes {
@@ -328,7 +401,7 @@ fn dis_dex(data: &[u8]) -> Result<String, String> {
             }
             let _ = writeln!(out, "\n  {}", m.name);
             if let Ok(il) = dex.disassemble_method(data, m.code_off) {
-                for i in il.iter().take(80) {
+                for i in il.iter().take(lim.per_method) {
                     let _ = writeln!(
                         out,
                         "    {:04x}: {:<22} {}",
@@ -338,5 +411,5 @@ fn dis_dex(data: &[u8]) -> Result<String, String> {
             }
         }
     }
-    Ok(cap(out))
+    Ok(lim.cap(out))
 }
