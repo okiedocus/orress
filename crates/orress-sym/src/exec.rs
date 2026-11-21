@@ -298,7 +298,7 @@ impl SymExec {
             // An input read: redirect the symbolic input region onto the destination buffer, so the
             // bytes the program then checks are the symbolic input. The buffer pointer is a concrete
             // (stack/global) address by the time the call runs.
-            S::ReadInput { buf_arg, ret } => {
+            S::ReadInput { buf_arg, ret, .. } => {
                 let buf = self.concrete_arg(*buf_arg)?;
                 self.input_base = buf;
                 // Drop any stale symbolic bytes in the new window, and plant a concrete NUL just
@@ -320,6 +320,18 @@ impl SymExec {
                     InputReturn::Count(n) => expr::konst(*n, 64),
                     InputReturn::Len => expr::konst(u64::from(self.input_len), 64),
                 }
+            }
+            // `cin >> n` (see `Stub::ReadNumInto`). Deliberately unsupported here rather than
+            // approximated: this engine's answer is the byte string it solved for in the symbolic
+            // input region, and the answer to a numeric read is a NUMBER. Planting symbolic bytes
+            // over the destination would make it solve for the four bytes of a binary integer and
+            // then present them as typed characters — a wrong answer that looks like a right one.
+            // The emulator's compare-hook and oracle-free confirm handle numeric input properly.
+            S::ReadNumInto { .. } => {
+                return Err(SymError::Unsupported {
+                    addr: self.rip,
+                    what: "C++ stream numeric extraction (cin >> n)".into(),
+                });
             }
             S::Strlen => {
                 let a = self.concrete_arg(0)?;
@@ -369,6 +381,16 @@ impl SymExec {
                     self.sym_mem.insert(dst.wrapping_add(i), c.clone());
                 }
                 expr::konst(dst, 64)
+            }
+            // The GUI readers' length/number models: the swept input length is concrete, and the
+            // numeric edit-box read is left unmodelled symbolically (the compare-hook's concrete
+            // emulation is what exercises those checks).
+            S::InputLen => expr::konst(u64::from(self.input_len), 64),
+            S::InputNum => {
+                return Err(SymError::Unsupported {
+                    addr: self.rip,
+                    what: "GetDlgItemInt of symbolic input".into(),
+                });
             }
             S::Atoi => {
                 let s = self.cstr_exprs(self.concrete_arg(0)?)?;

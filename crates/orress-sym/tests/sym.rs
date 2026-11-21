@@ -131,7 +131,7 @@ fn recovers_input_read_via_hooked_gets() {
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
 
-    let hooks = [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })]
+    let hooks = [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })]
         .into_iter()
         .collect();
     let found = orress_sym::solve_check_return(
@@ -210,7 +210,7 @@ fn path_explorer_solves_a_symbolic_length_loop() {
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
     let hooks: std::collections::HashMap<u64, Stub> =
-        [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })].into_iter().collect();
+        [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })].into_iter().collect();
 
     // Single-path steerer exits the strlen loop immediately → can't reach success.
     let single = orress_sym::solve_check(
@@ -274,7 +274,7 @@ fn return_model_explorer_solves_internal_read_with_loop() {
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
     let hooks: std::collections::HashMap<u64, Stub> =
-        [(SLOT, Stub::ReadInput { buf_arg: 0, ret: InputReturn::Buffer })].into_iter().collect();
+        [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })].into_iter().collect();
 
     // Single-path return solver exits the strlen loop on the first byte → cannot solve.
     let single = orress_sym::solve_check_return(
