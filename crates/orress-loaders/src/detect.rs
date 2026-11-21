@@ -111,6 +111,13 @@ const RULES: &[Rule] = &[
             convention (register) and store class and form information you can recover.",
     },
     Rule {
+        category: DetectionCategory::Language,
+        name: "Visual Basic 6",
+        sections: &[],
+        markers: &[b"MSVBVM60.DLL", b"MSVBVM50.DLL", b"ThunRTMain"],
+        explain: "Built with Visual Basic 6. It can be compiled two ways and the difference             decides the tools: P-code (a bytecode the runtime interprets) or native code (real             x86, the compiler default). Importing the runtime does not tell you which, because             both do; a decompiler such as VB Decompiler reports the mode. Either way the check             sits in an event handler, and native builds call the runtime's own string compares             (`__vbaStrCmp`, `__vbaStrComp`, `__vbaVarTstEq`).",
+    },
+    Rule {
         category: DetectionCategory::Compiler,
         name: "GCC",
         sections: &[],
