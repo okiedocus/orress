@@ -66,7 +66,7 @@ pub fn solve(program: &Program, report: &VmReport) -> Option<VmSolution> {
 fn error_rank(e: &SymError) -> u8 {
     match e {
         SymError::HitAvoid(_) => 0,
-        SymError::BudgetExhausted => 1,
+        SymError::BudgetExhausted | SymError::Deadline => 1,
         SymError::Unsupported { .. } | SymError::SymbolicAddress(_) | SymError::Fault(_) => 2,
     }
 }

@@ -19,7 +19,7 @@ pub mod expr;
 mod smt;
 mod solve;
 
-pub use exec::{SymError, SymExec};
+pub use exec::{SymError, SymExec, with_budget};
 pub use expr::{Expr, to_smt2};
 pub use solve::{SolveResult, solve};
 

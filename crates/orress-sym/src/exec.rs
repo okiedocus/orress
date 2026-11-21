@@ -28,6 +28,12 @@ pub enum SymError {
     SymbolicAddress(u64),
     Fault(u64),
     BudgetExhausted,
+    /// The wall-clock deadline set by [`with_budget`] ran out.
+    ///
+    /// Distinct from [`SymError::BudgetExhausted`] on purpose: "I ran out of steps on this path"
+    /// and "I ran out of time" lead to different decisions, and this project has been misled before
+    /// by logs that could not tell two kinds of giving-up apart.
+    Deadline,
     HitAvoid(u64),
 }
 
@@ -38,6 +44,7 @@ impl std::fmt::Display for SymError {
             Self::SymbolicAddress(a) => write!(f, "symbolic memory address at {a:#x}"),
             Self::Fault(a) => write!(f, "memory fault at {a:#x}"),
             Self::BudgetExhausted => write!(f, "step budget exhausted (wrong path?)"),
+            Self::Deadline => write!(f, "time budget exhausted"),
             Self::HitAvoid(a) => write!(f, "forced into an avoided block at {a:#x}"),
         }
     }
@@ -80,6 +87,41 @@ const MAX_EXPR_DEPTH: usize = 512;
 /// expression. Caps the depth built in one step, so the expression stays shallow enough that even
 /// its (recursive) `Rc` drop is safe; a larger compare is reported unsupported.
 const MAX_CMP_BYTES: usize = 4096;
+
+thread_local! {
+    /// When symbolic execution on this thread must stop. `None` means no limit.
+    static DEADLINE: std::cell::Cell<Option<std::time::Instant>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Restores the previous deadline when dropped, so a panic cannot leave a stale one set.
+struct DeadlineGuard(Option<std::time::Instant>);
+
+impl Drop for DeadlineGuard {
+    fn drop(&mut self) {
+        DEADLINE.with(|d| d.set(self.0));
+    }
+}
+
+/// Run `f` with a wall-clock limit on symbolic execution, on this thread.
+///
+/// The executor checks the clock every 64 steps, beside the existing expression-depth bail, and
+/// returns [`SymError::Deadline`]. Nested calls restore the outer deadline on the way out.
+///
+/// Why this exists: a budget checked only *between* candidate functions does not bound anything.
+/// Two corpus binaries ran ~79s each against a 20s budget because the whole overrun happened inside
+/// one function, and before any budget existed they hit the per-challenge timeout and filed nothing
+/// at all.
+pub fn with_budget<T>(budget: std::time::Duration, f: impl FnOnce() -> T) -> T {
+    let until = std::time::Instant::now() + budget;
+    let _guard = DeadlineGuard(DEADLINE.with(|d| d.replace(Some(until))));
+    f()
+}
+
+/// Has the deadline passed? False when none is set.
+fn past_deadline() -> bool {
+    DEADLINE.with(|d| d.get()).is_some_and(|t| std::time::Instant::now() >= t)
+}
 
 /// Cloneable so the path-exploring driver ([`crate::explore`]) can fork a state at a symbolic
 /// branch. The base image is an `Rc<Memory>` shared across forks (reads deref it; the rare write —
@@ -516,8 +558,13 @@ impl SymExec {
                 if st.step().is_err() {
                     break; // fault / unmodelled op (e.g. a symbolic-address access) on this path
                 }
-                if steps.is_multiple_of(64) && st.too_complex() {
-                    break; // deep input-dependent expression this path's solver won't crack
+                if steps.is_multiple_of(64) {
+                    if st.too_complex() {
+                        break; // deep input-dependent expression this path's solver won't crack
+                    }
+                    if past_deadline() {
+                        return None; // out of time: give the caller back what it has
+                    }
                 }
                 if let Some((cond, taken, fall)) = st.fork_pending.take() {
                     if frontier.len() + 2 > max_states {
@@ -555,8 +602,13 @@ impl SymExec {
             // expression that the built-in brute-force solver can't crack and that re-walking each
             // step makes quadratic. Bail so the caller moves to the next candidate function rather
             // than burning the whole step budget. Checked every 64 steps to keep it cheap.
-            if i % 64 == 0 && self.too_complex() {
-                return Err(SymError::BudgetExhausted);
+            if i % 64 == 0 {
+                if self.too_complex() {
+                    return Err(SymError::BudgetExhausted);
+                }
+                if past_deadline() {
+                    return Err(SymError::Deadline);
+                }
             }
         }
         Err(SymError::BudgetExhausted)
