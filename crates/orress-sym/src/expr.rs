@@ -112,7 +112,9 @@ impl Node {
                 Node::Var(_) => return 8,
                 Node::ZeroExt(_, b) | Node::SignExt(_, b) => return *b,
                 Node::Extract(_, hi, lo) => return hi - lo + 1,
-                Node::Rel(..) | Node::BoolNot(_) | Node::BoolAnd(..) | Node::BoolOr(..) => return 1,
+                Node::Rel(..) | Node::BoolNot(_) | Node::BoolAnd(..) | Node::BoolOr(..) => {
+                    return 1;
+                }
                 Node::Bin(_, a, _) | Node::Not(a) | Node::Neg(a) | Node::Ite(_, a, _) => cur = a,
             }
         }

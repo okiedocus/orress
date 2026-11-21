@@ -24,7 +24,10 @@ use crate::expr::{self, Expr, Node, Op, Rel};
 /// Why symbolic execution stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SymError {
-    Unsupported { addr: u64, what: String },
+    Unsupported {
+        addr: u64,
+        what: String,
+    },
     SymbolicAddress(u64),
     Fault(u64),
     BudgetExhausted,
@@ -120,7 +123,9 @@ pub fn with_budget<T>(budget: std::time::Duration, f: impl FnOnce() -> T) -> T {
 
 /// Has the deadline passed? False when none is set.
 fn past_deadline() -> bool {
-    DEADLINE.with(|d| d.get()).is_some_and(|t| std::time::Instant::now() >= t)
+    DEADLINE
+        .with(|d| d.get())
+        .is_some_and(|t| std::time::Instant::now() >= t)
 }
 
 /// Cloneable so the path-exploring driver ([`crate::explore`]) can fork a state at a symbolic
@@ -354,8 +359,10 @@ impl SymExec {
                     Rc::make_mut(&mut self.mem).map_zeroed(buf, u64::from(self.input_len) + 16);
                 }
                 for i in 0..16 {
-                    self.sym_mem
-                        .insert(buf.wrapping_add(u64::from(self.input_len) + i), expr::konst(0, 8));
+                    self.sym_mem.insert(
+                        buf.wrapping_add(u64::from(self.input_len) + i),
+                        expr::konst(0, 8),
+                    );
                 }
                 match ret {
                     InputReturn::Buffer => expr::konst(buf, 64),
@@ -643,7 +650,8 @@ impl SymExec {
         // Decode at the ABI's bitness: 32-bit cdecl code decodes differently (e.g. 0x42 is `inc
         // edx`, not a REX prefix), so a fixed 64-bit decoder would mis-read every 32-bit function.
         let bitness = if self.ptr() == 4 { 32 } else { 64 };
-        let mut dec = iced_x86::Decoder::with_ip(bitness, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
+        let mut dec =
+            iced_x86::Decoder::with_ip(bitness, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
         let instr = dec.decode();
         if instr.is_invalid() {
             return Err(SymError::Fault(ip));
@@ -1101,7 +1109,11 @@ impl SymExec {
                 let mut acc = expr::konst(0, 32);
                 for j in 0..16u32 {
                     let bit = expr::zext(expr::extract(src[j as usize].clone(), 7, 7), 32);
-                    acc = expr::bin(Op::Or, acc, expr::bin(Op::Shl, bit, expr::konst(u64::from(j), 32)));
+                    acc = expr::bin(
+                        Op::Or,
+                        acc,
+                        expr::bin(Op::Shl, bit, expr::konst(u64::from(j), 32)),
+                    );
                 }
                 self.set_reg(instr.op_register(0), fold(acc));
             }

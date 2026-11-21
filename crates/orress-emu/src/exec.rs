@@ -49,9 +49,8 @@ fn str_size(instr: &Instruction) -> usize {
 /// Whether either operand is an XMM register — what separates SSE `movsd`/`cmpsd` from the
 /// identically-named string instructions.
 fn touches_xmm(instr: &Instruction) -> bool {
-    (0..instr.op_count()).any(|i| {
-        instr.op_kind(i) == OpKind::Register && instr.op_register(i).is_xmm()
-    })
+    (0..instr.op_count())
+        .any(|i| instr.op_kind(i) == OpKind::Register && instr.op_register(i).is_xmm())
 }
 
 fn sign_bit(size: usize) -> u64 {
@@ -323,7 +322,11 @@ impl Emulator {
             let seedlen = hi - lo;
             if seedlen != 0 {
                 for (x, y) in [(a, b), (b, a)] {
-                    if x == seedlen && y != seedlen && (1..=256).contains(&y) && !self.wanted_lens.contains(&y) {
+                    if x == seedlen
+                        && y != seedlen
+                        && (1..=256).contains(&y)
+                        && !self.wanted_lens.contains(&y)
+                    {
                         self.wanted_lens.push(y);
                     }
                 }
@@ -513,17 +516,22 @@ impl Emulator {
             };
             if moves_si {
                 let v = addr(self.cpu.reg(Register::RSI).wrapping_add(delta));
-                self.cpu.set_reg(if narrow { Register::ESI } else { Register::RSI }, v);
+                self.cpu
+                    .set_reg(if narrow { Register::ESI } else { Register::RSI }, v);
             }
             if moves_di {
                 let v = addr(self.cpu.reg(Register::RDI).wrapping_add(delta));
-                self.cpu.set_reg(if narrow { Register::EDI } else { Register::RDI }, v);
+                self.cpu
+                    .set_reg(if narrow { Register::EDI } else { Register::RDI }, v);
             }
             if !repeated {
                 return Ok(());
             }
             let left = addr(self.cpu.reg(Register::RCX)).wrapping_sub(1);
-            self.cpu.set_reg(if narrow { Register::ECX } else { Register::RCX }, addr(left));
+            self.cpu.set_reg(
+                if narrow { Register::ECX } else { Register::RCX },
+                addr(left),
+            );
             self.steps += 1; // a long rep is work, and the budget should see it
             if compares {
                 // REPE stops at the first mismatch, REPNE at the first match.

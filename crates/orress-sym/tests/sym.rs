@@ -131,9 +131,16 @@ fn recovers_input_read_via_hooked_gets() {
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
 
-    let hooks = [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })]
-        .into_iter()
-        .collect();
+    let hooks = [(
+        SLOT,
+        Stub::ReadInput {
+            buf_arg: 0,
+            fmt_arg: None,
+            ret: InputReturn::Buffer,
+        },
+    )]
+    .into_iter()
+    .collect();
     let found = orress_sym::solve_check_return(
         mem,
         BASE,
@@ -145,9 +152,16 @@ fn recovers_input_read_via_hooked_gets() {
         Abi::Win64,
     )
     .unwrap();
-    assert!(found.result.complete, "incomplete: {}", found.result.message);
+    assert!(
+        found.result.complete,
+        "incomplete: {}",
+        found.result.message
+    );
     let expected: Vec<u8> = target.iter().map(|&t| t ^ KEY as u8).collect();
-    assert_eq!(found.result.input, expected, "key read via gets must be recovered");
+    assert_eq!(
+        found.result.input, expected,
+        "key read via gets must be recovered"
+    );
 }
 
 /// A check with a **symbolic-length `strlen` loop** whose loop-back is the *taken* edge, so the
@@ -209,24 +223,61 @@ fn path_explorer_solves_a_symbolic_length_loop() {
     mem.write_bytes(BASE, &code);
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
-    let hooks: std::collections::HashMap<u64, Stub> =
-        [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })].into_iter().collect();
+    let hooks: std::collections::HashMap<u64, Stub> = [(
+        SLOT,
+        Stub::ReadInput {
+            buf_arg: 0,
+            fmt_arg: None,
+            ret: InputReturn::Buffer,
+        },
+    )]
+    .into_iter()
+    .collect();
 
     // Single-path steerer exits the strlen loop immediately → can't reach success.
     let single = orress_sym::solve_check(
-        mem.clone(), BASE, &[], 0xd000, 4, success, vec![], hooks.clone(), Abi::Win64,
+        mem.clone(),
+        BASE,
+        &[],
+        0xd000,
+        4,
+        success,
+        vec![],
+        hooks.clone(),
+        Abi::Win64,
     )
     .unwrap();
-    assert!(!single.result.complete || &single.result.input[..3] != b"abc",
-        "single-path should NOT solve the symbolic-length loop (got {:?})", single.result.input);
+    assert!(
+        !single.result.complete || &single.result.input[..3] != b"abc",
+        "single-path should NOT solve the symbolic-length loop (got {:?})",
+        single.result.input
+    );
 
     // Path explorer forks the loop and finds "abc".
     let found = orress_sym::solve_check_explore(
-        mem, BASE, &[], 0xd000, 4, success, vec![], hooks, Abi::Win64, 4000, 2_000_000,
+        mem,
+        BASE,
+        &[],
+        0xd000,
+        4,
+        success,
+        vec![],
+        hooks,
+        Abi::Win64,
+        4000,
+        2_000_000,
     )
     .expect("explorer should find an accepting path");
-    assert!(found.result.complete, "explorer solve incomplete: {}", found.result.message);
-    assert_eq!(&found.result.input[..3], b"abc", "explorer must recover the key prefix");
+    assert!(
+        found.result.complete,
+        "explorer solve incomplete: {}",
+        found.result.message
+    );
+    assert_eq!(
+        &found.result.input[..3],
+        b"abc",
+        "explorer must recover the key prefix"
+    );
 }
 
 /// Return-verdict path exploration: a `check() -> bool` that reads its input internally (hooked
@@ -273,25 +324,60 @@ fn return_model_explorer_solves_internal_read_with_loop() {
     mem.write_bytes(BASE, &code);
     mem.map_zeroed(buf, 64);
     mem.write_bytes(SLOT, &0u64.to_le_bytes());
-    let hooks: std::collections::HashMap<u64, Stub> =
-        [(SLOT, Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer })].into_iter().collect();
+    let hooks: std::collections::HashMap<u64, Stub> = [(
+        SLOT,
+        Stub::ReadInput {
+            buf_arg: 0,
+            fmt_arg: None,
+            ret: InputReturn::Buffer,
+        },
+    )]
+    .into_iter()
+    .collect();
 
     // Single-path return solver exits the strlen loop on the first byte → cannot solve.
     let single = orress_sym::solve_check_return(
-        mem.clone(), BASE, &[], 0xd000, 4, vec![], hooks.clone(), Abi::Win64,
+        mem.clone(),
+        BASE,
+        &[],
+        0xd000,
+        4,
+        vec![],
+        hooks.clone(),
+        Abi::Win64,
     );
     let single_ok = single
         .map(|f| f.result.complete && f.result.input.get(..3) == Some(b"abc"))
         .unwrap_or(false);
-    assert!(!single_ok, "single-path must not solve the symbolic-length loop");
+    assert!(
+        !single_ok,
+        "single-path must not solve the symbolic-length loop"
+    );
 
     // The return-model explorer forks the loop and recovers "abc".
     let found = orress_sym::solve_check_return_explore(
-        mem, BASE, &[], 0xd000, 4, vec![], hooks, Abi::Win64, 4000, 2_000_000,
+        mem,
+        BASE,
+        &[],
+        0xd000,
+        4,
+        vec![],
+        hooks,
+        Abi::Win64,
+        4000,
+        2_000_000,
     )
     .expect("return-model explorer should find an accepting path");
-    assert!(found.result.complete, "incomplete: {}", found.result.message);
-    assert_eq!(&found.result.input[..3], b"abc", "must recover the key prefix");
+    assert!(
+        found.result.complete,
+        "incomplete: {}",
+        found.result.message
+    );
+    assert_eq!(
+        &found.result.input[..3],
+        b"abc",
+        "must recover the key prefix"
+    );
 }
 
 /// A **32-bit cdecl** per-byte check: the input pointer arrives on the stack (`[esp+4]`), not in a
@@ -355,9 +441,16 @@ fn recovers_a_32bit_cdecl_check() {
         Abi::Cdecl,
     )
     .unwrap();
-    assert!(found.result.complete, "incomplete: {}", found.result.message);
+    assert!(
+        found.result.complete,
+        "incomplete: {}",
+        found.result.message
+    );
     let expected: Vec<u8> = target.iter().map(|&t| t ^ KEY as u8).collect();
-    assert_eq!(found.result.input, expected, "32-bit cdecl key must be recovered");
+    assert_eq!(
+        found.result.input, expected,
+        "32-bit cdecl key must be recovered"
+    );
 }
 
 /// `check(ptr) { for i { if rol(ptr[i]^KEY, 3) != target[i] return 0 } return 1 }` — the kind of

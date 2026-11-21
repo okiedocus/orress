@@ -123,7 +123,8 @@ fn try_solve_accepts_x86_and_rejects_other_arches() {
     // x86-32 is now supported: it gets past the architecture gate. (This synthetic has no real VM,
     // so it still fails — but not with an "x86 only" architecture rejection.)
     let x86 = program("x86 (32-bit)", 32);
-    if let Err(orress_sym::SymError::Unsupported { what, .. }) = orress_vm::try_solve(&x86, &report) {
+    if let Err(orress_sym::SymError::Unsupported { what, .. }) = orress_vm::try_solve(&x86, &report)
+    {
         assert!(
             !what.contains("x86 only"),
             "x86-32 must not be rejected for its architecture: {what}"
@@ -133,8 +134,13 @@ fn try_solve_accepts_x86_and_rejects_other_arches() {
     // A non-x86 architecture is still refused at the gate.
     let arm = program("ARM64 (AArch64)", 64);
     match orress_vm::try_solve(&arm, &report) {
-        Err(orress_sym::SymError::Unsupported { what, .. }) => assert!(what.contains("x86"), "{what}"),
-        other => panic!("expected an arch rejection for ARM64, got {:?}", other.map(|s| s.key)),
+        Err(orress_sym::SymError::Unsupported { what, .. }) => {
+            assert!(what.contains("x86"), "{what}")
+        }
+        other => panic!(
+            "expected an arch rejection for ARM64, got {:?}",
+            other.map(|s| s.key)
+        ),
     }
     assert!(orress_vm::solve(&arm, &report).is_none());
 }

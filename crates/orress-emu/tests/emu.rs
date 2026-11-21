@@ -501,7 +501,10 @@ fn atoi_stub_parses_a_numeric_prefix() {
 fn scanf_conv_reads_the_first_numeric_destination() {
     use orress_emu::scanf_num_conv as c;
     assert_eq!(c(b"%d").map(|k| (k.width, k.radix)), Some((4, 10)));
-    assert_eq!(c(b"Enter: %5u\n").map(|k| (k.width, k.radix)), Some((4, 10)));
+    assert_eq!(
+        c(b"Enter: %5u\n").map(|k| (k.width, k.radix)),
+        Some((4, 10))
+    );
     assert_eq!(c(b"%hd").map(|k| k.width), Some(2));
     assert_eq!(c(b"%hhd").map(|k| k.width), Some(1));
     assert_eq!(c(b"%lld").map(|k| k.width), Some(8));
@@ -641,7 +644,11 @@ fn a_reused_stack_slot_stops_being_the_numeric_input() {
 
     emu.record_compares(true);
     emu.seed_input(b"1337".to_vec());
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 1, "the number matched");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        1,
+        "the number matched"
+    );
     assert!(
         emu.int_compares().contains(&(1337, 1337)),
         "the real numeric check is still recorded: {:?}",
@@ -738,7 +745,11 @@ fn an_ordering_check_is_not_a_numeric_key_compare() {
     emu.record_compares(true);
     emu.seed_input(b"100".to_vec());
     assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 0);
-    assert_eq!(emu.int_compares(), [(100, 4242)], "only the equality compare counts");
+    assert_eq!(
+        emu.int_compares(),
+        [(100, 4242)],
+        "only the equality compare counts"
+    );
 
     // The real key still confirms.
     emu.record_compares(true);
@@ -773,15 +784,27 @@ fn cdecl_stack_frame_does_not_fault() {
     let mut emu = Emulator::new();
     emu.map(0x1000, &code);
     let got = emu.call(0x1000, &[7, 35], Abi::Cdecl);
-    assert_eq!(got.map(|v| v as u32), Ok(42), "32-bit frame must be reachable");
+    assert_eq!(
+        got.map(|v| v as u32),
+        Ok(42),
+        "32-bit frame must be reachable"
+    );
 
     // The frame really is addressable with 32-bit arithmetic.
     let mut emu = Emulator::new();
     emu.map(0x1000, &code);
     emu.abi = Abi::Cdecl;
     let top = emu.setup_stack();
-    assert!(top <= u64::from(u32::MAX), "a 32-bit stack must fit in 32 bits: {top:#x}");
-    assert_eq!(emu.cpu.rsp() >> 32, 0, "and so must RSP: {:#x}", emu.cpu.rsp());
+    assert!(
+        top <= u64::from(u32::MAX),
+        "a 32-bit stack must fit in 32 bits: {top:#x}"
+    );
+    assert_eq!(
+        emu.cpu.rsp() >> 32,
+        0,
+        "and so must RSP: {:#x}",
+        emu.cpu.rsp()
+    );
 }
 
 /// The instruction batch an emulation probe over the corpus ranked as the top hard blockers:
@@ -803,7 +826,11 @@ fn direction_flag_and_flag_block_moves() {
     });
     let mut emu = Emulator::new();
     emu.map(0x1000, &code);
-    assert_eq!(emu.call(0x1000, &[], Abi::Cdecl).unwrap(), 0x400, "DF survived popfd");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::Cdecl).unwrap(),
+        0x400,
+        "DF survived popfd"
+    );
     assert!(emu.cpu.flags.df);
 }
 
@@ -837,7 +864,11 @@ fn pushad_popad_round_trip_the_registers() {
     });
     let mut emu = Emulator::new();
     emu.map(0x2000, &balance);
-    assert_eq!(emu.call(0x2000, &[], Abi::Cdecl).unwrap(), 0, "pushad/popad must balance");
+    assert_eq!(
+        emu.call(0x2000, &[], Abi::Cdecl).unwrap(),
+        0,
+        "pushad/popad must balance"
+    );
 }
 
 /// XCHG swaps, XADD sums into the destination while the source takes the old destination, and
@@ -936,8 +967,16 @@ fn rep_stos_and_movs_fill_and_copy() {
     emu.map(DST, &[0xff; 32]);
     emu.map(SRC, b"abcdef");
     emu.call(0x1000, &[], Abi::SysV).unwrap();
-    assert_eq!(emu.mem.read_vec(DST, 6).unwrap(), b"abcdef", "rep movsb copied");
-    assert_eq!(emu.mem.read_vec(DST + 6, 2).unwrap(), vec![0, 0], "rep stosd zeroed the rest");
+    assert_eq!(
+        emu.mem.read_vec(DST, 6).unwrap(),
+        b"abcdef",
+        "rep movsb copied"
+    );
+    assert_eq!(
+        emu.mem.read_vec(DST + 6, 2).unwrap(),
+        vec![0, 0],
+        "rep stosd zeroed the rest"
+    );
     // The counter is consumed and the pointers have advanced past the data.
     assert_eq!(emu.cpu.reg(iced_x86::Register::RCX), 0);
     assert_eq!(emu.cpu.reg(iced_x86::Register::RSI), SRC + 6);
@@ -960,7 +999,11 @@ fn std_makes_a_string_op_walk_backwards() {
     emu.map(0x1000, &code);
     emu.map(BUF, &[0; 8]);
     emu.call(0x1000, &[], Abi::SysV).unwrap();
-    assert_eq!(emu.mem.read_vec(BUF, 5).unwrap(), b"AAAA\0", "filled downwards from BUF+3");
+    assert_eq!(
+        emu.mem.read_vec(BUF, 5).unwrap(),
+        b"AAAA\0",
+        "filled downwards from BUF+3"
+    );
 }
 
 /// `repe cmpsb` IS the comparison in a hand-written asm password check: it stops at the first
@@ -1000,7 +1043,11 @@ fn repe_cmpsb_compares_and_yields_the_key() {
     emu.seed_input(b"AAAAAA".to_vec());
     assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 0);
     let recovered = emu.inline_key().expect("a cmpsb byte was recorded");
-    assert_eq!(&recovered[..1], b"s", "the expected first byte, from repe cmpsb: {recovered:?}");
+    assert_eq!(
+        &recovered[..1],
+        b"s",
+        "the expected first byte, from repe cmpsb: {recovered:?}"
+    );
 }
 
 /// Bit test takes CF from the selected bit, and BTS/BTR/BTC also write the bit back.
@@ -1052,7 +1099,11 @@ fn x87_control_instructions_do_not_halt_the_run() {
     let mut emu = Emulator::new();
     emu.map(0x1000, &code);
     emu.map(SLOT, &[0xff; 64]);
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 0x037f, "x87 reset control word");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        0x037f,
+        "x87 reset control word"
+    );
     // The environment area was written (not left as the 0xff filler).
     assert_eq!(emu.mem.read_vec(SLOT + 8, 4).unwrap(), vec![0, 0, 0, 0]);
 }
@@ -1070,11 +1121,19 @@ fn stub_for_maps_libc_names() {
     // More input readers seed their destination buffer.
     assert_eq!(
         orress_emu::stub_for("ReadFile"),
-        Stub::ReadInput { buf_arg: 1, fmt_arg: None, ret: orress_emu::InputReturn::Count(1) }
+        Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: None,
+            ret: orress_emu::InputReturn::Count(1)
+        }
     );
     assert_eq!(
         orress_emu::stub_for("__isoc99_fscanf"),
-        Stub::ReadInput { buf_arg: 2, fmt_arg: Some(1), ret: orress_emu::InputReturn::Count(1) }
+        Stub::ReadInput {
+            buf_arg: 2,
+            fmt_arg: Some(1),
+            ret: orress_emu::InputReturn::Count(1)
+        }
     );
 }
 
@@ -1190,14 +1249,20 @@ fn a_compare_site_that_scans_a_table_records_nothing() {
     // the scanning site, so there is no equal pair to mistake for a confirmation.
     emu.record_compares(true);
     emu.seed_input(b"252".to_vec());
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 1, "the scan found it");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        1,
+        "the scan found it"
+    );
     assert!(
         !emu.int_compares().iter().any(|&(x, y)| x == y),
         "a table scan is not a satisfied check: {:?}",
         emu.int_compares()
     );
     assert!(
-        !emu.int_compares().iter().any(|&(_, y)| matches!(y, 11 | 22 | 252)),
+        !emu.int_compares()
+            .iter()
+            .any(|&(_, y)| matches!(y, 11 | 22 | 252)),
         "no table entry may be recorded as an expected key: {:?}",
         emu.int_compares()
     );
@@ -1206,7 +1271,11 @@ fn a_compare_site_that_scans_a_table_records_nothing() {
     // the scanning site must not cost the real check that follows it.
     emu.record_compares(true);
     emu.seed_input(b"777".to_vec());
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 1, "the real gate passed");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        1,
+        "the real gate passed"
+    );
     assert!(
         emu.int_compares().contains(&(777, 777)),
         "the real gate is still recorded: {:?}",
@@ -1259,7 +1328,11 @@ fn a_cpp_stream_numeric_read_is_observable() {
     // the oracle-free confirm stage needs in order to confirm anything at all.
     emu.record_compares(true);
     emu.seed_input(b"31337".to_vec());
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 1, "the right number is accepted");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        1,
+        "the right number is accepted"
+    );
     assert!(
         emu.int_compares().contains(&(31337, 31337)),
         "the numeric comparison must be observable: {:?}",
@@ -1270,7 +1343,11 @@ fn a_cpp_stream_numeric_read_is_observable() {
     // differential that makes this a usable oracle rather than a guess.
     emu.record_compares(true);
     emu.seed_input(b"12345".to_vec());
-    assert_eq!(emu.call(0x1000, &[], Abi::SysV).unwrap(), 0, "a wrong number is rejected");
+    assert_eq!(
+        emu.call(0x1000, &[], Abi::SysV).unwrap(),
+        0,
+        "a wrong number is rejected"
+    );
     assert_eq!(emu.int_compares(), [(12345, 31337)]);
 
     // Non-numeric input converts nothing, exactly as a real stream leaves `n` untouched on a

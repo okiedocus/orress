@@ -48,7 +48,11 @@ fn keygen() -> Program {
         file_size: size,
         address,
         virtual_size: size,
-        perms: Perms { read: true, write: !execute, execute },
+        perms: Perms {
+            read: true,
+            write: !execute,
+            execute,
+        },
         entropy: None,
     };
     let info = BinaryInfo {
@@ -63,10 +67,19 @@ fn keygen() -> Program {
             section(".data", 0x300, 0x200, DATA, false),
         ],
         import_slots: vec![
-            NamedAddress { address: GETS_SLOT, name: "gets".into() },
-            NamedAddress { address: STRCMP_SLOT, name: "strcmp".into() },
+            NamedAddress {
+                address: GETS_SLOT,
+                name: "gets".into(),
+            },
+            NamedAddress {
+                address: STRCMP_SLOT,
+                name: "strcmp".into(),
+            },
         ],
-        function_symbols: vec![NamedAddress { address: BASE, name: "check".into() }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "check".into(),
+        }],
         ..BinaryInfo::default()
     };
     Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
@@ -113,7 +126,11 @@ fn inline_keycheck() -> Program {
         file_size: size,
         address,
         virtual_size: size,
-        perms: Perms { read: true, write: !execute, execute },
+        perms: Perms {
+            read: true,
+            write: !execute,
+            execute,
+        },
         entropy: None,
     };
     let info = BinaryInfo {
@@ -127,8 +144,14 @@ fn inline_keycheck() -> Program {
             section(".text", 0x200, 0x100, BASE, true),
             section(".data", 0x300, 0x200, DATA, false),
         ],
-        import_slots: vec![NamedAddress { address: GETS_SLOT, name: "gets".into() }],
-        function_symbols: vec![NamedAddress { address: BASE, name: "check".into() }],
+        import_slots: vec![NamedAddress {
+            address: GETS_SLOT,
+            name: "gets".into(),
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "check".into(),
+        }],
         ..BinaryInfo::default()
     };
     Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
@@ -165,7 +188,11 @@ fn numeric_check() -> Program {
         file_size: size,
         address,
         virtual_size: size,
-        perms: Perms { read: true, write: !execute, execute },
+        perms: Perms {
+            read: true,
+            write: !execute,
+            execute,
+        },
         entropy: None,
     };
     let info = BinaryInfo {
@@ -179,8 +206,14 @@ fn numeric_check() -> Program {
             section(".text", 0x200, 0x100, BASE, true),
             section(".data", 0x300, 0x200, DATA, false),
         ],
-        import_slots: vec![NamedAddress { address: SCANF_SLOT, name: "scanf".into() }],
-        function_symbols: vec![NamedAddress { address: BASE, name: "check".into() }],
+        import_slots: vec![NamedAddress {
+            address: SCANF_SLOT,
+            name: "scanf".into(),
+        }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "check".into(),
+        }],
         ..BinaryInfo::default()
     };
     Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
@@ -247,7 +280,11 @@ fn program_with(
         file_size: size,
         address,
         virtual_size: size,
-        perms: Perms { read: true, write: !execute, execute },
+        perms: Perms {
+            read: true,
+            write: !execute,
+            execute,
+        },
         entropy: None,
     };
     let info = BinaryInfo {
@@ -263,9 +300,15 @@ fn program_with(
         ],
         import_slots: imports
             .iter()
-            .map(|(addr, name)| NamedAddress { address: *addr, name: (*name).into() })
+            .map(|(addr, name)| NamedAddress {
+                address: *addr,
+                name: (*name).into(),
+            })
             .collect(),
-        function_symbols: vec![NamedAddress { address: BASE, name: "check".into() }],
+        function_symbols: vec![NamedAddress {
+            address: BASE,
+            name: "check".into(),
+        }],
         ..BinaryInfo::default()
     };
     Program::analyze(&info, Arc::new(file), &[]).expect("supported architecture")
@@ -355,7 +398,10 @@ fn reached_blocks_separates_an_accepting_checksum_input() {
 
     let blocks = |c: &str| orress_vm::reached_blocks(&p, BASE, c.as_bytes(), Abi::SysV).unwrap();
     let mine = blocks(key);
-    let twins: Vec<Vec<u64>> = ["vvvw", "ppppq", "aaaa"].iter().map(|c| blocks(c)).collect();
+    let twins: Vec<Vec<u64>> = ["vvvw", "ppppq", "aaaa"]
+        .iter()
+        .map(|c| blocks(c))
+        .collect();
     assert!(
         mine.iter().any(|b| twins.iter().all(|t| !t.contains(b))),
         "the accepting input must reach a block no wrong input reaches"
@@ -474,7 +520,11 @@ fn compare_satisfied_confirms_a_keygen_pair() {
     let p = two_read_keygen();
     let sat = |c: &str| orress_vm::compare_satisfied(&p, BASE, c.as_bytes(), Abi::SysV);
     // "AAAA" ^ 0x10 == "QQQQ"
-    assert_eq!(sat("AAAA\nQQQQ"), Some(true), "the derived serial is accepted");
+    assert_eq!(
+        sat("AAAA\nQQQQ"),
+        Some(true),
+        "the derived serial is accepted"
+    );
     // Right name, wrong serial — and the right serial under a different name.
     assert_eq!(sat("AAAA\nQQQR"), Some(false));
     assert_eq!(sat("BBBB\nQQQQ"), Some(false));
@@ -506,7 +556,11 @@ fn compare_hook_recovers_an_argument_passed_key() {
 fn compare_satisfied_confirms_an_argument_passed_key() {
     let p = arg_keycheck();
     let sat = |c: &str| orress_vm::compare_satisfied(&p, BASE, c.as_bytes(), Abi::SysV);
-    assert_eq!(sat("WXYZ!"), Some(true), "the stored key satisfies the loop");
+    assert_eq!(
+        sat("WXYZ!"),
+        Some(true),
+        "the stored key satisfies the loop"
+    );
     // Same length and shape, wrong bytes — the differential controls must not pass.
     assert_eq!(sat("JKLM!"), Some(false));
     assert_eq!(sat("WXYZ?"), Some(false));
@@ -577,7 +631,11 @@ fn compare_hook_recovers_a_numeric_key() {
 fn compare_satisfied_confirms_a_numeric_key() {
     let p = numeric_check();
     let sat = |c: &str| orress_vm::compare_satisfied(&p, BASE, c.as_bytes(), Abi::SysV);
-    assert_eq!(sat("25711"), Some(true), "the right number satisfies the check");
+    assert_eq!(
+        sat("25711"),
+        Some(true),
+        "the right number satisfies the check"
+    );
     // Same shape, wrong value — the differential controls a caller uses must not pass.
     assert_eq!(sat("25712"), Some(false));
     assert_eq!(sat("38044"), Some(false));
@@ -642,7 +700,6 @@ fn an_address_is_not_a_numeric_key() {
     );
 }
 
-
 /// Check functions named by **what they call** — a reader, a comparer, or both.
 ///
 /// This exists alongside the size and call-graph heuristics because those rank by shape and
@@ -677,7 +734,9 @@ fn compare_hook_recovers_an_inline_byte_loop_key() {
     let recoveries = orress_vm::recover_by_compare(&p, BASE, Abi::SysV);
     assert!(!recoveries.is_empty(), "no inline comparison observed");
     assert!(
-        recoveries.iter().any(|r| r.keys.iter().any(|k| k == b"WXYZ!")),
+        recoveries
+            .iter()
+            .any(|r| r.keys.iter().any(|k| k == b"WXYZ!")),
         "expected inline key WXYZ! among {:?}",
         recoveries
             .iter()
@@ -752,6 +811,12 @@ fn a_compare_pass_reports_which_comparison_accepted_the_input() {
     );
 
     // `compare_satisfied` stays the boolean view over the same answer.
-    assert_eq!(orress_vm::compare_satisfied(&p, BASE, b"25711", Abi::SysV), Some(true));
-    assert_eq!(orress_vm::compare_satisfied(&p, BASE, b"25712", Abi::SysV), Some(false));
+    assert_eq!(
+        orress_vm::compare_satisfied(&p, BASE, b"25711", Abi::SysV),
+        Some(true)
+    );
+    assert_eq!(
+        orress_vm::compare_satisfied(&p, BASE, b"25712", Abi::SysV),
+        Some(false)
+    );
 }

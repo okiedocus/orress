@@ -100,7 +100,11 @@ pub enum Stub {
     /// one. It decides whether the destination is a character buffer or a *number*: for
     /// `scanf("%d", &n)` the seed's digits must be parsed and stored as a binary integer rather
     /// than copied in as text (see [`scanf_num_conv`]).
-    ReadInput { buf_arg: usize, fmt_arg: Option<usize>, ret: InputReturn },
+    ReadInput {
+        buf_arg: usize,
+        fmt_arg: Option<usize>,
+        ret: InputReturn,
+    },
     /// `operator>>(istream&, T&)` — C++ `cin >> n` for an integer `n`.
     ///
     /// Unlike [`Stub::ReadInput`], the conversion is fixed by the overload's own type rather than
@@ -110,7 +114,11 @@ pub enum Stub {
     /// `dst_arg` is the reference the parsed value is written through, and the destination is
     /// tagged as the numeric input so the comparison behind it is observable
     /// (see [`Emulator::int_compares`]).
-    ReadNumInto { dst_arg: usize, conv: NumConv, ret_arg: usize },
+    ReadNumInto {
+        dst_arg: usize,
+        conv: NumConv,
+        ret_arg: usize,
+    },
     /// `strlen(s)`.
     Strlen,
     /// `strcmp(a, b)` → 0 if equal.
@@ -159,30 +167,58 @@ pub fn stub_for(name: &str) -> Stub {
         "malloc" | "calloc" => Stub::Malloc,
         // Input readers: mark the destination buffer as symbolic input (and, under the compare-hook,
         // write the seed into it). Buffer-pointer argument index differs per function.
-        "gets" | "gets_s" | "fgets" => {
-            Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Buffer }
-        }
-        "scanf" | "isoc99_scanf" | "scanf_s" => {
-            Stub::ReadInput { buf_arg: 1, fmt_arg: Some(0), ret: InputReturn::Count(1) }
-        }
+        "gets" | "gets_s" | "fgets" => Stub::ReadInput {
+            buf_arg: 0,
+            fmt_arg: None,
+            ret: InputReturn::Buffer,
+        },
+        "scanf" | "isoc99_scanf" | "scanf_s" => Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: Some(0),
+            ret: InputReturn::Count(1),
+        },
         // fscanf(FILE*, fmt, dst): the first %s target is the third argument.
-        "fscanf" | "isoc99_fscanf" => {
-            Stub::ReadInput { buf_arg: 2, fmt_arg: Some(1), ret: InputReturn::Count(1) }
-        }
-        "read" => Stub::ReadInput { buf_arg: 1, fmt_arg: None, ret: InputReturn::Len },
-        "fread" => Stub::ReadInput { buf_arg: 0, fmt_arg: None, ret: InputReturn::Len },
-        "ReadConsoleA" | "ReadConsoleW" => {
-            Stub::ReadInput { buf_arg: 1, fmt_arg: None, ret: InputReturn::Count(1) }
-        }
+        "fscanf" | "isoc99_fscanf" => Stub::ReadInput {
+            buf_arg: 2,
+            fmt_arg: Some(1),
+            ret: InputReturn::Count(1),
+        },
+        "read" => Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: None,
+            ret: InputReturn::Len,
+        },
+        "fread" => Stub::ReadInput {
+            buf_arg: 0,
+            fmt_arg: None,
+            ret: InputReturn::Len,
+        },
+        "ReadConsoleA" | "ReadConsoleW" => Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: None,
+            ret: InputReturn::Count(1),
+        },
         // ReadFile(handle, buf, n, &read, ov): the destination buffer is the second argument.
-        "ReadFile" => Stub::ReadInput { buf_arg: 1, fmt_arg: None, ret: InputReturn::Count(1) },
+        "ReadFile" => Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: None,
+            ret: InputReturn::Count(1),
+        },
         // GUI edit-box reads — the largest single reader family in the crackme corpus, and the one
         // the sandbox can never drive (a dialog app has no stdin to pipe a guess into), so the
         // emulated check is the only oracle available for these.
         // GetWindowTextA(hwnd, buf, max) -> length copied.
-        "GetWindowTextA" => Stub::ReadInput { buf_arg: 1, fmt_arg: None, ret: InputReturn::Len },
+        "GetWindowTextA" => Stub::ReadInput {
+            buf_arg: 1,
+            fmt_arg: None,
+            ret: InputReturn::Len,
+        },
         // GetDlgItemTextA(hwnd, id, buf, max) -> length copied.
-        "GetDlgItemTextA" => Stub::ReadInput { buf_arg: 2, fmt_arg: None, ret: InputReturn::Len },
+        "GetDlgItemTextA" => Stub::ReadInput {
+            buf_arg: 2,
+            fmt_arg: None,
+            ret: InputReturn::Len,
+        },
         // C++ `cin >> n`. These are the Itanium-ABI manglings libstdc++ and MinGW emit for
         // `std::istream::operator>>`, one per integer type; the trailing letter is the argument
         // type (`i` int, `j` unsigned, `s` short, `x` long long, …). `l`/`m` (long) are mapped at
@@ -213,7 +249,11 @@ impl Stub {
     fn read_num_ref(width: usize, _signed: bool) -> Self {
         Self::ReadNumInto {
             dst_arg: 1,
-            conv: NumConv { width, radix: 10, float: false },
+            conv: NumConv {
+                width,
+                radix: 10,
+                float: false,
+            },
             ret_arg: 0,
         }
     }
@@ -309,14 +349,22 @@ pub fn scanf_num_conv(fmt: &[u8]) -> Option<NumConv> {
             (_, 2..) => 8,
             _ => 4,
         };
-        let int = |radix| Some(NumConv { width: int_width, radix, float: false });
+        let int = |radix| {
+            Some(NumConv {
+                width: int_width,
+                radix,
+                float: false,
+            })
+        };
         return match conv {
             b'd' | b'i' | b'u' => int(10),
             b'x' | b'X' => int(16),
             b'o' => int(8),
-            b'f' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A' => {
-                Some(NumConv { width: if ls > 0 { 8 } else { 4 }, radix: 10, float: true })
-            }
+            b'f' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A' => Some(NumConv {
+                width: if ls > 0 { 8 } else { 4 },
+                radix: 10,
+                float: true,
+            }),
             // %s, %c, %[set], %p, %n: not a numeric destination.
             _ => None,
         };
@@ -349,13 +397,21 @@ pub fn parse_num(text: &[u8], conv: &NumConv) -> Option<u64> {
         None => (false, s.strip_prefix('+').unwrap_or(s)),
     };
     let rest = if conv.radix == 16 {
-        rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")).unwrap_or(rest)
+        rest.strip_prefix("0x")
+            .or_else(|| rest.strip_prefix("0X"))
+            .unwrap_or(rest)
     } else {
         rest
     };
-    let end = rest.find(|c: char| !c.is_digit(conv.radix)).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_digit(conv.radix))
+        .unwrap_or(rest.len());
     let mag = u64::from_str_radix(rest.get(..end)?, conv.radix).ok()?;
-    Some(if neg { (mag as i64).wrapping_neg() as u64 } else { mag })
+    Some(if neg {
+        (mag as i64).wrapping_neg() as u64
+    } else {
+        mag
+    })
 }
 
 /// C `atoi`: skips leading whitespace, takes an optional sign, then the leading decimal digits
@@ -871,7 +927,11 @@ impl Emulator {
             // Concrete emulation has no real stdin. With a seed set (the compare-hook driver), write
             // it into the destination buffer so a keygen runs forward on a known input; otherwise
             // leave the buffer as-is. (Symbolic execution is what *symbolizes* the buffer instead.)
-            Stub::ReadInput { buf_arg, fmt_arg, ret } => {
+            Stub::ReadInput {
+                buf_arg,
+                fmt_arg,
+                ret,
+            } => {
                 let buf = self.arg(*buf_arg);
                 let line = self.next_seed_line();
                 // A numeric conversion (`scanf("%d", &n)`) stores a binary integer, so the seed's
@@ -914,7 +974,11 @@ impl Emulator {
                     InputReturn::Len => line.len() as u64,
                 }
             }
-            Stub::ReadNumInto { dst_arg, conv, ret_arg } => {
+            Stub::ReadNumInto {
+                dst_arg,
+                conv,
+                ret_arg,
+            } => {
                 let dst = self.arg(*dst_arg);
                 let line = self.next_seed_line();
                 if dst != 0
@@ -988,7 +1052,14 @@ impl Emulator {
                     self.reg_num.insert(iced_x86::Register::RAX);
                 }
                 // A non-numeric seed converts to 0 and clears the caller's `translated` flag.
-                match parse_num(&seed, &NumConv { width: 4, radix: 10, float: false }) {
+                match parse_num(
+                    &seed,
+                    &NumConv {
+                        width: 4,
+                        radix: 10,
+                        float: false,
+                    },
+                ) {
                     Some(v) => v,
                     None => {
                         let flag = self.arg(2);
@@ -1092,7 +1163,8 @@ impl Emulator {
         // Decode at the ABI's bitness: a 32-bit cdecl binary must decode as 32-bit, or e.g.
         // `inc edx` (0x42) is misread as a REX prefix. 64-bit ABIs decode as 64-bit.
         let bits = if self.abi.ptr_size() == 4 { 32 } else { 64 };
-        let mut dec = iced_x86::Decoder::with_ip(bits, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
+        let mut dec =
+            iced_x86::Decoder::with_ip(bits, &buf[..n], ip, iced_x86::DecoderOptions::NONE);
         let instr = dec.decode();
         if instr.is_invalid() {
             return Err(EmuError::InvalidInstruction(ip));
@@ -1148,7 +1220,11 @@ impl Emulator {
         // RBP inside the mapped stack, with the frame's locals below it.
         let sp = self.cpu.rsp();
         self.cpu.set_reg(
-            if abi.ptr_size() == 4 { iced_x86::Register::EBP } else { iced_x86::Register::RBP },
+            if abi.ptr_size() == 4 {
+                iced_x86::Register::EBP
+            } else {
+                iced_x86::Register::RBP
+            },
             sp,
         );
         self.run_until(Some(SENTINEL))

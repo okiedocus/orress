@@ -35,7 +35,10 @@ pub fn solve_z3(constraints: &[Expr], n: u32) -> Option<Vec<u8>> {
     }
     // `to_smt2` already declares `b0..bN` as `(_ BitVec 8)`, asserts the constraints, and ends with
     // (check-sat)(get-model). A :timeout bounds a hard checksum, and `-T` is the wall-clock backstop.
-    let script = format!("(set-option :timeout 8000)\n{}", expr::to_smt2(constraints, n));
+    let script = format!(
+        "(set-option :timeout 8000)\n{}",
+        expr::to_smt2(constraints, n)
+    );
     let mut child = Command::new("z3")
         .arg("-smt2")
         .arg("-in")
@@ -72,10 +75,16 @@ fn parse_model(out: &str, n: usize) -> Option<Vec<u8>> {
             continue;
         }
         let val = if let Some(h) = p.find("#x") {
-            let hex: String = p[h + 2..].chars().take_while(char::is_ascii_hexdigit).collect();
+            let hex: String = p[h + 2..]
+                .chars()
+                .take_while(char::is_ascii_hexdigit)
+                .collect();
             u16::from_str_radix(&hex, 16)
         } else if let Some(b) = p.find("#b") {
-            let bin: String = p[b + 2..].chars().take_while(|c| matches!(c, '0' | '1')).collect();
+            let bin: String = p[b + 2..]
+                .chars()
+                .take_while(|c| matches!(c, '0' | '1'))
+                .collect();
             u16::from_str_radix(&bin, 2)
         } else {
             continue;

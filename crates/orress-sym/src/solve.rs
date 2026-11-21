@@ -150,8 +150,6 @@ fn bits_mask(w: u32) -> u64 {
     if w >= 64 { u64::MAX } else { (1u64 << w) - 1 }
 }
 
-
-
 /// A cost for one constraint under `assign`: 0 when satisfied, otherwise a distance coordinate
 /// descent can minimise. For an equality the distance is the Hamming distance between the two
 /// sides, so each input byte that controls a distinct byte of the compared value can be fixed
@@ -281,7 +279,11 @@ mod tests {
         let mut hi = expr::konst(0, 64);
         for i in 0..8u32 {
             let b = expr::zext(expr::var(8 + i), 64);
-            hi = expr::bin(Op::Or, hi, expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64)));
+            hi = expr::bin(
+                Op::Or,
+                hi,
+                expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64)),
+            );
         }
         let k1 = u64::from_le_bytes(*b"ger_here");
         let eq1 = expr::rel(Rel::Eq, hi, expr::konst(k1, 64));

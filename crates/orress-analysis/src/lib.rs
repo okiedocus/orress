@@ -330,7 +330,9 @@ impl Program {
             .flat_map(|f| f.blocks.iter().flat_map(|b| b.insns.iter().copied()))
             .collect();
         for addr in addrs {
-            let Some(insn) = self.decode(addr) else { continue };
+            let Some(insn) = self.decode(addr) else {
+                continue;
+            };
             for &target in &insn.data_refs {
                 if out.len() >= MAX_CALLBACK_SEEDS {
                     return out;
@@ -355,7 +357,9 @@ impl Program {
     /// adjustment. Keeps a jump table or a string that happens to live in `.text` from being
     /// mistaken for a callback.
     fn looks_like_entry(&self, addr: u64) -> bool {
-        let Some(insn) = self.decode(addr) else { return false };
+        let Some(insn) = self.decode(addr) else {
+            return false;
+        };
         let text = insn.text();
         let mnemonic = insn.mnemonic.as_str();
         match mnemonic {

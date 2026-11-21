@@ -244,8 +244,12 @@ impl<'a> Printer<'a> {
                 Some(Ty::Int(w, signed)) => Some((*w, *signed)),
                 _ => None,
             },
-            Expr::Const(_, w) | Expr::Load(_, w) | Expr::Bin(_, _, _, w) | Expr::Neg(_, w)
-            | Expr::Not(_, w) | Expr::Cast(_, w, _) => Some((*w, false)),
+            Expr::Const(_, w)
+            | Expr::Load(_, w)
+            | Expr::Bin(_, _, _, w)
+            | Expr::Neg(_, w)
+            | Expr::Not(_, w)
+            | Expr::Cast(_, w, _) => Some((*w, false)),
             // Everything else — iterator chains, methods, floats, vectors — infers its type from
             // context or is not an integer at all.
             _ => None,
@@ -957,8 +961,16 @@ impl<'a> Printer<'a> {
             self.link(format!("\"{}\"", escape(&text)), TokKind::Str, a);
         } else if let Some(n) = self.program.name(a) {
             let is_fn = self.program.functions.contains_key(&a);
-            let kind = if is_fn { TokKind::Function } else { TokKind::Variable };
-            let text = if self.port { rust_ident(&n.text) } else { n.text.clone() };
+            let kind = if is_fn {
+                TokKind::Function
+            } else {
+                TokKind::Variable
+            };
+            let text = if self.port {
+                rust_ident(&n.text)
+            } else {
+                n.text.clone()
+            };
             if is_fn {
                 // A function name is an *item* in Rust: it cannot be added to or subtracted from,
                 // which is what `__mingw_SEH_error_handler - rbp` tried to do.
@@ -1011,8 +1023,7 @@ impl<'a> Printer<'a> {
             // A call through a known function's address is just a call to it. Without this the
             // port emitted `((name as usize as u64))(args)` -- the address cast that makes a
             // function usable in arithmetic, applied where a callable was wanted.
-            CallTarget::Indirect(e)
-                if matches!(&**e, Expr::Addr(a) if self.program.functions.contains_key(a)) =>
+            CallTarget::Indirect(e) if matches!(&**e, Expr::Addr(a) if self.program.functions.contains_key(a)) =>
             {
                 let Expr::Addr(a) = &**e else { unreachable!() };
                 let name = self.func_name(*a);
@@ -1756,7 +1767,11 @@ impl<'a> Printer<'a> {
         // the decompiler rather than through `func_name`, which is why sanitising the call sites
         // and the stubs was not enough: one corpus binary exports `AntiRevGetTC()`, parentheses
         // included, and the port opened with `fn AntiRevGetTC()() -> bool`.
-        let shown = if self.port { rust_ident(name) } else { name.to_string() };
+        let shown = if self.port {
+            rust_ident(name)
+        } else {
+            name.to_string()
+        };
         self.link(shown, TokKind::Function, entry);
         self.p("(");
         let mut first = true;
@@ -1816,7 +1831,11 @@ impl<'a> Printer<'a> {
                     w.rust(*signed)
                 };
                 self.tok(ty, TokKind::Type);
-                if float { "0.0".to_string() } else { "0".to_string() }
+                if float {
+                    "0.0".to_string()
+                } else {
+                    "0".to_string()
+                }
             };
             if self.port {
                 self.p(" = ");
@@ -1950,7 +1969,11 @@ fn ext_name(program: &Program, a: u64) -> String {
 pub(crate) fn rust_ident(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        out.push(if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' });
+        out.push(if c.is_ascii_alphanumeric() || c == '_' {
+            c
+        } else {
+            '_'
+        });
     }
     // A Rust identifier cannot start with a digit, and an empty name is not a name.
     if out.is_empty() {

@@ -23,9 +23,15 @@ pub struct Limits {
 
 impl Limits {
     /// For a human or an agent reading the output.
-    pub const DISPLAY: Self = Self { per_method: 80, max_bytes: MAX_OUT };
+    pub const DISPLAY: Self = Self {
+        per_method: 80,
+        max_bytes: MAX_OUT,
+    };
     /// For a program searching the output — see the note on [`Limits`].
-    pub const ANALYSIS: Self = Self { per_method: 4096, max_bytes: 8 << 20 };
+    pub const ANALYSIS: Self = Self {
+        per_method: 4096,
+        max_bytes: 8 << 20,
+    };
 
     fn cap(self, mut s: String) -> String {
         if s.len() > self.max_bytes {
@@ -35,8 +41,10 @@ impl Limits {
                 end -= 1;
             }
             s.truncate(end);
-            s.push_str("
-… (truncated)");
+            s.push_str(
+                "
+… (truncated)",
+            );
         }
         s
     }
@@ -360,7 +368,10 @@ fn dis_java(data: &[u8], lim: Limits) -> Result<String, String> {
     for m in &cf.methods {
         let Some(code) = &m.code else { continue };
         let _ = writeln!(out, "\n  {}{}", m.name, m.descriptor);
-        for ins in orress_java::disassemble(code, &cf.cp).into_iter().take(lim.per_method) {
+        for ins in orress_java::disassemble(code, &cf.cp)
+            .into_iter()
+            .take(lim.per_method)
+        {
             let _ = writeln!(
                 out,
                 "    {:>4}: {:<16} {}",

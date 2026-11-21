@@ -374,12 +374,18 @@ fn region_maps_the_page_tail_but_reads_stop_at_the_raw_data() {
     info.sections[1].virtual_size = 0x20;
     let m = Memory::new(&info, Arc::clone(&data));
     assert!(m.contains(DATA + 0x1f), "the virtual part is mapped");
-    assert!(m.contains(DATA + 0x20), "so is the file-alignment padding behind it");
+    assert!(
+        m.contains(DATA + 0x20),
+        "so is the file-alignment padding behind it"
+    );
     assert!(m.contains(DATA + 0xfff), "the whole last page is mapped");
     assert!(!m.contains(DATA + 0x1000), "but no further");
 
     // Readable exactly as far as the raw data goes, and not one byte beyond.
-    assert!(m.read(DATA + 0x1ff, 1).is_some(), "last raw byte is readable");
+    assert!(
+        m.read(DATA + 0x1ff, 1).is_some(),
+        "last raw byte is readable"
+    );
     assert!(
         m.read(DATA + 0x200, 1).is_none(),
         "past the raw data reads nothing rather than the next section's bytes"

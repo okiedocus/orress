@@ -198,7 +198,12 @@ fn input_placement(program: &Program) -> u64 {
 ///
 /// Use differentially (same-shaped wrong inputs must NOT satisfy it) to rule out a check that
 /// compares the input against itself (an echo) rather than against a stored key.
-pub fn compare_satisfied(program: &Program, func_entry: u64, candidate: &[u8], abi: Abi) -> Option<bool> {
+pub fn compare_satisfied(
+    program: &Program,
+    func_entry: u64,
+    candidate: &[u8],
+    abi: Abi,
+) -> Option<bool> {
     match compare_pass(program, func_entry, candidate, abi) {
         ComparePassOutcome::Unsupported => None,
         ComparePassOutcome::No => Some(false),
@@ -270,7 +275,11 @@ pub fn compare_pass(
         shapes.push(Shape::Number);
     }
     // A dialog handler: enter at the block that reads the edit box, not at the message dispatch.
-    shapes.extend(gui_reader_blocks(program, entry).into_iter().map(Shape::GuiBlock));
+    shapes.extend(
+        gui_reader_blocks(program, entry)
+            .into_iter()
+            .map(Shape::GuiBlock),
+    );
     for shape in shapes {
         match compare_run(program, entry, candidate, abi, shape).pass {
             Some(ComparePass::Bytes) => return ComparePassOutcome::Passed(ComparePass::Bytes),
@@ -303,21 +312,57 @@ const GUI_READERS: [&str; 3] = ["GetDlgItemTextA", "GetWindowTextA", "GetDlgItem
 /// [`GUI_READERS`], which stays the dialog-specific list because a dialog needs a different calling
 /// shape, not just a different name.
 const INPUT_READERS: [&str; 30] = [
-    "gets", "gets_s", "fgets", "scanf", "scanf_s", "fscanf", "sscanf", "__isoc99_scanf",
-    "__isoc99_sscanf", "getchar", "getch", "getche", "fgetc", "getline", "ReadFile", "ReadConsoleA",
-    "ReadConsoleW", "GetDlgItemTextA", "GetDlgItemTextW", "GetWindowTextA", "GetWindowTextW",
+    "gets",
+    "gets_s",
+    "fgets",
+    "scanf",
+    "scanf_s",
+    "fscanf",
+    "sscanf",
+    "__isoc99_scanf",
+    "__isoc99_sscanf",
+    "getchar",
+    "getch",
+    "getche",
+    "fgetc",
+    "getline",
+    "ReadFile",
+    "ReadConsoleA",
+    "ReadConsoleW",
+    "GetDlgItemTextA",
+    "GetDlgItemTextW",
+    "GetWindowTextA",
+    "GetWindowTextW",
     "GetDlgItemInt",
     // C++ `cin >> n`, by its Itanium-ABI mangling (one symbol per integer type). The `cin` object
     // appears in 12% of corpus binaries, the largest family that had no reader hook, and a check
     // whose read is unhooked is invisible to extraction, confirmation and search alike.
-    "_ZNSirsERi", "_ZNSirsERj", "_ZNSirsERs", "_ZNSirsERt", "_ZNSirsERl", "_ZNSirsERm",
-    "_ZNSirsERx", "_ZNSirsERy",
+    "_ZNSirsERi",
+    "_ZNSirsERj",
+    "_ZNSirsERs",
+    "_ZNSirsERt",
+    "_ZNSirsERl",
+    "_ZNSirsERm",
+    "_ZNSirsERx",
+    "_ZNSirsERy",
 ];
 
 /// Imports that compare a string or buffer — where a key check lands when it is not written inline.
 const COMPARERS: [&str; 14] = [
-    "strcmp", "strncmp", "stricmp", "strcmpi", "strcasecmp", "strncasecmp", "memcmp", "bcmp",
-    "lstrcmpA", "lstrcmpW", "lstrcmpiA", "wcscmp", "mbscmp", "CompareStringA",
+    "strcmp",
+    "strncmp",
+    "stricmp",
+    "strcmpi",
+    "strcasecmp",
+    "strncasecmp",
+    "memcmp",
+    "bcmp",
+    "lstrcmpA",
+    "lstrcmpW",
+    "lstrcmpiA",
+    "wcscmp",
+    "mbscmp",
+    "CompareStringA",
 ];
 
 /// An import's name with the decoration a linker adds stripped, so one spelling matches them all:
@@ -462,7 +507,9 @@ fn looks_like_address(program: &Program, value: u64) -> bool {
 /// hex, since a `%x` crackme's key is typed in hex. Used to verify that a passing numeric
 /// comparison really matched *this* candidate rather than some unrelated pair of equal values.
 fn candidate_numbers(candidate: &[u8]) -> Vec<u64> {
-    let Ok(s) = std::str::from_utf8(candidate) else { return Vec::new() };
+    let Ok(s) = std::str::from_utf8(candidate) else {
+        return Vec::new();
+    };
     let s = s.trim();
     if s.is_empty() || s.len() > 20 {
         return Vec::new();
@@ -491,7 +538,13 @@ struct RunOutcome {
 }
 
 /// One compare-hook run on `candidate`. See [`Shape`] for what the calling conventions mean.
-fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape: Shape) -> RunOutcome {
+fn compare_run(
+    program: &Program,
+    entry: u64,
+    candidate: &[u8],
+    abi: Abi,
+    shape: Shape,
+) -> RunOutcome {
     let mut emu = orress_emu::Emulator::new();
     emu.mem = emu_image(program);
     emu.hooks = import_hooks(program);
@@ -502,7 +555,9 @@ fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape:
     let args: Vec<u64> = match shape {
         Shape::Number => {
             emu.seed_num_arg(0);
-            let Some(v) = numeric_candidate(candidate) else { return RunOutcome::default() };
+            let Some(v) = numeric_candidate(candidate) else {
+                return RunOutcome::default();
+            };
             vec![v as u64]
         }
         _ => {
@@ -526,9 +581,8 @@ fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape:
         }
     }
 
-    let observed = emu.compares().len()
-        + emu.int_compares().len()
-        + usize::from(emu.inline_key().is_some());
+    let observed =
+        emu.compares().len() + emu.int_compares().len() + usize::from(emu.inline_key().is_some());
 
     // What the check may legitimately have compared: the candidate, and — for a keygen pair fed
     // as `name\nserial`, where each read takes one line — either line on its own.
@@ -549,7 +603,10 @@ fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape:
             .iter()
             .any(|e| k.len() <= e.len() && k.as_slice() == &e[..k.len()])
     {
-        return RunOutcome { pass: Some(ComparePass::Bytes), observed };
+        return RunOutcome {
+            pass: Some(ComparePass::Bytes),
+            observed,
+        };
     }
     // Library compare: the input operand equals the value it was compared against.
     if emu
@@ -557,7 +614,10 @@ fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape:
         .iter()
         .any(|(a, b)| a == b && expected.contains(&a.as_slice()))
     {
-        return RunOutcome { pass: Some(ComparePass::Bytes), observed };
+        return RunOutcome {
+            pass: Some(ComparePass::Bytes),
+            observed,
+        };
     }
     // Numeric check: the parsed input was compared whole against a number and matched. Three
     // guards, each of which a real false positive walked through:
@@ -568,10 +628,14 @@ fn compare_run(program: &Program, entry: u64, candidate: &[u8], abi: Abi, shape:
     //     holds while the taint is right, and that is exactly what fails here; and
     //   * an address in the program's image is not a key (see `looks_like_address`).
     let want = candidate_numbers(candidate);
-    let hit = emu.int_compares().iter().any(|&(x, y)| {
-        x == y && x != 0 && want.contains(&x) && !looks_like_address(program, x)
-    });
-    RunOutcome { pass: hit.then_some(ComparePass::Number), observed }
+    let hit = emu
+        .int_compares()
+        .iter()
+        .any(|&(x, y)| x == y && x != 0 && want.contains(&x) && !looks_like_address(program, x));
+    RunOutcome {
+        pass: hit.then_some(ComparePass::Number),
+        observed,
+    }
 }
 
 /// **Precondition diagnostic.** How many comparisons against a seeded probe input a run of this
@@ -591,7 +655,11 @@ pub fn compare_observations(program: &Program, func_entry: u64, probe: &[u8], ab
         return 0;
     };
     let mut shapes = vec![Shape::Pointer, Shape::Number];
-    shapes.extend(gui_reader_blocks(program, entry).into_iter().map(Shape::GuiBlock));
+    shapes.extend(
+        gui_reader_blocks(program, entry)
+            .into_iter()
+            .map(Shape::GuiBlock),
+    );
     shapes
         .into_iter()
         .map(|s| compare_run(program, entry, probe, abi, s).observed)
@@ -717,8 +785,18 @@ pub fn verdict_functions(program: &Program) -> Vec<u64> {
 fn is_fail_text(text: &str) -> bool {
     let t = text.to_ascii_lowercase();
     const FAIL: &[&str] = &[
-        "incorrect", "wrong", "invalid", "denied", "fail", "unsuccessful", "try again", "sorry",
-        "not correct", "no match", "nope", "bad ",
+        "incorrect",
+        "wrong",
+        "invalid",
+        "denied",
+        "fail",
+        "unsuccessful",
+        "try again",
+        "sorry",
+        "not correct",
+        "no match",
+        "nope",
+        "bad ",
     ];
     FAIL.iter().any(|m| t.contains(m))
 }
@@ -753,7 +831,10 @@ pub fn emulate_outcome(program: &Program, func_entry: u64, candidate: &[u8], abi
     let dbg = std::env::var("CRACKEN_DEBUG_CONFIRM").is_ok();
     if win.is_empty() {
         if dbg {
-            eprintln!("[outcome] no success-string sites (win=0 lose={})", lose.len());
+            eprintln!(
+                "[outcome] no success-string sites (win=0 lose={})",
+                lose.len()
+            );
         }
         return Verdict::Unknown; // nothing to steer toward — the return-value check can't help here
     }
@@ -808,7 +889,9 @@ pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<Vm
     let avoid: Vec<u64> = func
         .blocks
         .iter()
-        .filter(|b| verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start))
+        .filter(|b| {
+            verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start)
+        })
         .map(|b| b.start)
         .collect();
 
@@ -844,7 +927,10 @@ pub fn solve_function(program: &Program, func_entry: u64, abi: Abi) -> Option<Vm
                 smt2: found.smt2,
             };
             // Keep the richest solve (the length/path that constrained the most bytes).
-            if best.as_ref().is_none_or(|b| sol.constraints > b.constraints) {
+            if best
+                .as_ref()
+                .is_none_or(|b| sol.constraints > b.constraints)
+            {
                 best = Some(sol);
             }
         }
@@ -868,7 +954,9 @@ pub fn solve_function_explore(program: &Program, func_entry: u64, abi: Abi) -> O
     let avoid: Vec<u64> = func
         .blocks
         .iter()
-        .filter(|b| verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start))
+        .filter(|b| {
+            verdict_const(program, b) == Some(0) && reaches_ret_cleanly(program, func, b.start)
+        })
         .map(|b| b.start)
         .collect();
     let input_base = input_placement(program);
@@ -1049,16 +1137,37 @@ fn success_block(program: &Program, func: &Function) -> Option<(u64, Vec<u64>)> 
 fn is_success_text(text: &str) -> bool {
     let t = text.to_ascii_lowercase();
     const FAIL: &[&str] = &[
-        "incorrect", "wrong", "invalid", "denied", "fail", "unsuccessful", "try again", "sorry",
-        "error", "not correct", "no match",
+        "incorrect",
+        "wrong",
+        "invalid",
+        "denied",
+        "fail",
+        "unsuccessful",
+        "try again",
+        "sorry",
+        "error",
+        "not correct",
+        "no match",
     ];
     if FAIL.iter().any(|m| t.contains(m)) {
         return false;
     }
     const WIN: &[&str] = &[
-        "correct", "congrat", "you win", "access granted", "well done", "good job", "accepted",
-        "unlocked", "right password", "right key", "right serial", "winner", "you did it",
-        "you got it", "flag{",
+        "correct",
+        "congrat",
+        "you win",
+        "access granted",
+        "well done",
+        "good job",
+        "accepted",
+        "unlocked",
+        "right password",
+        "right key",
+        "right serial",
+        "winner",
+        "you did it",
+        "you got it",
+        "flag{",
     ];
     WIN.iter().any(|m| t.contains(m))
 }
@@ -1214,12 +1323,7 @@ pub fn recover_by_compare(program: &Program, func_entry: u64, abi: Abi) -> Vec<C
 /// Returns the recovered key/serial candidates and any length-gate constants the run observed (a
 /// value equal to the seed length compared against a different small constant — see
 /// [`orress_emu::Emulator::wanted_lens`]).
-fn run_seed(
-    program: &Program,
-    func_entry: u64,
-    abi: Abi,
-    seed: &[u8],
-) -> (Vec<Vec<u8>>, Vec<u64>) {
+fn run_seed(program: &Program, func_entry: u64, abi: Abi, seed: &[u8]) -> (Vec<Vec<u8>>, Vec<u64>) {
     let mut cur = seed.to_vec();
     let mut keys: Vec<Vec<u8>> = Vec::new();
     let mut wanted: Vec<u64> = Vec::new();
