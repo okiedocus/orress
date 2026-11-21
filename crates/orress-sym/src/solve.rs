@@ -150,61 +150,7 @@ fn bits_mask(w: u32) -> u64 {
     if w >= 64 { u64::MAX } else { (1u64 << w) - 1 }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::expr::{self, Op, Rel};
 
-    /// A 64-bit little-endian load of input bytes 0..8 as an expression.
-    fn load64_le() -> Expr {
-        let mut acc = expr::konst(0, 64);
-        for i in 0..8u32 {
-            let b = expr::zext(expr::var(i), 64);
-            let shifted = expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64));
-            acc = expr::bin(Op::Or, acc, shifted);
-        }
-        acc
-    }
-
-    #[test]
-    fn solves_a_wide_u64_equality_by_descent() {
-        // `*(u64*)input == K` — 8 coupled bytes, too many to brute force; descent must recover the
-        // little-endian bytes of K. K spells "Pa55w0rd".
-        let k = u64::from_le_bytes(*b"Pa55w0rd");
-        let eq = expr::rel(Rel::Eq, load64_le(), expr::konst(k, 64));
-        let r = solve(&[eq], 8);
-        assert!(r.complete, "wide equality should solve: {}", r.message);
-        assert_eq!(&r.input, b"Pa55w0rd");
-    }
-
-    #[test]
-    fn small_group_still_brute_forces() {
-        // A per-byte transform-and-compare: in[0] ^ 0x41 == 0x10 -> in[0] == 0x51.
-        let lhs = expr::bin(Op::Xor, expr::zext(expr::var(0), 8), expr::konst(0x41, 8));
-        let eq = expr::rel(Rel::Eq, lhs, expr::konst(0x10, 8));
-        let r = solve(&[eq], 1);
-        assert!(r.complete);
-        assert_eq!(r.input[0], 0x51);
-    }
-
-    #[test]
-    fn two_independent_wide_equalities() {
-        // Two u64 loads over disjoint byte groups (the `== b"16 bytes"` shape).
-        let k0 = u64::from_le_bytes(*b"n0_debug");
-        let eq0 = expr::rel(Rel::Eq, load64_le(), expr::konst(k0, 64));
-        // Second load over bytes 8..16.
-        let mut hi = expr::konst(0, 64);
-        for i in 0..8u32 {
-            let b = expr::zext(expr::var(8 + i), 64);
-            hi = expr::bin(Op::Or, hi, expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64)));
-        }
-        let k1 = u64::from_le_bytes(*b"ger_here");
-        let eq1 = expr::rel(Rel::Eq, hi, expr::konst(k1, 64));
-        let r = solve(&[eq0, eq1], 16);
-        assert!(r.complete, "{}", r.message);
-        assert_eq!(&r.input, b"n0_debugger_here");
-    }
-}
 
 /// A cost for one constraint under `assign`: 0 when satisfied, otherwise a distance coordinate
 /// descent can minimise. For an equality the distance is the Hamming distance between the two
@@ -287,4 +233,60 @@ fn descend(idxs: &[usize], group_constraints: &[&Expr], assign: &mut [u8]) -> bo
         }
     }
     satisfied(assign)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::{self, Op, Rel};
+
+    /// A 64-bit little-endian load of input bytes 0..8 as an expression.
+    fn load64_le() -> Expr {
+        let mut acc = expr::konst(0, 64);
+        for i in 0..8u32 {
+            let b = expr::zext(expr::var(i), 64);
+            let shifted = expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64));
+            acc = expr::bin(Op::Or, acc, shifted);
+        }
+        acc
+    }
+
+    #[test]
+    fn solves_a_wide_u64_equality_by_descent() {
+        // `*(u64*)input == K` — 8 coupled bytes, too many to brute force; descent must recover the
+        // little-endian bytes of K. K spells "Pa55w0rd".
+        let k = u64::from_le_bytes(*b"Pa55w0rd");
+        let eq = expr::rel(Rel::Eq, load64_le(), expr::konst(k, 64));
+        let r = solve(&[eq], 8);
+        assert!(r.complete, "wide equality should solve: {}", r.message);
+        assert_eq!(&r.input, b"Pa55w0rd");
+    }
+
+    #[test]
+    fn small_group_still_brute_forces() {
+        // A per-byte transform-and-compare: in[0] ^ 0x41 == 0x10 -> in[0] == 0x51.
+        let lhs = expr::bin(Op::Xor, expr::zext(expr::var(0), 8), expr::konst(0x41, 8));
+        let eq = expr::rel(Rel::Eq, lhs, expr::konst(0x10, 8));
+        let r = solve(&[eq], 1);
+        assert!(r.complete);
+        assert_eq!(r.input[0], 0x51);
+    }
+
+    #[test]
+    fn two_independent_wide_equalities() {
+        // Two u64 loads over disjoint byte groups (the `== b"16 bytes"` shape).
+        let k0 = u64::from_le_bytes(*b"n0_debug");
+        let eq0 = expr::rel(Rel::Eq, load64_le(), expr::konst(k0, 64));
+        // Second load over bytes 8..16.
+        let mut hi = expr::konst(0, 64);
+        for i in 0..8u32 {
+            let b = expr::zext(expr::var(8 + i), 64);
+            hi = expr::bin(Op::Or, hi, expr::bin(Op::Shl, b, expr::konst(u64::from(8 * i), 64)));
+        }
+        let k1 = u64::from_le_bytes(*b"ger_here");
+        let eq1 = expr::rel(Rel::Eq, hi, expr::konst(k1, 64));
+        let r = solve(&[eq0, eq1], 16);
+        assert!(r.complete, "{}", r.message);
+        assert_eq!(&r.input, b"n0_debugger_here");
+    }
 }

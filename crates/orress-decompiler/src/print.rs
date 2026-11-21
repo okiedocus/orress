@@ -240,7 +240,7 @@ impl<'a> Printer<'a> {
             // A parameter only has an integer type when the signature says so. A slice-length
             // parameter prints as `a3.len()` and is a `usize`; casting it makes the whole
             // expression that width, and the `usize` local it feeds then rejects it.
-            Expr::Param(i, _) => match self.sig.params.get(*i as usize) {
+            Expr::Param(i, _) => match self.sig.params.get(*i) {
                 Some(Ty::Int(w, signed)) => Some((*w, *signed)),
                 _ => None,
             },
