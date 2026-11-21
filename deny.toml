@@ -14,6 +14,16 @@ ignore = [
     # rsa is only used by yara-x to *verify* Authenticode signatures with public keys, which the
     # attack does not affect. No fixed rsa release exists yet.
     { id = "RUSTSEC-2023-0071", reason = "public-key signature verification only (yara-x); not affected" },
+    # Timing variability in operations intended to be constant-time. Reaches ORRESS only as
+    # yara-x -> p256 -> ecdsa -> elliptic-curve -> crypto-bigint: ECDSA *verification* of
+    # Authenticode signatures with public keys, the same path as RUSTSEC-2023-0071 above. A timing
+    # side channel leaks a secret; there is no secret on this path, and the work is local rather
+    # than remotely observable.
+    #
+    # Not fixable here: the fix is crypto-bigint >=0.7.6, which needs major bumps of
+    # elliptic-curve, ecdsa and p256, and yara-x pins those -- `cargo update -p crypto-bigint`
+    # locks 0 packages. REMOVE THIS ENTRY when yara-x updates its p256.
+    { id = "RUSTSEC-2026-0387", reason = "public-key signature verification only (yara-x); no secret to leak" },
 ]
 
 [licenses]
