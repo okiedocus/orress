@@ -557,8 +557,10 @@ fn confidence(handlers: usize, fan_out: usize) -> f32 {
 
 mod lift;
 pub use lift::{
-    CompareRecovery, VmSolution, emu_image, import_hooks, recover_by_compare, solve,
-    solve_function, solve_function_explore, solve_stdin_function, try_solve,
+    ComparePass, ComparePassOutcome, CompareRecovery, Verdict, VmSolution, compare_observations,
+    compare_pass, compare_satisfied, emu_image, emulate_outcome, gui_check_functions, import_hooks,
+    input_check_functions, reached_blocks, recover_by_compare, solve, solve_function,
+    solve_function_explore, solve_stdin_function, try_solve, verdict_functions,
 };
 
 #[cfg(test)]
