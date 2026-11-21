@@ -680,7 +680,7 @@ impl Emulator {
 
     /// Sets the concrete bytes each input-reading stub (gets/scanf/fgets/…) writes into its
     /// destination buffer. With a seed set, a keygen's serial algorithm runs *forward* on a known
-    /// name, so the comparison that gates success sees the real expected serial — see [`compares`].
+    /// name, so the comparison that gates success sees the real expected serial — see the `compares` log.
     pub fn seed_input(&mut self, seed: impl Into<Vec<u8>>) {
         self.input_seed = seed.into();
         self.seed_cursor = 0;
@@ -702,7 +702,7 @@ impl Emulator {
 
     /// Turns the compare-hook oracle on/off. While on, every `strcmp`/`strncmp`/`memcmp` appends its
     /// two operands to [`compares`](Self::compares) and inline per-byte comparisons against the
-    /// seeded input are recorded into [`byte_expect`]. Toggling resets the recorded state.
+    /// seeded input are recorded into `byte_expect`. Toggling resets the recorded state.
     pub fn record_compares(&mut self, on: bool) {
         self.record_compares = on;
         self.compares.clear();
@@ -1115,7 +1115,7 @@ impl Emulator {
     /// environment ([`setup_tls`]) and points FS/GS at it, unless a base was already set.
     /// Returns the stack top.
     ///
-    /// The top depends on the current ABI's pointer width — see [`DEFAULT_STACK_TOP_32`] — so set
+    /// The top depends on the current ABI's pointer width (`DEFAULT_STACK_TOP_32` / `_64`) — so set
     /// [`abi`](Self::abi) before calling this directly. [`call`](Self::call) already does.
     pub fn setup_stack(&mut self) -> u64 {
         let top = if self.abi.ptr_size() == 4 {

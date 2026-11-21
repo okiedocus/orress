@@ -128,7 +128,7 @@ fn past_deadline() -> bool {
         .is_some_and(|t| std::time::Instant::now() >= t)
 }
 
-/// Cloneable so the path-exploring driver ([`crate::explore`]) can fork a state at a symbolic
+/// Cloneable so the path-exploring driver (`SymExec::explore`) can fork a state at a symbolic
 /// branch. The base image is an `Rc<Memory>` shared across forks (reads deref it; the rare write —
 /// `malloc`/stack growth — copies-on-write via `Rc::make_mut`), because every *symbolic* write
 /// already lands in the per-state `sym_mem` overlay, not the base. So a fork clones only the small

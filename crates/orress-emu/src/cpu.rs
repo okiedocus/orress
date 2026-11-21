@@ -20,7 +20,7 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// Unpacks the modelled bits from an RFLAGS image — the inverse of [`to_rflags`], for `popf`.
+    /// Unpacks the modelled bits from an RFLAGS image — the inverse of [`Self::to_rflags`], for `popf`.
     pub fn from_rflags(v: u64) -> Self {
         Self {
             cf: v & (1 << 0) != 0,
