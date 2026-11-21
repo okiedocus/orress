@@ -35,6 +35,25 @@ fn mask(size: usize) -> u64 {
     }
 }
 
+/// Operand size of a string instruction, from its mnemonic suffix.
+fn str_size(instr: &Instruction) -> usize {
+    use iced_x86::Mnemonic as M;
+    match instr.mnemonic() {
+        M::Movsb | M::Stosb | M::Lodsb | M::Scasb | M::Cmpsb => 1,
+        M::Movsw | M::Stosw | M::Lodsw | M::Scasw | M::Cmpsw => 2,
+        M::Movsq | M::Stosq | M::Lodsq | M::Scasq | M::Cmpsq => 8,
+        _ => 4, // the `*d` forms
+    }
+}
+
+/// Whether either operand is an XMM register — what separates SSE `movsd`/`cmpsd` from the
+/// identically-named string instructions.
+fn touches_xmm(instr: &Instruction) -> bool {
+    (0..instr.op_count()).any(|i| {
+        instr.op_kind(i) == OpKind::Register && instr.op_register(i).is_xmm()
+    })
+}
+
 fn sign_bit(size: usize) -> u64 {
     1u64 << (size * 8 - 1)
 }
@@ -63,6 +82,10 @@ fn sign_extend128(v: u128, bits: u32) -> i128 {
 }
 
 impl Emulator {
+    /// How many *different* values one compare site may test the numeric input against before it is
+    /// treated as a table scan rather than a key check. See [`Emulator::note_int_cmp`].
+    const MAX_SITE_EXPECTED: usize = 3;
+
     // --- operands ---------------------------------------------------------
 
     /// The linear address of a memory operand: its offset plus the FS/GS segment base when the
@@ -93,6 +116,12 @@ impl Emulator {
         if index != Register::None {
             let scale = u64::from(instr.memory_index_scale());
             addr = addr.wrapping_add(self.cpu.reg(index).wrapping_mul(scale));
+        }
+        // 32-bit addressing WRAPS at 4 GiB. `[ebp-0xc4]` carries a displacement of 0xffffff3c, so
+        // without this mask the carry out of bit 31 lands above the 32-bit address space and every
+        // access to a local variable faults — i.e. no 32-bit function with a frame could run.
+        if self.abi.ptr_size() == 4 {
+            addr &= 0xffff_ffff;
         }
         addr
     }
@@ -134,6 +163,9 @@ impl Emulator {
                 if !self.reg_taint.is_empty() {
                     self.reg_taint.remove(&r.full_register());
                 }
+                if !self.reg_num.is_empty() {
+                    self.reg_num.remove(&r.full_register());
+                }
             }
             OpKind::Memory => self.mem.write(self.ea(instr), val & mask(size), size)?,
             _ => {}
@@ -148,10 +180,41 @@ impl Emulator {
     ///   * a **register copy** of an already-tainted byte (`mov ecx, eax`) — compilers routinely
     ///     stage the loaded byte through another register before the compare, and without
     ///     propagating taint across the copy the comparison looks untainted and is missed.
+    ///
     /// (`write_op` has already cleared the destination's old taint, so a copy from an untainted
     /// source correctly leaves it untainted.)
+    ///
+    /// Also maintains the *numeric* input's location: a store of the tainted number moves the tag
+    /// to that slot, and a store of anything else over it clears the tag, because the compiler has
+    /// reused the slot and what it holds now is not the input.
     fn taint_from_load(&mut self, instr: &Instruction) {
-        if !self.record_compares || instr.op0_kind() != OpKind::Register {
+        if !self.record_compares {
+            return;
+        }
+        // The numeric input stored to memory (`mov [rbp-4], eax` after `atoi`): remember the slot,
+        // so a later load of it is still recognised as the input. (The store already happened.)
+        if instr.op0_kind() == OpKind::Memory && instr.memory_size().size() >= 2 {
+            let width = instr.memory_size().size();
+            let ea = self.ea(instr);
+            if instr.op1_kind() == OpKind::Register
+                && self.reg_num.contains(&instr.op_register(1).full_register())
+            {
+                self.num_input = Some((ea, width));
+            } else if let Some((addr, w)) = self.num_input
+                && ea < addr.saturating_add(w as u64)
+                && addr < ea.saturating_add(width as u64)
+            {
+                // The slot holding the number is being overwritten with something that is NOT the
+                // number: the compiler has reused the stack slot for a pointer, a loop counter, or
+                // an unrelated local. Keeping the tag made every later load of that slot read as
+                // "the input", so an unrelated `cmp` recorded its operand as the expected key —
+                // and at confirm time that bogus key compared equal to itself, which looks exactly
+                // like a satisfied check. Three of the corpus's "solves" were input-buffer
+                // addresses recovered this way. A later store of the real number re-tags the slot.
+                self.num_input = None;
+            }
+        }
+        if instr.op0_kind() != OpKind::Register {
             return;
         }
         let dst = instr.op_register(0).full_register();
@@ -168,14 +231,89 @@ impl Emulator {
             }
             _ => {}
         }
+        // Whole-value taint for the numeric input: a load of the parsed integer (`mov eax, [n]`)
+        // or a register copy of it, so a later `cmp eax, 25711` reveals the expected number.
+        let carries_num = match instr.op1_kind() {
+            OpKind::Memory => self
+                .num_input
+                .is_some_and(|(a, w)| self.ea(instr) == a && instr.memory_size().size() == w),
+            OpKind::Register => self.reg_num.contains(&instr.op_register(1).full_register()),
+            _ => false,
+        };
+        if carries_num {
+            self.reg_num.insert(dst);
+        }
+    }
+
+    /// Records one whole-value comparison against the numeric input, unless its site is **scanning**.
+    ///
+    /// A single instruction that compares the input against many different values in one run is
+    /// walking a table (`cmp eax, [tbl + i*4]`), not testing it against a stored key. Every entry
+    /// of that table would otherwise become an "expected number", so any input appearing anywhere
+    /// in it compares equal and would confirm — which is exactly how three unrelated MSVC GUI
+    /// crackmes all reported the key `252`: their scanned tables contain `0xfc`. Once a site is
+    /// recognised as a scan, its earlier entries are withdrawn too, because the first few look
+    /// indistinguishable from a real gate until the loop goes round again.
+    ///
+    /// A genuine equality gate records ONE value per site (`cmp eax, 1234h`), so the threshold only
+    /// has to be above the handful a real check can produce by being entered twice.
+    fn note_int_cmp(&mut self, site: u64, pair: (u64, u64)) {
+        if self.int_scan_sites.contains(&site) {
+            return;
+        }
+        let distinct = self
+            .int_sites
+            .iter()
+            .zip(&self.int_expect)
+            .filter(|(s, _)| **s == site)
+            .map(|(_, (_, want))| *want)
+            .chain(std::iter::once(pair.1))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if distinct > Self::MAX_SITE_EXPECTED {
+            self.int_scan_sites.insert(site);
+            // Withdraw this site's entries: retain only those recorded elsewhere.
+            let keep: Vec<bool> = self.int_sites.iter().map(|s| *s != site).collect();
+            let mut i = 0;
+            self.int_expect.retain(|_| {
+                let k = keep[i];
+                i += 1;
+                k
+            });
+            self.int_sites.retain(|s| *s != site);
+            return;
+        }
+        self.int_expect.push(pair);
+        self.int_sites.push(site);
     }
 
     /// Records an inline comparison against the seeded input: if one `cmp` operand is a byte loaded
     /// from the input (a tainted register) or the input memory itself, the other operand is the
     /// expected byte(s) for that input offset. Collected into `byte_expect` → [`Emulator::inline_key`].
     fn note_cmp(&mut self, instr: &Instruction, size: usize, a: u64, b: u64) {
-        if !self.record_compares || self.input_region.is_none() {
+        if !self.record_compares || (self.input_region.is_none() && self.num_input.is_none()) {
             return;
+        }
+        // Whole-value check against a *numeric* input (`scanf("%d")`/`atoi`): one operand is the
+        // parsed integer, so the other is the number the check expects. Recorded as a pair rather
+        // than per byte — see [`Emulator::int_compares`].
+        if size >= 2 && (self.num_input.is_some() || !self.reg_num.is_empty()) {
+            let is_num = |i: u32| match instr.op_kind(i) {
+                OpKind::Register => self.reg_num.contains(&instr.op_register(i).full_register()),
+                OpKind::Memory => self
+                    .num_input
+                    .is_some_and(|(addr, w)| self.ea(instr) == addr && w == size),
+                _ => false,
+            };
+            // Exactly one side must be the input: `cmp eax, ecx` with both tainted compares the
+            // input against itself and says nothing about the key. And the flags must be consumed
+            // as an equality test, so an ordering check (`if (n >= 100)`) can't pass off its bound
+            // as the key.
+            let (a_num, b_num) = (is_num(0), is_num(1));
+            if a_num != b_num && self.is_equality_use(instr.next_ip()) {
+                let pair = if a_num { (a, b) } else { (b, a) };
+                self.note_int_cmp(instr.ip(), pair);
+            }
         }
         // Length gate: a value equal to the seeded input's length compared against a *different*
         // small constant is `strlen(input) == N` (or `len != N`). Record N so the caller can re-seed
@@ -298,6 +436,120 @@ impl Emulator {
             _ => {}
         }
         Ok(())
+    }
+
+    /// One string instruction, including the `rep`/`repe`/`repne` loop around it. The operand
+    /// size comes from the mnemonic (`stosb` 1 … `stosq` 8); the pointers walk forward, or backward
+    /// when the direction flag is set, and the address registers wrap at the address size.
+    ///
+    /// A `cmps` iteration also feeds the compare-hook: when one side is the seeded input, the byte
+    /// on the other side is the expected key byte for that offset — which is how a `repe cmpsb`
+    /// password check gives up its key with no library call to hook.
+    fn string_op(&mut self, instr: &Instruction, size: usize) -> Result<(), EmuError> {
+        use iced_x86::Mnemonic as M;
+        let m = instr.mnemonic();
+        let narrow = self.ptr() == 4;
+        let addr = |v: u64| if narrow { v & 0xffff_ffff } else { v };
+        let acc = match size {
+            1 => Register::AL,
+            2 => Register::AX,
+            4 => Register::EAX,
+            _ => Register::RAX,
+        };
+        // F3 is REP on movs/stos/lods and REPE on cmps/scas; F2 is REPNE. iced reports F3 through
+        // both `has_rep_prefix` and `has_repe_prefix`, so the ZF test is applied per mnemonic
+        // rather than per prefix.
+        let repeated = instr.has_rep_prefix() || instr.has_repne_prefix();
+        let compares = matches!(
+            m,
+            M::Cmpsb | M::Cmpsw | M::Cmpsd | M::Cmpsq | M::Scasb | M::Scasw | M::Scasd | M::Scasq
+        );
+        // A guest-controlled RCX could otherwise spin for billions of iterations; every real
+        // crackme buffer is tiny. Each iteration is also charged to the step budget.
+        const MAX_ITERS: u64 = 1 << 20;
+
+        for _ in 0..MAX_ITERS {
+            if repeated && addr(self.cpu.reg(Register::RCX)) == 0 {
+                return Ok(());
+            }
+            let si = addr(self.cpu.reg(Register::RSI));
+            let di = addr(self.cpu.reg(Register::RDI));
+            let (mut moves_si, mut moves_di) = (false, false);
+            match m {
+                M::Movsb | M::Movsw | M::Movsd | M::Movsq => {
+                    let v = self.mem.read(si, size)?;
+                    self.mem.write(di, v, size)?;
+                    (moves_si, moves_di) = (true, true);
+                }
+                M::Stosb | M::Stosw | M::Stosd | M::Stosq => {
+                    let v = self.cpu.reg(acc);
+                    self.mem.write(di, v, size)?;
+                    moves_di = true;
+                }
+                M::Lodsb | M::Lodsw | M::Lodsd | M::Lodsq => {
+                    let v = self.mem.read(si, size)?;
+                    self.cpu.set_reg(acc, v);
+                    moves_si = true;
+                }
+                M::Scasb | M::Scasw | M::Scasd | M::Scasq => {
+                    let a = self.cpu.reg(acc) & mask(size);
+                    let b = self.mem.read(di, size)?;
+                    self.do_sub(a, b, size);
+                    moves_di = true;
+                }
+                M::Cmpsb | M::Cmpsw | M::Cmpsd | M::Cmpsq => {
+                    let a = self.mem.read(si, size)?;
+                    let b = self.mem.read(di, size)?;
+                    self.do_sub(a, b, size);
+                    self.note_string_cmp(si, di, size, a, b);
+                    (moves_si, moves_di) = (true, true);
+                }
+                _ => return Ok(()),
+            }
+            let delta = if self.cpu.flags.df {
+                (size as u64).wrapping_neg()
+            } else {
+                size as u64
+            };
+            if moves_si {
+                let v = addr(self.cpu.reg(Register::RSI).wrapping_add(delta));
+                self.cpu.set_reg(if narrow { Register::ESI } else { Register::RSI }, v);
+            }
+            if moves_di {
+                let v = addr(self.cpu.reg(Register::RDI).wrapping_add(delta));
+                self.cpu.set_reg(if narrow { Register::EDI } else { Register::RDI }, v);
+            }
+            if !repeated {
+                return Ok(());
+            }
+            let left = addr(self.cpu.reg(Register::RCX)).wrapping_sub(1);
+            self.cpu.set_reg(if narrow { Register::ECX } else { Register::RCX }, addr(left));
+            self.steps += 1; // a long rep is work, and the budget should see it
+            if compares {
+                // REPE stops at the first mismatch, REPNE at the first match.
+                if instr.has_repne_prefix() && self.cpu.flags.zf {
+                    return Ok(());
+                }
+                if instr.has_rep_prefix() && !self.cpu.flags.zf {
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Records a `cmps` byte against the seeded input (see [`note_cmp`] for the `cmp` equivalent):
+    /// whichever side lies in the input buffer, the other side is the expected byte there.
+    fn note_string_cmp(&mut self, si: u64, di: u64, size: usize, a: u64, b: u64) {
+        if !self.record_compares || size != 1 {
+            return;
+        }
+        if let Some(off) = self.input_offset(si) {
+            self.byte_expect.push((off, b as u8));
+        }
+        if let Some(off) = self.input_offset(di) {
+            self.byte_expect.push((off, a as u8));
+        }
     }
 
     // --- stack ------------------------------------------------------------
@@ -663,7 +915,158 @@ impl Emulator {
                 }
                 self.write_op(instr, 0, m, size)?;
             }
-            M::Nop | M::Endbr64 | M::Endbr32 | M::Pause => {}
+            // String instructions, with their REP prefixes. `cld; rep stosd` is the standard
+            // inlined buffer-zeroing prologue, so these sit in front of the very code a check
+            // needs to reach — and `repe cmpsb` IS the key comparison in hand-written asm crackmes.
+            M::Movsb | M::Movsw | M::Movsq => return self.string_op(instr, str_size(instr)),
+            M::Stosb | M::Stosw | M::Stosd | M::Stosq => {
+                return self.string_op(instr, str_size(instr));
+            }
+            M::Lodsb | M::Lodsw | M::Lodsd | M::Lodsq => {
+                return self.string_op(instr, str_size(instr));
+            }
+            M::Scasb | M::Scasw | M::Scasd | M::Scasq => {
+                return self.string_op(instr, str_size(instr));
+            }
+            M::Cmpsb | M::Cmpsw | M::Cmpsq => return self.string_op(instr, str_size(instr)),
+            // `movsd`/`cmpsd` are ambiguous in iced: the string form and the SSE scalar-double
+            // form share a mnemonic. Only the string form addresses memory through RSI/RDI with no
+            // XMM operand, so that is what tells them apart.
+            M::Movsd | M::Cmpsd if !touches_xmm(instr) => {
+                return self.string_op(instr, 4);
+            }
+            // Direction flag. A `cld` sits in front of most inlined string loops, so leaving it
+            // unimplemented stopped ~11% of corpus binaries dead at the first one.
+            M::Cld => self.cpu.flags.df = false,
+            M::Std => self.cpu.flags.df = true,
+            // Flag and register block moves (32-bit asm crackmes use these constantly).
+            M::Pushfd | M::Pushf | M::Pushfq => {
+                let v = self.cpu.flags.to_rflags();
+                self.push(v)?;
+            }
+            M::Popfd | M::Popf | M::Popfq => {
+                let v = self.pop()?;
+                self.cpu.flags = crate::cpu::Flags::from_rflags(v);
+            }
+            // PUSHAD/POPAD: all eight 32-bit GPRs, in the architectural order, with the pushed ESP
+            // being the value from *before* the push block.
+            M::Pushad | M::Pusha => {
+                use Register::*;
+                let sp = self.cpu.rsp();
+                for r in [EAX, ECX, EDX, EBX] {
+                    let v = self.cpu.reg(r);
+                    self.push(v)?;
+                }
+                self.push(sp)?;
+                for r in [EBP, ESI, EDI] {
+                    let v = self.cpu.reg(r);
+                    self.push(v)?;
+                }
+            }
+            M::Popad | M::Popa => {
+                use Register::*;
+                for r in [EDI, ESI, EBP] {
+                    let v = self.pop()?;
+                    self.cpu.set_reg(r, v);
+                }
+                let _discarded_esp = self.pop()?; // POPAD ignores the saved ESP slot
+                for r in [EBX, EDX, ECX, EAX] {
+                    let v = self.pop()?;
+                    self.cpu.set_reg(r, v);
+                }
+            }
+            // Exchanges.
+            M::Xchg => {
+                let (a, b) = self.two(instr, size)?;
+                self.write_op(instr, 0, b, size)?;
+                self.write_op(instr, 1, a, size)?;
+            }
+            M::Xadd => {
+                let (a, b) = self.two(instr, size)?;
+                let sum = self.do_add(a, b, size);
+                self.write_op(instr, 1, a, size)?;
+                self.write_op(instr, 0, sum, size)?;
+            }
+            M::Cmpxchg => {
+                // acc == dst ? dst = src, ZF=1 : acc = dst, ZF=0
+                let acc_reg = match size {
+                    1 => Register::AL,
+                    2 => Register::AX,
+                    4 => Register::EAX,
+                    _ => Register::RAX,
+                };
+                let acc = self.cpu.reg(acc_reg) & mask(size);
+                let dst = self.read_op(instr, 0, size)? & mask(size);
+                self.do_sub(acc, dst, size); // sets the flags, ZF included
+                if acc == dst {
+                    let src = self.read_op(instr, 1, size)?;
+                    self.write_op(instr, 0, src, size)?;
+                } else {
+                    self.cpu.set_reg(acc_reg, dst);
+                }
+            }
+            // Anti-debug breakpoints: under emulation nothing is attached, so the handler a real
+            // debugger would take never runs — stepping over them matches "no debugger present".
+            M::Int3 | M::Int | M::Int1 => {}
+            // CPUID: report a blank, featureless CPU. Anti-VM checks read the hypervisor bit and
+            // the vendor string from here, and all-zero is the least suspicious answer available.
+            M::Cpuid => {
+                for r in [Register::RAX, Register::RBX, Register::RCX, Register::RDX] {
+                    self.cpu.set_reg(r, 0);
+                }
+            }
+            // Bit test (and its set/reset/complement forms): CF takes the selected bit. Exact,
+            // not a stub — the bit index is taken modulo the operand width, as the hardware does
+            // for a register destination.
+            M::Bt | M::Bts | M::Btr | M::Btc => {
+                let (val, idx) = self.two(instr, size)?;
+                let bits = (size * 8) as u64;
+                let bit = idx % bits;
+                self.cpu.flags.cf = (val >> bit) & 1 == 1;
+                let updated = match instr.mnemonic() {
+                    M::Bts => Some(val | (1 << bit)),
+                    M::Btr => Some(val & !(1 << bit)),
+                    M::Btc => Some(val ^ (1 << bit)),
+                    _ => None, // plain BT only reads
+                };
+                if let Some(v) = updated {
+                    self.write_op(instr, 0, v, size)?;
+                }
+            }
+            // x87 CONTROL instructions only. A compiled prologue initialises the FPU and saves or
+            // loads its control word even when the check itself never does floating-point work, so
+            // these otherwise stop a run before it reaches the comparison.
+            //
+            // Deliberately NOT extended to x87 data movement or arithmetic (`fld`, `fstp`, `fdiv`,
+            // …): treating those as no-ops would let a check that really computes in floating point
+            // run on garbage and "accept" a wrong key. Leaving them unsupported stops the run
+            // instead, which costs a sample but never invents a solve.
+            M::Fninit | M::Fnclex | M::Fclex | M::Fldcw => {}
+            M::Fnstcw | M::Fstcw => {
+                // The x87 reset control word: 0x037f (all exceptions masked, round to nearest,
+                // extended precision) — what a just-initialised FPU would report.
+                let addr = self.ea(instr);
+                self.mem.write(addr, 0x037f, 2)?;
+            }
+            M::Fnstsw | M::Fstsw => {
+                // Status word of an idle FPU: no exceptions pending, stack empty.
+                match instr.op0_kind() {
+                    OpKind::Register => self.cpu.set_reg(instr.op_register(0), 0),
+                    _ => {
+                        let addr = self.ea(instr);
+                        self.mem.write(addr, 0, 2)?;
+                    }
+                }
+            }
+            M::Fnstenv | M::Fstenv => {
+                // The 28-byte protected-mode environment block, zeroed. Anti-debug code reads the
+                // saved FPU instruction pointer from here; zero reads as "nothing happened".
+                let addr = self.ea(instr);
+                for i in 0..28u64 {
+                    self.mem.write_u8(addr.wrapping_add(i), 0)?;
+                }
+            }
+            M::Nop | M::Endbr64 | M::Endbr32 | M::Pause | M::Wait => {}
             other => {
                 return Err(EmuError::Unsupported {
                     addr,

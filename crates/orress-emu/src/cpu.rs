@@ -13,9 +13,26 @@ pub struct Flags {
     pub zf: bool,
     pub sf: bool,
     pub of: bool,
+    /// Direction flag: when set, the string instructions walk *backwards*. `cld`/`std` set it, and
+    /// the compiler emits a `cld` before an inlined `rep movs`, so ignoring it is not an option
+    /// once string instructions are modelled.
+    pub df: bool,
 }
 
 impl Flags {
+    /// Unpacks the modelled bits from an RFLAGS image — the inverse of [`to_rflags`], for `popf`.
+    pub fn from_rflags(v: u64) -> Self {
+        Self {
+            cf: v & (1 << 0) != 0,
+            pf: v & (1 << 2) != 0,
+            af: v & (1 << 4) != 0,
+            zf: v & (1 << 6) != 0,
+            sf: v & (1 << 7) != 0,
+            of: v & (1 << 11) != 0,
+            df: v & (1 << 10) != 0,
+        }
+    }
+
     /// Packs into the low bits of RFLAGS (bit 1 is the reserved, always-1 bit).
     pub fn to_rflags(self) -> u64 {
         let mut v = 0b10u64;
@@ -24,6 +41,7 @@ impl Flags {
         v |= u64::from(self.af) << 4;
         v |= u64::from(self.zf) << 6;
         v |= u64::from(self.sf) << 7;
+        v |= u64::from(self.df) << 10;
         v |= u64::from(self.of) << 11;
         v
     }
