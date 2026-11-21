@@ -187,6 +187,84 @@ impl<'a> Printer<'a> {
         self
     }
 
+    /// Prints `e` coerced to `to`, as `(e) as uN`, when its width differs and we are emitting
+    /// compilable Rust.
+    ///
+    /// Rust has no implicit integer conversions, and a decompiled body mixes widths constantly: a
+    /// 64-bit register holding a 32-bit argument, a byte loaded into a word, a 32-bit result
+    /// returned from a function the ABI types as 64-bit. Every one is a hard error, and they were
+    /// the single largest reason no emitted port compiled.
+    ///
+    /// Always parenthesised. `as` binds tighter than any binary operator, so `a - b as u64` would
+    /// cast only `b` — silently changing the arithmetic rather than failing to build.
+    fn coerced(&mut self, e: &Expr, to: Width, signed: bool, prec_level: u8) {
+        let Some((have, _)) = self.declared_int(e) else {
+            self.value(e, prec_level);
+            return;
+        };
+        if !self.port || have == to {
+            self.value(e, prec_level);
+            return;
+        }
+        self.p("(");
+        self.value(e, 0);
+        self.p(")");
+        self.kw(" as ");
+        self.tok(to.rust(signed), TokKind::Type);
+    }
+
+    /// Whether an expression has a **concrete** integer type that a cast can safely restate.
+    ///
+    /// An allow-list, not a deny-list, because the dangerous cases are the ones that infer their
+    /// type from where they are used: casting `a1.iter().map(..).sum()` makes it
+    /// `(..).sum() as u32`, and `sum` then has nothing to infer its output from, so the port stops
+    /// compiling for a new reason. Floating-point and packed-vector expressions are excluded for
+    /// the obvious reason — an integer cast would change what they mean, or not typecheck at all.
+    fn declared_int(&self, e: &Expr) -> Option<(Width, bool)> {
+        match e {
+            // A variable prints with the type it was DECLARED with, which type inference may have
+            // narrowed below the register width the IR node still carries. Comparing the IR width
+            // is what left `rax_2 = arg_4` (u64 = u32) without a cast.
+            Expr::Var(v, w) => match self.int_local_width(v) {
+                Some(decl) => Some(decl),
+                // Not in `locals` and not a float/vector/usize local: a plain register temporary,
+                // which does print at its IR width.
+                None if !self.float_locals.contains(v)
+                    && !self.usize_locals.contains(v)
+                    && !self.vec_locals.contains_key(v) =>
+                {
+                    Some((*w, false))
+                }
+                None => None,
+            },
+            // A parameter only has an integer type when the signature says so. A slice-length
+            // parameter prints as `a3.len()` and is a `usize`; casting it makes the whole
+            // expression that width, and the `usize` local it feeds then rejects it.
+            Expr::Param(i, _) => match self.sig.params.get(*i as usize) {
+                Some(Ty::Int(w, signed)) => Some((*w, *signed)),
+                _ => None,
+            },
+            Expr::Const(_, w) | Expr::Load(_, w) | Expr::Bin(_, _, _, w) | Expr::Neg(_, w)
+            | Expr::Not(_, w) | Expr::Cast(_, w, _) => Some((*w, false)),
+            // Everything else — iterator chains, methods, floats, vectors — infers its type from
+            // context or is not an integer at all.
+            _ => None,
+        }
+    }
+
+    /// The declared integer type of a local, for assignments to coerce to. `None` for anything
+    /// that is not a plain integer — floats, vectors and `usize` locals have their own types and a
+    /// width cast would be wrong.
+    fn int_local_width(&self, v: &Var) -> Option<(Width, bool)> {
+        if self.float_locals.contains(v)
+            || self.usize_locals.contains(v)
+            || self.vec_locals.contains_key(v)
+        {
+            return None;
+        }
+        self.locals.get(v).copied()
+    }
+
     /// The module path prefix for memory helpers (`orress_rt::` in port mode, nothing otherwise).
     fn rt(&self) -> &'static str {
         if self.port { "orress_rt::" } else { "" }
@@ -240,9 +318,13 @@ impl<'a> Printer<'a> {
     }
 
     fn func_name(&self, addr: u64) -> String {
-        self.program
+        let raw = self
+            .program
             .name(addr)
-            .map_or_else(|| format!("sub_{addr:x}"), |n| n.text.clone())
+            .map_or_else(|| format!("sub_{addr:x}"), |n| n.text.clone());
+        // Readable output keeps the symbol exactly as the binary spells it; a port has to be
+        // valid Rust, and the two must agree with the stub declarations either way.
+        if self.port { rust_ident(&raw) } else { raw }
     }
 
     fn number(&mut self, v: u64, w: Width) {
@@ -440,17 +522,23 @@ impl<'a> Printer<'a> {
                     self.p(")");
                 }
             }
-            Expr::Bin(op, a, b, _) => {
+            Expr::Bin(op, a, b, w) => {
                 let pr = prec(e);
                 // `Sar` is an arithmetic shift-right; Rust `>>` is arithmetic only when the left
                 // operand is signed, so cast it (`(a as iN) >> b`). `Shr` stays logical.
                 if matches!(op, BinOp::Sar) {
                     self.signed(a);
                 } else {
-                    self.value(a, pr);
+                    self.coerced(a, *w, false, pr);
                 }
                 self.p(&format!(" {} ", op.symbol()));
-                self.value(b, pr + 1);
+                // A shift's right operand is a count, not a value of the result type: Rust accepts
+                // any integer width there, and casting it would only add noise.
+                if matches!(op, BinOp::Shl | BinOp::Shr | BinOp::Sar) {
+                    self.value(b, pr + 1);
+                } else {
+                    self.coerced(b, *w, false, pr + 1);
+                }
             }
             Expr::Neg(a, _) => {
                 self.p("-");
@@ -524,8 +612,20 @@ impl<'a> Printer<'a> {
             Expr::Call(t, args) => self.call(t, args),
             Expr::Addr(a) => self.global(*a),
             Expr::StackAddr(off) => {
-                self.p("&mut ");
-                self.tok(Var::Stack(*off).to_string(), TokKind::Variable);
+                // A port needs a `u64` it can do arithmetic on, and the address of the local is
+                // exactly what the original code had. The pseudocode keeps the readable borrow.
+                if self.port {
+                    self.p("(&mut ");
+                    self.tok(Var::Stack(*off).to_string(), TokKind::Variable);
+                    self.kw(" as ");
+                    self.p("*mut _");
+                    self.kw(" as ");
+                    self.tok("u64", TokKind::Type);
+                    self.p(")");
+                } else {
+                    self.p("&mut ");
+                    self.tok(Var::Stack(*off).to_string(), TokKind::Variable);
+                }
             }
             Expr::Select(c, a, b, _) => {
                 self.kw("if ");
@@ -747,6 +847,15 @@ impl<'a> Printer<'a> {
                     s.as_str()
                 };
                 self.tok(format!("{}unknown", self.rt()), TokKind::Function);
+                // `unknown<T>` panics, so T is never used — but Rust still has to know it, and an
+                // `Unknown` node carries no width to pick from. In a comparison such as
+                // `unknown("dh") != 0` there is nothing to infer from either, which left three
+                // ports failing on `E0283` alone.
+                if self.port {
+                    self.p("::<");
+                    self.tok("u64", TokKind::Type);
+                    self.p(">");
+                }
                 self.p("(");
                 self.tok(format!("\"{}\"", escape(what)), TokKind::Str);
                 self.p(")");
@@ -847,20 +956,48 @@ impl<'a> Printer<'a> {
             };
             self.link(format!("\"{}\"", escape(&text)), TokKind::Str, a);
         } else if let Some(n) = self.program.name(a) {
-            let text = n.text.clone();
-            let kind = if self.program.functions.contains_key(&a) {
-                TokKind::Function
+            let is_fn = self.program.functions.contains_key(&a);
+            let kind = if is_fn { TokKind::Function } else { TokKind::Variable };
+            let text = if self.port { rust_ident(&n.text) } else { n.text.clone() };
+            if is_fn {
+                // A function name is an *item* in Rust: it cannot be added to or subtracted from,
+                // which is what `__mingw_SEH_error_handler - rbp` tried to do.
+                if self.port {
+                    self.p("(");
+                    self.link(text, kind, a);
+                    self.kw(" as ");
+                    self.tok("usize", TokKind::Type);
+                    self.kw(" as ");
+                    self.tok("u64", TokKind::Type);
+                    self.p(")");
+                } else {
+                    self.link(text, kind, a);
+                }
             } else {
-                TokKind::Variable
-            };
-            if kind == TokKind::Variable {
+                // In a port the global is declared as its ADDRESS (`const data_x: u64 = 0x...`),
+                // so the name alone is already the `u64` the read/write helpers want.
+                if !self.port {
+                    self.p("&");
+                }
+                self.link(text, kind, a);
+            }
+        } else if self.program.functions.contains_key(&a) {
+            let name = format!("sub_{a:x}");
+            if self.port {
+                self.p("(");
+                self.link(name, TokKind::Function, a);
+                self.kw(" as ");
+                self.tok("usize", TokKind::Type);
+                self.kw(" as ");
+                self.tok("u64", TokKind::Type);
+                self.p(")");
+            } else {
+                self.link(name, TokKind::Function, a);
+            }
+        } else {
+            if !self.port {
                 self.p("&");
             }
-            self.link(text, kind, a);
-        } else if self.program.functions.contains_key(&a) {
-            self.link(format!("sub_{a:x}"), TokKind::Function, a);
-        } else {
-            self.p("&");
             self.link(format!("data_{a:x}"), TokKind::Variable, a);
         }
     }
@@ -868,6 +1005,16 @@ impl<'a> Printer<'a> {
     fn call(&mut self, t: &CallTarget, args: &[Expr]) {
         match t {
             CallTarget::Direct(a) | CallTarget::Import(a) => {
+                let name = self.func_name(*a);
+                self.link(name, TokKind::Function, *a);
+            }
+            // A call through a known function's address is just a call to it. Without this the
+            // port emitted `((name as usize as u64))(args)` -- the address cast that makes a
+            // function usable in arithmetic, applied where a callable was wanted.
+            CallTarget::Indirect(e)
+                if matches!(&**e, Expr::Addr(a) if self.program.functions.contains_key(a)) =>
+            {
+                let Expr::Addr(a) = &**e else { unreachable!() };
                 let name = self.func_name(*a);
                 self.link(name, TokKind::Function, *a);
             }
@@ -906,7 +1053,13 @@ impl<'a> Printer<'a> {
                     }
                 } else {
                     self.p(" = ");
-                    self.value(e, 0);
+                    // The local was declared from its own inferred width, which is routinely wider
+                    // than the value being stored into it (a 64-bit register holding a 32-bit
+                    // argument).
+                    match self.int_local_width(v) {
+                        Some((w, signed)) => self.coerced(e, w, signed, 0),
+                        None => self.value(e, 0),
+                    }
                 }
             }
             Stmt::Store(a, v, w) => {
@@ -1220,6 +1373,11 @@ impl<'a> Printer<'a> {
                     self.p(" ");
                     if self.sig.ret == Some(Ty::Bool) {
                         self.bool_value(e);
+                    } else if let Some(Ty::Int(w, signed)) = self.sig.ret {
+                        // The signature width comes from the ABI (often a full register), while the
+                        // returned expression is whatever the body computed. Mismatches here were
+                        // the second-commonest reason an emitted port did not compile.
+                        self.coerced(e, w, signed, 0);
                     } else {
                         self.expr(e, 0);
                     }
@@ -1594,7 +1752,12 @@ impl<'a> Printer<'a> {
         self.emit_struct_decls();
         self.start(Some(entry));
         self.kw("fn ");
-        self.link(name, TokKind::Function, entry);
+        // The ported function's OWN name also has to be a valid Rust identifier. It arrives from
+        // the decompiler rather than through `func_name`, which is why sanitising the call sites
+        // and the stubs was not enough: one corpus binary exports `AntiRevGetTC()`, parentheses
+        // included, and the port opened with `fn AntiRevGetTC()() -> bool`.
+        let shown = if self.port { rust_ident(name) } else { name.to_string() };
+        self.link(shown, TokKind::Function, entry);
         self.p("(");
         let mut first = true;
         for (i, ty) in self.sig.params.clone().iter().enumerate() {
@@ -1637,17 +1800,27 @@ impl<'a> Printer<'a> {
             self.kw("let mut ");
             self.tok(self.var_name(v), TokKind::Variable);
             self.p(": ");
-            if let Some((n, lane)) = self.vec_locals.get(v) {
+            // A port also needs an initialiser: a slot may be read on a path whose store was
+            // never lifted, and Rust rejects that. Zero is what a fresh frame holds.
+            let zero = if let Some((n, lane)) = self.vec_locals.get(v) {
                 self.p(&format!("[{}; {n}]", lane.rust()));
+                format!("[{}; {n}]", if lane.float { "0.0" } else { "0" })
             } else if self.usize_locals.contains(v) {
                 self.tok("usize", TokKind::Type);
+                "0".to_string()
             } else {
-                let ty = if self.float_locals.contains(v) {
+                let float = self.float_locals.contains(v);
+                let ty = if float {
                     if w.0 == 4 { "f32" } else { "f64" }
                 } else {
                     w.rust(*signed)
                 };
                 self.tok(ty, TokKind::Type);
+                if float { "0.0".to_string() } else { "0".to_string() }
+            };
+            if self.port {
+                self.p(" = ");
+                self.p(&zero);
             }
             self.p(";");
             self.end();
@@ -1657,14 +1830,20 @@ impl<'a> Printer<'a> {
             self.kw("let mut ");
             self.tok(Var::Stack(*o).to_string(), TokKind::Variable);
             self.p(": ");
-            if *size > 8 {
+            let zero = if *size > 8 {
                 self.p("[");
                 self.tok("u8", TokKind::Type);
                 self.p("; ");
                 self.number(*size as u64, Width::B64);
                 self.p("]");
+                format!("[0u8; {size}]")
             } else {
                 self.tok("u64", TokKind::Type);
+                "0".to_string()
+            };
+            if self.port {
+                self.p(" = ");
+                self.p(&zero);
             }
             self.p(";");
             self.tok(" // its address is passed on", TokKind::Comment);
@@ -1755,9 +1934,32 @@ fn strip_trivial_cast(e: &Expr) -> &Expr {
 /// The name a call / address uses for the symbol at `a` (matching [`Printer::call`]
 /// and [`Printer::global`]).
 fn ext_name(program: &Program, a: u64) -> String {
+    // Only used for the port's stub declarations, so it is always sanitised.
     program
         .name(a)
-        .map_or_else(|| format!("sub_{a:x}"), |n| n.text.clone())
+        .map_or_else(|| format!("sub_{a:x}"), |n| rust_ident(&n.text))
+}
+
+/// `s` mangled into a valid Rust identifier, for port mode.
+///
+/// A symbol from the binary is not necessarily a Rust name. A decorated C name can carry `@`, a
+/// demangled C++ one carries `<`, `>`, `:`, spaces and parentheses, and one corpus binary exports
+/// `AntiRevGetTC()` -- parentheses and all -- which was emitted verbatim as
+/// `fn AntiRevGetTC()() -> bool` and could not parse. The ported function's own name, its call
+/// sites and its stubs all go through this, so they keep agreeing with each other.
+pub(crate) fn rust_ident(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        out.push(if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' });
+    }
+    // A Rust identifier cannot start with a digit, and an empty name is not a name.
+    if out.is_empty() {
+        return "unnamed".into();
+    }
+    if out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 /// Can `s` be declared as a Rust item name, so a stub for it compiles?
@@ -1835,7 +2037,8 @@ fn is_ident(s: &str) -> bool {
 pub fn stub_decls(program: &Program, entry: u64, body: &[Node]) -> String {
     // function name -> argument count (the widest call site wins).
     let mut fns: BTreeMap<String, usize> = BTreeMap::new();
-    let mut globals: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // name -> address, so each can be declared as the constant the port's helpers need.
+    let mut globals: BTreeMap<String, u64> = BTreeMap::new();
 
     fn each_expr(nodes: &[Node], f: &mut impl FnMut(&Expr)) {
         for n in nodes {
@@ -1900,16 +2103,16 @@ pub fn stub_decls(program: &Program, entry: u64, body: &[Node]) -> String {
             } else {
                 let name = program
                     .name(*a)
-                    .map_or_else(|| format!("data_{a:x}"), |n| n.text.clone());
+                    .map_or_else(|| format!("data_{a:x}"), |n| rust_ident(&n.text));
                 if is_ident(&name) {
-                    globals.insert(name);
+                    globals.insert(name, *a);
                 }
             }
         }
         _ => {}
     });
     // A symbol that is called wins over a data declaration of the same name.
-    globals.retain(|g| !fns.contains_key(g));
+    globals.retain(|g, _| !fns.contains_key(g));
 
     if fns.is_empty() && globals.is_empty() {
         return String::new();
@@ -1933,8 +2136,11 @@ pub fn stub_decls(program: &Program, entry: u64, body: &[Node]) -> String {
             ));
         }
     }
-    for g in &globals {
-        s.push_str(&format!("static {g}: u64 = 0;\n"));
+    for (g, addr) in &globals {
+        // The ADDRESS, not a value: the body reads through `orress_rt::read(addr)`, so what it
+        // needs from a global is where it lives. A `static ... = 0` both failed to compile at the
+        // call (a `&u64` where a `u64` was wanted) and would have been the wrong number.
+        s.push_str(&format!("const {g}: u64 = {addr:#x};\n"));
     }
     s
 }
