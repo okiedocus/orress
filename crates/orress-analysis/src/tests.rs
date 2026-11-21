@@ -359,16 +359,37 @@ fn arm64_main_from_literal_pool() {
     assert_eq!(p.main, Some(0x40_1040));
 }
 
+/// A section is MAPPED to a page boundary, but only its raw data is READABLE.
+///
+/// The loader maps whole pages, so the file-alignment padding past `virtual_size` is live memory —
+/// and packed or hand-written binaries put code there, including the entry point. Treating that
+/// tail as unmapped made such an entry read as "not code", which stopped function discovery before
+/// it began and left those binaries with zero functions. Reads, on the other hand, must stop at
+/// the end of the raw data: what follows it in the file belongs to the next section, so returning
+/// it would be fabricating memory contents.
 #[test]
-fn region_length_honours_virtual_size() {
+fn region_maps_the_page_tail_but_reads_stop_at_the_raw_data() {
     let (mut info, data) = crackme();
-    // PE-style: raw data padded past the virtual size; only the virtual part is mapped.
+    // PE-style: 0x200 bytes of raw data, only 0x20 of them "virtual".
     info.sections[1].virtual_size = 0x20;
     let m = Memory::new(&info, Arc::clone(&data));
-    assert!(m.contains(DATA + 0x1f) && !m.contains(DATA + 0x20));
-    // Zero virtual size: the file size stands.
+    assert!(m.contains(DATA + 0x1f), "the virtual part is mapped");
+    assert!(m.contains(DATA + 0x20), "so is the file-alignment padding behind it");
+    assert!(m.contains(DATA + 0xfff), "the whole last page is mapped");
+    assert!(!m.contains(DATA + 0x1000), "but no further");
+
+    // Readable exactly as far as the raw data goes, and not one byte beyond.
+    assert!(m.read(DATA + 0x1ff, 1).is_some(), "last raw byte is readable");
+    assert!(
+        m.read(DATA + 0x200, 1).is_none(),
+        "past the raw data reads nothing rather than the next section's bytes"
+    );
+
+    // Zero virtual size: the file size stands (still rounded up to the mapped page).
     info.sections[1].virtual_size = 0;
-    assert!(Memory::new(&info, Arc::clone(&data)).contains(DATA + 0x1ff));
+    let m = Memory::new(&info, Arc::clone(&data));
+    assert!(m.contains(DATA + 0x1ff) && m.read(DATA + 0x1ff, 1).is_some());
+
     // A section whose address range wraps the address space is rejected.
     info.sections[1].address = u64::MAX - 0x10;
     assert!(!Memory::new(&info, data).contains(u64::MAX - 0x8));

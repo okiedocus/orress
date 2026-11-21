@@ -258,6 +258,14 @@ impl Program {
                 p.main = Some(user_main);
             }
         }
+        // Address-taken callbacks, once the call graph has been followed as far as it goes: a
+        // dialog or window procedure is reachable only through an API that was handed its address,
+        // so without this its body — and every import it calls — stays invisible.
+        // See `callback_seeds`.
+        let callbacks = p.callback_seeds(&known_entries);
+        if !callbacks.is_empty() {
+            p.explore(callbacks, &known_entries, &imports);
+        }
         p.name_functions();
         p.collect_string_refs(info, strings);
         p.lines = listing::build(&p, info);
@@ -294,6 +302,79 @@ impl Program {
                 text: "entry".into(),
                 kind: NameKind::Detected,
             });
+        }
+    }
+
+    /// Entry addresses of **address-taken callbacks**: code pointers that appear as immediates in
+    /// the code already discovered, point at an undiscovered function prologue, and so were never
+    /// reached by call-graph exploration.
+    ///
+    /// A dialog procedure, window procedure, thread start routine, atexit handler or vtable slot is
+    /// never *called* by the program — its address is only handed to an API (`push offset DlgProc`
+    /// / `DialogBoxParam`). Nothing seeds it, so its entire body stays undisassembled: no blocks, no
+    /// cross-references, and no sign of the imports it calls. For a dialog-based crackme that is the
+    /// whole check, which is why following these matters beyond tidiness.
+    ///
+    /// Deliberately conservative — a target must sit in a code region, lie outside every function
+    /// found so far, and *begin like a function* — because a false entry costs a junk function in
+    /// every heuristic that ranks them.
+    fn callback_seeds(&self, known: &HashSet<u64>) -> Vec<u64> {
+        /// A cap on how many of these to chase, so a pointer-table-heavy binary cannot turn one
+        /// analysis into thousands of speculative functions.
+        const MAX_CALLBACK_SEEDS: usize = 128;
+
+        let mut out: Vec<u64> = Vec::new();
+        let addrs: Vec<u64> = self
+            .functions
+            .values()
+            .flat_map(|f| f.blocks.iter().flat_map(|b| b.insns.iter().copied()))
+            .collect();
+        for addr in addrs {
+            let Some(insn) = self.decode(addr) else { continue };
+            for &target in &insn.data_refs {
+                if out.len() >= MAX_CALLBACK_SEEDS {
+                    return out;
+                }
+                if known.contains(&target)
+                    || out.contains(&target)
+                    || !self.memory.is_code(target)
+                    || self.functions.contains_key(&target)
+                    || self.function_containing(target).is_some()
+                {
+                    continue;
+                }
+                if self.looks_like_entry(target) {
+                    out.push(target);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `addr` begins the way a compiled function does — a frame push, or a stack
+    /// adjustment. Keeps a jump table or a string that happens to live in `.text` from being
+    /// mistaken for a callback.
+    fn looks_like_entry(&self, addr: u64) -> bool {
+        let Some(insn) = self.decode(addr) else { return false };
+        let text = insn.text();
+        let mnemonic = insn.mnemonic.as_str();
+        match mnemonic {
+            // A register push: `push ebp` opening a frame, or a callee-saved register being
+            // preserved. Any register will do — a window procedure often opens with `push esi` —
+            // but a push of an immediate or a memory operand is not how a function starts.
+            "push" => {
+                !text.contains('[')
+                    && text
+                        .split_whitespace()
+                        .nth(1)
+                        .is_some_and(|op| op.starts_with('e') || op.starts_with('r'))
+            }
+            // `sub rsp, N` / `sub esp, N`: a frameless function reserving locals.
+            "sub" => text.contains("sp"),
+            // The hot-patch pad MSVC puts in front of a function.
+            "mov" => text.contains("edi, edi"),
+            "enter" => true,
+            _ => false,
         }
     }
 
