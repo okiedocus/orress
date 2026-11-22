@@ -15,6 +15,34 @@ const REGION_SCAN_TIMEOUT: Duration = Duration::from_secs(30);
 /// Overall budget for scanning all of a process's regions.
 const MEMORY_SCAN_BUDGET: Duration = Duration::from_secs(120);
 
+/// The yara-x modules this build compiles in.
+///
+/// Not all of them: `console`, `cuckoo`, `dotnet`, `lnk`, `time` and `vt` are left out, so a rule
+/// importing one of those compiles everywhere else and fails here. See this crate's Cargo.toml.
+const MODULES: &str = "pe, elf, macho, hash, math, string";
+
+/// A readable message for a compile error, naming the one failure that is a build choice.
+///
+/// yara-x reports a rule importing an uncompiled module as ``unknown module `time` ``, which reads
+/// as a typo in the rule rather than as something this build does not have. Someone pointing the
+/// library scan at a folder of such rules would get that error per file with nothing to act on.
+///
+/// The explanation goes on the **first** line because [`scan_dir`] keeps only that line per file.
+fn compile_error_message(text: &str) -> String {
+    let module = text
+        .lines()
+        .next()
+        .and_then(|first| first.split_once("unknown module `"))
+        .and_then(|(_, rest)| rest.split_once('`'))
+        .map(|(name, _)| name);
+    match module {
+        Some(name) => format!(
+            "module `{name}` is not compiled into this build (available: {MODULES})\n{text}"
+        ),
+        None => text.to_string(),
+    }
+}
+
 /// A readable message for a scan error, spelling out timeouts.
 fn scan_error_message(e: &yara_x::ScanError, limit: Duration) -> String {
     match e {
@@ -57,7 +85,7 @@ const MAX_MATCHES: usize = 200;
 pub fn scan(rule_src: &str, data: &[u8]) -> YaraOutcome {
     let rules = match yara_x::compile(rule_src) {
         Ok(r) => r,
-        Err(e) => return YaraOutcome::CompileError(e.to_string()),
+        Err(e) => return YaraOutcome::CompileError(compile_error_message(&e.to_string())),
     };
     let mut scanner = yara_x::Scanner::new(&rules);
     scanner.set_timeout(FILE_SCAN_TIMEOUT);
@@ -386,5 +414,48 @@ mod tests {
         assert_eq!(hits[0].rule, "lib_rule");
         assert_eq!(hits[0].file, "r.yar");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Several yara-x modules are not compiled in, so a rule importing one cannot work here. What
+    /// this pins is that it fails *informatively*: yara-x alone says ``unknown module `time` ``,
+    /// which reads as a typo in the rule.
+    ///
+    /// The first line carries the explanation because `scan_dir` keeps only the first line per
+    /// file, and a borrowed rule library is exactly where this arrives in bulk.
+    #[test]
+    fn a_rule_needing_an_uncompiled_module_says_so() {
+        let out = scan(
+            r#"import "time" rule r { condition: time.now() > 0 }"#,
+            b"anything",
+        );
+        let YaraOutcome::CompileError(msg) = out else {
+            panic!("a rule importing `time` must not compile in this build: {out:?}");
+        };
+        let first = msg.lines().next().unwrap_or_default();
+        assert!(
+            first.contains("not compiled into this build"),
+            "the first line must explain itself, since scan_dir shows only that: {msg}"
+        );
+        assert!(
+            first.contains("time"),
+            "it must name the module asked for: {msg}"
+        );
+        assert!(
+            first.contains("pe"),
+            "and say what is available instead: {msg}"
+        );
+    }
+
+    /// The same helper must leave an ordinary compile error alone.
+    #[test]
+    fn an_ordinary_compile_error_is_not_dressed_up() {
+        let out = scan("rule broken { condition: }", b"");
+        let YaraOutcome::CompileError(msg) = out else {
+            panic!("a malformed rule must not compile: {out:?}");
+        };
+        assert!(
+            !msg.contains("not compiled into this build"),
+            "a syntax error is not a missing module: {msg}"
+        );
     }
 }
