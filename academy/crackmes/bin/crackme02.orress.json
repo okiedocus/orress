@@ -1,1 +1,0 @@
-{"target":"crackme02.exe","sha256":"b9edab812fd8b6070d3c28bc94ff3c7f0ce52219757fff5ccb84a56194a7da50","format":"pe","language":"Rust","anti_debug_imports":["IsDebuggerPresent","QueryPerformanceCounter"],"check_addr":5368800256}
