@@ -49,9 +49,11 @@ wasmtime::component::bindgen!({
         "worktree": WorktreeData,
         "project": ProjectData,
         "key-value-store": KeyValueData,
-        // Interface, then a DOT, then the resource. wasmtime 48 rejects a `with` key it did
-        // not consume, which is how the old slash-separated form was found to have been
-        // doing nothing.
+        // Interface, then a DOT, then the resource. wasmtime 36 built this key with a SLASH
+        // and 48 builds it with a dot, so the old `.../http-client/http-response-stream` was
+        // correct then and stale now. 48 also rejects a `with` key it never consumed, which is
+        // the only reason the rename was caught instead of this mapping going quietly dead and
+        // handing the resource a bindgen-generated type instead of `HttpStreamData`.
         "zed:extension/http-client.http-response-stream": HttpStreamData,
     },
 });
