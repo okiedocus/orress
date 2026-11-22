@@ -165,8 +165,12 @@ pub fn payload(target: &Path, info: &BinaryInfo) -> String {
         f.push(format!("\"anti_debug_imports\":[{}]", list.join(",")));
     }
 
+    // `entry`, named for what it is. It went out as `check_addr` first, and a real hand-off
+    // showed why that was wrong: the receiving tool uses that name for the address of the
+    // comparison, so an entry point arriving under it presents a located check that nobody
+    // located. On the Rust binary this was first tried against, the two were nowhere near.
     if let Some(e) = info.entry {
-        f.push(format!("\"check_addr\":{e}"));
+        f.push(format!("\"entry\":{e}"));
     }
 
     format!("{{{}}}", f.join(","))
@@ -240,7 +244,11 @@ mod tests {
         assert!(p.contains("\"target\":\"crackme.exe\""), "{p}");
         assert!(p.contains("\"sha256\":\"deadbeef\""), "{p}");
         assert!(p.contains("\"packer\":\"UPX\""), "{p}");
-        assert!(p.contains("\"check_addr\":4201520"), "{p}");
+        assert!(p.contains("\"entry\":4201520"), "{p}");
+        assert!(
+            !p.contains("check_addr"),
+            "an entry point must not be sent as the check address: {p}"
+        );
         assert!(p.contains("\"IsDebuggerPresent\""), "{p}");
         assert!(!p.contains("printf"), "only the anti-debug imports: {p}");
     }

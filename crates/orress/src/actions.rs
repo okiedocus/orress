@@ -33,7 +33,7 @@ pub fn registry(themes: &[Theme], handoff: Option<&str>) -> ActionRegistry {
         r.register(
             crate::handoff::ACTION,
             title,
-            "Hand the open binary to the external tool configured in ORRESS_HANDOFF_TOOL, with              what this analysis already found: the format, a packer if one was recognised, any              anti-debugging imports and the entry point. Written as JSON beside the target.",
+            "Hand the open binary to an installed external analysis tool, with what this              analysis already found: the format, a packer if one was recognised, any              anti-debugging imports and the entry point. Written as JSON beside the target. The              tool comes from an extension that declares one, or from ORRESS_HANDOFF_TOOL.",
         );
     }
     r.register(
