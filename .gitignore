@@ -6,3 +6,8 @@
 
 # Private planning documents
 /docs/
+
+# Hand-off files and sessions written beside a target by an external analysis tool. Generated,
+# per-machine, and not ours to publish.
+*.orress.json
+*.pathfinder.toml
