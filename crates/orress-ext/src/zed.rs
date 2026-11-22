@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use wasmtime::component::{Resource, ResourceTable};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 /// A worktree the host exposes to an extension (a project folder it can read and probe).
 pub struct WorktreeData {
@@ -49,7 +49,10 @@ wasmtime::component::bindgen!({
         "worktree": WorktreeData,
         "project": ProjectData,
         "key-value-store": KeyValueData,
-        "zed:extension/http-client/http-response-stream": HttpStreamData,
+        // Interface, then a DOT, then the resource. wasmtime 48 rejects a `with` key it did
+        // not consume, which is how the old slash-separated form was found to have been
+        // doing nothing.
+        "zed:extension/http-client.http-response-stream": HttpStreamData,
     },
 });
 
@@ -154,7 +157,9 @@ impl ZedState {
             .env("PWD", work_dir.to_string_lossy());
         // Preopen the extension's own directory as `.` so it can manage the files it owns. A
         // missing dir is non-fatal — the extension then simply has no filesystem access.
-        let _ = builder.preopened_dir(work_dir, ".", DirPerms::all(), FilePerms::all());
+        // wasmtime-wasi 48 collapsed the DirPerms/FilePerms pair into one FsPerms enum;
+        // ReadWrite is what all()/all() meant.
+        let _ = builder.preopened_dir(work_dir, ".", FsPerms::ReadWrite);
         Self {
             table: ResourceTable::new(),
             wasi: builder.build(),
@@ -863,8 +868,6 @@ impl ZedExtension {
                 let (result,) = func
                     .call(&mut self.store, (language_server_id, worktree))
                     .map_err(|e| e.to_string())?;
-                func.post_return(&mut self.store)
-                    .map_err(|e| e.to_string())?;
                 result
             }
             Some(target) => {
@@ -878,8 +881,6 @@ impl ZedExtension {
                 self.arm();
                 let (result,) = func
                     .call(&mut self.store, (language_server_id, target, worktree))
-                    .map_err(|e| e.to_string())?;
-                func.post_return(&mut self.store)
                     .map_err(|e| e.to_string())?;
                 result
             }
@@ -908,7 +909,9 @@ impl ZedExtension {
             .map_err(|e| e.to_string())?;
         self.arm();
         func.call(&mut self.store, ()).map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store).map_err(|e| e.to_string())
+        // No post_return: wasmtime 48 deprecated it as a no-op, the component model having
+        // moved the cleanup it used to trigger into the call itself.
+        Ok(())
     }
 
     /// Asks the extension how to launch a language server, giving it a worktree rooted at `root`.
@@ -933,8 +936,6 @@ impl ZedExtension {
         self.arm();
         let (result,) = func
             .call(&mut self.store, (language_server_id, worktree))
-            .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
             .map_err(|e| e.to_string())?;
         let cmd = result?;
         Ok(LangServerCommand {
@@ -976,8 +977,6 @@ impl ZedExtension {
         let (result,) = func
             .call(&mut self.store, (context_server_id, project))
             .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
-            .map_err(|e| e.to_string())?;
         let cmd = result?;
         Ok(LangServerCommand {
             command: cmd.command,
@@ -1007,8 +1006,6 @@ impl ZedExtension {
         self.arm();
         let (result,) = func
             .call(&mut self.store, (context_server_id, project))
-            .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
             .map_err(|e| e.to_string())?;
         Ok(result?.map(|c| ContextServerConfig {
             installation_instructions: c.installation_instructions,
@@ -1052,8 +1049,6 @@ impl ZedExtension {
                 (into_wit_command(command), args.to_vec(), worktree),
             )
             .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
-            .map_err(|e| e.to_string())?;
         let out = result?;
         Ok(SlashCommandResult {
             text: out.text,
@@ -1086,8 +1081,6 @@ impl ZedExtension {
         let (result,) = func
             .call(&mut self.store, (into_wit_command(command), args.to_vec()))
             .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
-            .map_err(|e| e.to_string())?;
         Ok(result?
             .into_iter()
             .map(|c| SlashCommandCompletion {
@@ -1115,8 +1108,6 @@ impl ZedExtension {
         self.arm();
         let (result,) = func
             .call(&mut self.store, (adapter_name, config_json))
-            .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
             .map_err(|e| e.to_string())?;
         Ok(into_request_kind(result?))
     }
@@ -1159,8 +1150,6 @@ impl ZedExtension {
                 (adapter_name, config, user_installed_path, worktree),
             )
             .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
-            .map_err(|e| e.to_string())?;
         let bin = result?;
         Ok(DapBinary {
             command: bin.command,
@@ -1188,8 +1177,6 @@ impl ZedExtension {
         self.arm();
         let (result,) = func
             .call(&mut self.store, (lower_debug_config(config),))
-            .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
             .map_err(|e| e.to_string())?;
         Ok(lift_scenario(result?))
     }
@@ -1222,8 +1209,6 @@ impl ZedExtension {
                 ),
             )
             .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
-            .map_err(|e| e.to_string())?;
         Ok(result.map(lift_scenario))
     }
 
@@ -1247,8 +1232,6 @@ impl ZedExtension {
                 &mut self.store,
                 (locator_name, lower_task_template(build_task)),
             )
-            .map_err(|e| e.to_string())?;
-        func.post_return(&mut self.store)
             .map_err(|e| e.to_string())?;
         Ok(lift_request(result?))
     }

@@ -17,13 +17,16 @@ regex.workspace = true
 orress-loaders.workspace = true
 tlsh2 = "1"
 fuzzyhash = "0.2"
-# yara-x is held on the 1.7 line because it builds on the wasmtime 36 LTS series, which (unlike
-# the 38-45 lines newer yara-x releases use) has fixes for every published wasmtime advisory.
-# yara-x 1.7 only accepts its own 1.7 companion crates, so those are pinned exactly as well.
-# Known yara-x advisory GHSA-2jx3-ff3v-j7jj (unsound `Rules::deserialize`, fixed in 1.19) does not
-# apply: ORRESS never deserializes compiled rules, it always compiles them from source.
-# Revisit when a yara-x release moves to a patched wasmtime line.
-yara-x-macros = "=1.7.1"
-yara-x-parser = "=1.7.1"
-yara-x-proto = "=1.7.1"
-yara-x = { version = "=1.7.1", default-features = false, features = ["pe-module", "elf-module", "macho-module", "hash-module", "math-module", "string-module", "constant-folding", "fast-regexp"] }
+# On the 1.24 line, which is the wasmtime 48 LTS series. The 1.7 pin existed because wasmtime 36
+# was the newest LTS with fixes for every published wasmtime advisory; 48 is the next one, and has
+# more patch releases than any other line. yara-x only accepts its own matching companion crates,
+# so those move together and stay pinned exactly.
+#
+# Moving off 1.7 settled three things that pin could not. GHSA-2jx3-ff3v-j7jj (unsound
+# `Rules::deserialize`) is fixed from 1.19 rather than argued inapplicable. And the Authenticode
+# crypto stack now arrives as rsa 0.10 and p256 0.14, the patched versions, so RUSTSEC-2023-0071
+# and RUSTSEC-2026-0387 no longer need exceptions in deny.toml -- see the note there.
+yara-x-macros = "=1.24.0"
+yara-x-parser = "=1.24.0"
+yara-x-proto = "=1.24.0"
+yara-x = { version = "=1.24.0", default-features = false, features = ["pe-module", "elf-module", "macho-module", "hash-module", "math-module", "string-module", "constant-folding", "fast-regexp"] }

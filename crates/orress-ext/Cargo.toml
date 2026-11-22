@@ -13,9 +13,15 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# wasmtime 36 is a long-term-support series (patched through 2027); keep it in step with the
-# wasmtime that yara-x uses (orress-triage) so only one copy is built.
-wasmtime = { version = "36.0.17", default-features = false, features = ["runtime", "cranelift", "component-model"] }
+# wasmtime 48 is the current long-term-support series; keep it in step with the wasmtime that
+# yara-x uses (orress-triage) so only one copy is built. Both moved together off 36/yara-x 1.7.
+#
+# Guest compatibility is not assumed here, it is tested: `src/tests.rs` instantiates three
+# pre-built components committed to `fixtures/` -- the current Zed API, the older `=0.5.0` API
+# world, and a `wasm32-wasip1` build componentized with the preview1 reactor adapter, which is the
+# shape Zed actually ships. None of them is rebuilt by a host upgrade, so they are direct evidence
+# that existing extensions still load.
+wasmtime = { version = "48.0.10", default-features = false, features = ["runtime", "cranelift", "component-model"] }
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.8"
@@ -25,7 +31,7 @@ tar = "0.4"
 orress-archive.workspace = true
 orress-theme.workspace = true
 orress-lsp.workspace = true
-wasmtime-wasi = { version = "36.0.17", default-features = false }
+wasmtime-wasi = { version = "48.0.10", default-features = false }
 
 [dev-dependencies]
 wasm-encoder = "0.240"
