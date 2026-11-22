@@ -31,6 +31,8 @@ arboard.workspace = true
 orress-academy.workspace = true
 orress-actions.workspace = true
 orress-project.workspace = true
+# For the hand-off payload: the loader types the analysis already produced.
+orress-loaders.workspace = true
 orress-dwarf.workspace = true
 orress-pdb.workspace = true
 orress-sig.workspace = true

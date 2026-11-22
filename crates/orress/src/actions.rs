@@ -20,8 +20,22 @@ pub fn default_keymap() -> Keymap {
     Keymap::from_json(DEFAULT_KEYMAP).expect("built-in keymap is valid")
 }
 
-pub fn registry(themes: &[Theme]) -> ActionRegistry {
+/// Build the action registry.
+///
+/// `handoff` is the title of an external guided tool, when one is configured and installed. It is
+/// an `Option` rather than a constant because an action that is not registered is invisible
+/// everywhere at once -- menus, the command palette, the keymap listing -- since `menu_entry` and
+/// the palette both resolve ids through this registry and skip what they cannot find. Hiding it
+/// here is the whole gate; there is no second place to remember.
+pub fn registry(themes: &[Theme], handoff: Option<&str>) -> ActionRegistry {
     let mut r = ActionRegistry::new();
+    if let Some(title) = handoff {
+        r.register(
+            crate::handoff::ACTION,
+            title,
+            "Hand the open binary to the external tool configured in ORRESS_HANDOFF_TOOL, with              what this analysis already found: the format, a packer if one was recognised, any              anti-debugging imports and the entry point. Written as JSON beside the target.",
+        );
+    }
     r.register(
         "command_palette::Toggle",
         "Command Palette",
@@ -532,7 +546,7 @@ mod tests {
 
     #[test]
     fn default_keymap_only_uses_registered_actions() {
-        let registry = registry(&Theme::built_in());
+        let registry = registry(&Theme::built_in(), None);
         // `null` bindings unbind a key in a context, so only real actions are checked.
         for binding in default_keymap().bindings() {
             if let Some(action) = binding.action.as_ref() {

@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod handoff;
 mod splash;
 
 fn main() -> eframe::Result {

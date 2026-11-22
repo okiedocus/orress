@@ -192,7 +192,13 @@ impl OrressApp {
                 move || repaint.request_repaint(),
                 paths.as_ref().map(Paths::projects_dir),
             ),
-            registry: actions::registry(&themes),
+            registry: actions::registry(
+                &themes,
+                crate::handoff::tool()
+                    .as_deref()
+                    .map(crate::handoff::title)
+                    .as_deref(),
+            ),
             paths,
             settings,
             themes,
@@ -1080,6 +1086,7 @@ impl OrressApp {
             "view::Shellcode" => self.workspace.open(TabKind::Shellcode),
             "view::Triage" => self.workspace.open(TabKind::Triage),
             "view::Yara" => self.workspace.open(TabKind::Yara),
+            id if id == crate::handoff::ACTION => self.hand_off(ctx),
             "view::Wasm" => self.workspace.open(TabKind::Wasm),
             "view::Pyc" => self.workspace.open(TabKind::Pyc),
             "view::Java" => self.workspace.open(TabKind::Java),
@@ -1230,6 +1237,35 @@ impl OrressApp {
             .collect()
     }
 
+    /// Hand the open binary to the external tool.
+    ///
+    /// Reached only through an action that is registered only when the tool exists, so this cannot
+    /// be invoked by a user who has none -- but it re-checks anyway, because the tool can be
+    /// uninstalled while ORRESS is running and a stale start-up decision should not produce a
+    /// confusing failure.
+    fn hand_off(&mut self, ctx: &Context) {
+        let Some(tool) = crate::handoff::tool() else {
+            self.notify(ctx, "No external tool is configured.", true);
+            return;
+        };
+        let Some(doc) = self.docs.active() else {
+            self.notify(ctx, "Open a binary first.", true);
+            return;
+        };
+        let Some(analysis) = doc.analysis().cloned() else {
+            self.notify(ctx, "Analysis has not finished yet.", true);
+            return;
+        };
+        let target = doc.path.clone();
+        match crate::handoff::launch(&tool, &target, &analysis.info) {
+            Ok(beside) => {
+                let msg = format!("Handed over, with analysis written to {}", beside.display());
+                self.notify(ctx, msg, false);
+            }
+            Err(e) => self.notify(ctx, e, true),
+        }
+    }
+
     /// A menu entry for an action, with its shortcut and explanation. A shortcut that only works
     /// in one place (e.g. the hex view) is shown with that place.
     fn menu_entry(&self, ui: &mut Ui, id: &str, clicked: &mut Vec<ActionId>) {
@@ -1364,6 +1400,10 @@ impl OrressApp {
                             "file::Strings",
                             "file::Functions",
                             "view::Xrefs",
+                            // Absent unless a tool is configured AND installed; `menu_entry`
+                            // skips an id the registry does not have, so there is nothing to
+                            // see and nothing to grey out.
+                            crate::handoff::ACTION,
                         ] {
                             self.menu_entry(ui, id, &mut clicked);
                         }
