@@ -194,9 +194,8 @@ impl OrressApp {
             ),
             registry: actions::registry(
                 &themes,
-                crate::handoff::tool()
-                    .as_deref()
-                    .map(crate::handoff::title)
+                crate::handoff::offer(paths.as_ref().map(Paths::extensions_dir).as_deref())
+                    .map(|t| t.title)
                     .as_deref(),
             ),
             paths,
@@ -1244,8 +1243,9 @@ impl OrressApp {
     /// uninstalled while ORRESS is running and a stale start-up decision should not produce a
     /// confusing failure.
     fn hand_off(&mut self, ctx: &Context) {
-        let Some(tool) = crate::handoff::tool() else {
-            self.notify(ctx, "No external tool is configured.", true);
+        let dir = self.paths.as_ref().map(|p| p.extensions_dir());
+        let Some(tool) = crate::handoff::offer(dir.as_deref()) else {
+            self.notify(ctx, "No external analysis tool is installed.", true);
             return;
         };
         let Some(doc) = self.docs.active() else {

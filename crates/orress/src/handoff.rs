@@ -37,7 +37,43 @@ pub const TOOL_ENV: &str = "ORRESS_HANDOFF_TOOL";
 /// change, and it must not disclose what it points at.
 pub const ACTION: &str = "tool::HandOff";
 
-/// The external tool, if one is configured and present.
+/// A tool to hand off to: what to call it, what to run, and what to pass before the target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tool {
+    pub title: String,
+    pub command: PathBuf,
+    pub args: Vec<String>,
+}
+
+/// The tool to offer: from an installed extension if one declares it, otherwise the environment.
+///
+/// The extension route is the one to use. It installs through **Manage Extensions**, including
+/// from a private git URL, and it carries its own name and command, so nothing here has to. An
+/// extension is any directory with a parseable `extension.toml`, so a tool needs no WASM to be
+/// installed this way -- only a manifest declaring `[analysis_tools.<id>]`.
+///
+/// The environment variable is checked second and stays for the case the extension route cannot
+/// serve: a build that is not installed as an extension at all, which is what developing one looks
+/// like.
+pub fn offer(extensions_dir: Option<&Path>) -> Option<Tool> {
+    if let Some(dir) = extensions_dir
+        && let Some(t) = orress_ext::analysis_tools(dir).into_iter().next()
+    {
+        return Some(Tool {
+            title: format!("Open in {}", t.name),
+            command: PathBuf::from(t.command),
+            args: t.args,
+        });
+    }
+    let path = tool()?;
+    Some(Tool {
+        title: title(&path),
+        command: path,
+        args: Vec::new(),
+    })
+}
+
+/// The external tool from the environment, if one is configured and present.
 ///
 /// Returns `None` for an unset variable, an empty one, or a path that is not a file -- each of
 /// which means the same thing to the caller: offer nothing.
@@ -141,14 +177,15 @@ pub fn payload(target: &Path, info: &BinaryInfo) -> String {
 /// The child is spawned and not waited for: this is a separate application with its own window,
 /// and blocking ORRESS's UI thread on it would freeze the editor for as long as the person used
 /// the other program.
-pub fn launch(tool: &Path, target: &Path, info: &BinaryInfo) -> Result<PathBuf, String> {
+pub fn launch(tool: &Tool, target: &Path, info: &BinaryInfo) -> Result<PathBuf, String> {
     let beside = target.with_extension("orress.json");
     std::fs::write(&beside, payload(target, info))
         .map_err(|e| format!("could not write {}: {e}", beside.display()))?;
-    std::process::Command::new(tool)
+    std::process::Command::new(&tool.command)
+        .args(&tool.args)
         .arg(target)
         .spawn()
-        .map_err(|e| format!("could not start {}: {e}", tool.display()))?;
+        .map_err(|e| format!("could not start {}: {e}", tool.command.display()))?;
     Ok(beside)
 }
 

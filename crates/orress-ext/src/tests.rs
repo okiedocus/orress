@@ -809,3 +809,68 @@ fn missing_manifest_is_an_error() {
     assert!(load_extension(&dir).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An extension can provide an external analysis tool, and needs no WASM to do it.
+///
+/// This is the answer to "why can't it be installed through Manage Extensions?" -- it can, and
+/// always could: an extension is any directory with a parseable `extension.toml`, and
+/// `install_git` clones one from a URL. What was missing was a manifest key saying "I provide a
+/// program that takes the open binary", so installing one surfaced nothing.
+#[test]
+fn an_extension_can_provide_an_analysis_tool() {
+    let root = std::env::temp_dir().join(format!("orress_tools_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ext = root.join("guide");
+    std::fs::create_dir_all(ext.join("bin")).unwrap();
+    std::fs::write(ext.join("bin").join("guide.exe"), b"MZ").unwrap();
+    std::fs::write(
+        ext.join("extension.toml"),
+        r#"
+id = "guide"
+name = "Guided Route"
+version = "0.1.0"
+
+[analysis_tools.route]
+command = "bin/guide.exe"
+args = ["--from-orress"]
+"#,
+    )
+    .unwrap();
+
+    let found = analysis_tools(&root);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let t = &found[0];
+    assert_eq!(t.extension_id, "guide");
+    assert_eq!(t.name, "Guided Route", "the NAME comes from the manifest");
+    assert_eq!(t.args, vec!["--from-orress".to_string()]);
+    assert!(
+        Path::new(&t.command).is_absolute() && Path::new(&t.command).is_file(),
+        "a command inside the extension must be resolved against it: {}",
+        t.command
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Nothing declared means nothing offered, which is what keeps the menu entry absent rather than
+/// greyed out.
+#[test]
+fn an_extension_declaring_no_tool_offers_none() {
+    let root = std::env::temp_dir().join(format!("orress_notools_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ext = root.join("plain");
+    std::fs::create_dir_all(&ext).unwrap();
+    // A manifest that provides other things, and one that declares the section but leaves the
+    // command empty -- neither is broken, and neither provides a tool.
+    std::fs::write(
+        ext.join("extension.toml"),
+        "id = \"plain\"\nname = \"Plain\"\n\n[analysis_tools.empty]\nname = \"Nope\"\n",
+    )
+    .unwrap();
+    assert!(analysis_tools(&root).is_empty());
+    assert!(
+        analysis_tools(&root.join("does-not-exist")).is_empty(),
+        "a missing extensions directory must not panic"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

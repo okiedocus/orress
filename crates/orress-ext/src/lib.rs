@@ -150,6 +150,10 @@ pub struct ExtensionManifest {
     /// Language servers the extension provides.
     #[serde(default)]
     pub language_servers: BTreeMap<String, LanguageServerEntry>,
+    /// External analysis tools the extension provides (id → entry). ORRESS's own key; see
+    /// [`AnalysisToolEntry`].
+    #[serde(default)]
+    pub analysis_tools: BTreeMap<String, AnalysisToolEntry>,
     /// Context (MCP) servers the extension provides (id → entry). The launch command is resolved
     /// from the extension's WASM (`context-server-command`).
     #[serde(default)]
@@ -199,6 +203,26 @@ impl ExtensionManifest {
             })
             .collect()
     }
+}
+
+/// An external analysis tool an extension provides: a program that takes a path to the binary
+/// being analysed and does something with it in its own window.
+///
+/// This is ORRESS's own manifest key, not one of Zed's. Zed ignores keys it does not know and so
+/// do we, so a manifest carrying this stays loadable by both.
+///
+/// `command` may be a bare name on `PATH` or a path inside the extension directory; the latter is
+/// resolved against it by the same rule as a language server's command, which refuses to escape
+/// the directory.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct AnalysisToolEntry {
+    /// What to show in the menu. Falls back to the extension's own name.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -776,6 +800,49 @@ pub fn resolve_language_server(
 /// Runs a Zed extension's WASM to get a language server's `initializationOptions`
 /// (`language-server-initialization-options`) for `worktree_root`. `None` when the extension has
 /// none.
+/// An analysis tool found in an installed extension, with its command made absolute.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisTool {
+    /// The extension that provides it.
+    pub extension_id: String,
+    pub id: String,
+    /// What to show in a menu.
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+/// Every analysis tool declared by an installed extension, sorted by name.
+///
+/// A declaration with no command is skipped rather than reported: an extension that provides other
+/// things and happens to carry an empty section is not broken, it just provides no tool.
+pub fn analysis_tools(extensions_dir: &Path) -> Vec<AnalysisTool> {
+    let mut out = Vec::new();
+    for ext in crate::registry::installed(extensions_dir) {
+        let Ok(loaded) = load_extension(&ext.dir) else {
+            continue;
+        };
+        for (id, entry) in &loaded.manifest.analysis_tools {
+            if entry.command.trim().is_empty() {
+                continue;
+            }
+            out.push(AnalysisTool {
+                extension_id: ext.id.clone(),
+                id: id.clone(),
+                name: if entry.name.is_empty() {
+                    ext.name.clone()
+                } else {
+                    entry.name.clone()
+                },
+                command: absolutize_command(&entry.command, &ext.dir),
+                args: entry.args.clone(),
+            });
+        }
+    }
+    out.sort_by_key(|t| t.name.to_lowercase());
+    out
+}
+
 pub fn resolve_server_initialization_options(
     wasm: &Path,
     server_id: &str,
