@@ -192,12 +192,9 @@ impl OrressApp {
                 move || repaint.request_repaint(),
                 paths.as_ref().map(Paths::projects_dir),
             ),
-            registry: actions::registry(
-                &themes,
-                crate::handoff::offer(paths.as_ref().map(Paths::extensions_dir).as_deref())
-                    .map(|t| t.title)
-                    .as_deref(),
-            ),
+            // Filled by `rebuild_registry` below, so start-up and a later install build it the
+            // same way rather than two call sites drifting apart.
+            registry: ActionRegistry::new(),
             paths,
             settings,
             themes,
@@ -268,10 +265,27 @@ impl OrressApp {
                     .data_mut(|d| d.insert_temp(egui::Id::new(key), tex));
             }
         }
+        app.rebuild_registry();
         for file in cli_files {
             app.open_file(file);
         }
         app
+    }
+
+    /// Build the action registry from the current themes and the installed extensions.
+    ///
+    /// Every surface resolves an id through this registry -- menus, the command palette, the
+    /// keymap listing -- and skips what it cannot find, which is what makes an unregistered
+    /// action invisible everywhere at once. The same property means the registry has to be
+    /// rebuilt whenever what it is built from changes, and there are exactly two such moments:
+    /// start-up, and an extension being installed or removed.
+    fn rebuild_registry(&mut self) {
+        self.registry = actions::registry(
+            &self.themes,
+            crate::handoff::offer(self.paths.as_ref().map(Paths::extensions_dir).as_deref())
+                .map(|t| t.title)
+                .as_deref(),
+        );
     }
 
     /// Installs an extension from a git URL or a local directory path, then re-registers themes
@@ -333,6 +347,13 @@ impl OrressApp {
         let mut adapters = user_adapters;
         adapters.extend(ext_adapters);
         self.lsp.reset_adapters(adapters);
+        // Actions as well. Without this, installing an extension that declares an external
+        // analysis tool put files on disk, said "Installed extension", and surfaced nothing --
+        // no menu entry, no palette entry, nothing explaining why -- until ORRESS was restarted.
+        // Uninstalling is the same problem pointing the other way: an entry that still offers a
+        // command that is gone. A theme shipped by an extension needs it too, since each theme
+        // gets its own action.
+        self.rebuild_registry();
         // The Extensions panel re-reads the installed list.
         orress_views::refresh_extensions(ctx);
         // A theme may have changed or disappeared; force the theme to re-apply next frame.
